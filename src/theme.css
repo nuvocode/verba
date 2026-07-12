@@ -140,7 +140,9 @@ input { font: inherit; }
 /* ---------- talk ---------- */
 .talk { height: 100%; display: flex; flex-direction: column; }
 .talk-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 340px; }
-.stream { display: flex; flex-direction: column; min-width: 0; }
+/* min-height:0 on both columns — grid items default to min-height:auto, so a tall rail
+   would stretch the row and hand the scrolling to .body instead of each column. */
+.stream { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .stream-scroll { flex: 1; overflow: auto; padding: 44px 48px 24px; }
 .stream-inner { max-width: 640px; margin: 0 auto; }
 .msg { margin-bottom: 28px; animation: vfade .35s ease both; }
@@ -172,7 +174,7 @@ input { font: inherit; }
 .send { height: 46px; padding: 0 18px; display: flex; align-items: center; background: var(--ink); color: var(--bg); border-radius: 9px; font-size: 13.5px; font-weight: 500; }
 .send:hover { opacity: .9; }
 .send:disabled { opacity: .4; }
-.rail { border-left: 1px solid var(--line); background: var(--bg2); padding: 28px 24px; overflow: auto; }
+.rail { border-left: 1px solid var(--line); background: var(--bg2); padding: 28px 24px; overflow: auto; min-height: 0; }
 .rail .lbl { font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink3); margin-bottom: 14px; }
 .goal { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 9px; }
 .goal .mk { color: var(--ink3); font-size: 12px; width: 14px; flex: none; }

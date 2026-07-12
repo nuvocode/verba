@@ -101,6 +101,32 @@ export async function addMessage(sessionId: number, role: string, content: strin
   );
 }
 
+export interface SessionRow {
+  id: number;
+  scenario: string;
+  started_at: number;
+  summary: string | null;
+}
+
+/** Past conversations, newest first. Sessions that never got a message are noise — skip them. */
+export async function listSessions(limit = 50): Promise<SessionRow[]> {
+  const db = await getDb();
+  return db.select<SessionRow[]>(
+    `SELECT s.id, s.scenario, s.started_at, s.summary,
+            (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS n
+     FROM sessions s WHERE n > 1 ORDER BY s.started_at DESC LIMIT $1`,
+    [limit],
+  );
+}
+
+export async function sessionMessages(sessionId: number): Promise<{ role: string; content: string }[]> {
+  const db = await getDb();
+  return db.select<{ role: string; content: string }[]>(
+    "SELECT role, content FROM messages WHERE session_id = $1 ORDER BY id ASC",
+    [sessionId],
+  );
+}
+
 export async function setSummary(sessionId: number, summary: string): Promise<void> {
   const db = await getDb();
   await db.execute("UPDATE sessions SET summary = $1 WHERE id = $2", [summary, sessionId]);

@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Settings } from "../lib/settings";
 import type { BlockKind } from "../lib/learn";
 import type { Day } from "../lib/useDay";
 import type { Talk as TalkState } from "../lib/useTalk";
+import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
 
 export default function Talk({
   settings,
@@ -16,6 +17,18 @@ export default function Talk({
   onBegin: (kind: BlockKind) => void;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
+  const [past, setPast] = useState<SessionRow[]>([]);
+  const [open, setOpen] = useState<SessionRow | null>(null);
+  const [transcript, setTranscript] = useState<{ role: string; content: string }[]>([]);
+
+  // The picker is also the archive — reload it whenever we come back to it.
+  useEffect(() => {
+    if (!talk.started) void listSessions().then(setPast).catch(() => {});
+  }, [talk.started, talk.reflection]);
+
+  useEffect(() => {
+    if (open) void sessionMessages(open.id).then(setTranscript).catch(() => setTranscript([]));
+  }, [open]);
 
   useEffect(() => {
     scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" });
@@ -27,6 +40,40 @@ export default function Talk({
     const block = day.plan?.blocks.find((b) => (b.kind === "conversation" || b.kind === "scenario") && !day.isDone(b.kind));
     if (block) void day.complete(block.kind);
   }, [talk.reflection]);
+
+  // ---- replaying an old conversation ----
+  if (!talk.started && open)
+    return (
+      <div className="refl">
+        <div className="eyebrow">
+          {new Date(open.started_at).toLocaleString()} · {talk.scenarioById(open.scenario).title}
+        </div>
+        <h1 className="display">Looking back.</h1>
+
+        {open.summary && (
+          <div className="lede" style={{ maxWidth: 600, marginBottom: 40 }}>
+            <div className="bullet" />
+            <p style={{ fontSize: 17, fontStyle: "italic" }}>{open.summary}</p>
+          </div>
+        )}
+
+        {transcript.map((m, i) => (
+          <div className={`msg ${m.role === "user" ? "user" : "ai"}`} key={i}>
+            <div className="who">{m.role === "user" ? "YOU" : "COACH"}</div>
+            <div className="text">{m.content}</div>
+          </div>
+        ))}
+
+        <div style={{ display: "flex", gap: 12, marginTop: 30 }}>
+          <button className="btn sm" onClick={() => void talk.start(talk.scenarioById(open.scenario))}>
+            Practise this again →
+          </button>
+          <button className="btn sm ghost" onClick={() => setOpen(null)}>
+            Back to scenarios
+          </button>
+        </div>
+      </div>
+    );
 
   // ---- no conversation open yet: pick a scenario ----
   if (!talk.started)
@@ -51,6 +98,30 @@ export default function Talk({
           ))}
         </div>
         {talk.error && <div className="err">{talk.error}</div>}
+
+        {past.length > 0 && (
+          <>
+            <div className="eyebrow" style={{ margin: "48px 0 14px" }}>
+              Past conversations
+            </div>
+            <div className="spine">
+              {past.map((s) => {
+                const sc = talk.scenarioById(s.scenario);
+                return (
+                  <button className="spine-item" key={s.id} onClick={() => setOpen(s)}>
+                    <div style={{ flex: 1 }}>
+                      <div className="title">
+                        {sc.emoji} {sc.title}
+                      </div>
+                      <div className="meta">{s.summary ?? "no summary — ended early"}</div>
+                    </div>
+                    <div className="st">{new Date(s.started_at).toLocaleDateString()}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     );
 
