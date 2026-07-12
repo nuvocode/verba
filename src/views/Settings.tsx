@@ -1,284 +1,381 @@
-import { useEffect, useState } from "react";
-import { fetch } from "@tauri-apps/plugin-http";
-import type { ProviderId, SpeechEngine, Settings } from "../lib/settings";
-import { getProvider } from "../lib/providers";
-import { registry, getPack, importPack, originLabel } from "../lib/packs";
-import { latestLevelSignal } from "../lib/db";
-import { webSpeech } from "../lib/speech";
+import { useState } from "react";
+import {
+  isLocalProvider,
+  type CorrectionTiming,
+  type ProviderId,
+  type Settings,
+  type SpeechEngine,
+} from "../lib/settings";
+import { importPack, listPacks, originLabel, packOrigin, registry, removeImportedPack } from "../lib/packs";
+import { importScenario, listScenarios } from "../lib/scenarios";
 
-const CEFR = ["A1", "A2", "B1", "B2", "C1", "C2"];
-const speech = webSpeech();
+const PROVIDERS: {
+  id: ProviderId;
+  name: string;
+  desc: string;
+  model: keyof Settings;
+  key?: keyof Settings;
+  host?: keyof Settings;
+}[] = [
+  {
+    id: "ollama",
+    name: "Ollama",
+    desc: "Runs on this machine. Private, free, works on a plane.",
+    model: "ollamaModel",
+    host: "ollamaHost",
+  },
+  {
+    id: "lmstudio",
+    name: "LM Studio",
+    desc: "Local OpenAI-compatible server. No key needed.",
+    model: "lmstudioModel",
+    host: "lmstudioHost",
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    desc: "Deeper conversation and subtler corrections. API key required.",
+    model: "anthropicModel",
+    key: "anthropicKey",
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    desc: "Alternative cloud provider. API key required.",
+    model: "openaiModel",
+    key: "openaiKey",
+  },
+  { id: "gemini", name: "Gemini", desc: "Google's models. API key required.", model: "geminiModel", key: "geminiKey" },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    desc: "One key, many models. API key required.",
+    model: "openrouterModel",
+    key: "openrouterKey",
+  },
+];
+
+const SPEECH: { id: SpeechEngine; name: string; local: boolean; desc: string; key?: keyof Settings }[] = [
+  { id: "web", name: "System speech", local: true, desc: "Your OS dictation and voices. Offline, quality varies." },
+  {
+    id: "elevenlabs",
+    name: "ElevenLabs",
+    local: false,
+    desc: "Most natural tutor voice. API key required.",
+    key: "elevenLabsKey",
+  },
+  {
+    id: "deepgram",
+    name: "Deepgram",
+    local: false,
+    desc: "Sharper speech recognition. API key required.",
+    key: "deepgramKey",
+  },
+];
+
+const TIMINGS: [CorrectionTiming, string, string][] = [
+  ["adaptive", "Adaptive", "Interrupt only for mistakes that break meaning; the rest wait for the reflection."],
+  ["live", "Live", "Show every correction the moment it happens."],
+  ["delayed", "Delayed", "Never interrupt. Everything is handed back at the end of the session."],
+];
 
 export default function SettingsView({
   settings,
   onChange,
 }: {
   settings: Settings;
-  onChange: (s: Settings) => void;
+  onChange: (patch: Partial<Settings>) => void;
 }) {
-  const [test, setTest] = useState("");
-  const [packs, setPacks] = useState(() => registry());
-  const [importText, setImportText] = useState("");
-  const [importMsg, setImportMsg] = useState("");
-  const [level, setLevel] = useState<{ estimate: string; confidence: string; rationale: string } | null>(null);
-  const set = (patch: Partial<Settings>) => onChange({ ...settings, ...patch });
+  const [packJson, setPackJson] = useState("");
+  const [scenarioJson, setScenarioJson] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [, bump] = useState(0); // packs/scenarios live in localStorage — force a re-read after import
 
-  useEffect(() => {
-    latestLevelSignal(settings.targetLang)
-      .then(setLevel)
-      .catch(() => {});
-  }, [settings.targetLang]);
+  const packs = listPacks();
+  const active = PROVIDERS.find((p) => p.id === settings.provider);
+  const speechCfg = SPEECH.find((s) => s.id === settings.speechEngine);
+  const importedCount = registry().filter((r) => r.origin === "imported").length;
 
-  /** Selecting a pack also sets the target language name from the pack. */
-  function selectPack(id: string) {
-    const p = getPack(id);
-    set(p ? { packId: id, targetLang: p.name } : { packId: id });
-  }
-
-  function doImport() {
+  function tryImport(kind: "pack" | "scenario") {
+    setErr("");
+    setMsg("");
     try {
-      const p = importPack(importText);
-      setPacks(registry());
-      setImportText("");
-      setImportMsg(`✅ Imported ${p.name} (${p.id}) — labelled Unverified until reviewed.`);
-    } catch (e: any) {
-      setImportMsg(`❌ ${e?.message ?? e}`);
-    }
-  }
-
-  async function testConnection() {
-    setTest("Testing…");
-    try {
-      if (settings.provider === "ollama") {
-        const r = await fetch(`${settings.ollamaHost}/api/tags`);
-        const d = await r.json();
-        const models = (d.models ?? []).map((m: any) => m.name).join(", ");
-        setTest(`✅ Ollama reachable. Models: ${models || "(none)"}`);
+      if (kind === "pack") {
+        const p = importPack(packJson);
+        setPackJson("");
+        setMsg(`Imported language pack “${p.name}”. It's unverified — you pasted it in yourself.`);
       } else {
-        const reply = await getProvider(settings).chat(
-          [{ role: "user", content: "Reply with the single word: ok" }],
-          { temperature: 0 },
-        );
-        setTest(`✅ Reply: ${reply.slice(0, 60)}`);
+        const s = importScenario(scenarioJson);
+        setScenarioJson("");
+        setMsg(`Imported scenario “${s.title}”. It's now in the Talk picker.`);
       }
+      bump((n) => n + 1);
     } catch (e: any) {
-      setTest(`❌ ${e?.message ?? e}`);
+      setErr(String(e?.message ?? e));
     }
   }
+
+  const toggleRow = (title: string, desc: string, on: boolean, onClick: () => void) => (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 20,
+        padding: "16px 4px",
+        borderBottom: "1px solid var(--line2)",
+        marginBottom: 36,
+      }}
+    >
+      <div>
+        <div className="name">{title}</div>
+        <div className="desc" style={{ maxWidth: 440, lineHeight: 1.5 }}>
+          {desc}
+        </div>
+      </div>
+      <button className={`toggle ${on ? "on" : ""}`} onClick={onClick} aria-pressed={on}>
+        <span />
+      </button>
+    </div>
+  );
 
   return (
-    <div className="settings">
-      <h1>Settings</h1>
+    <div className="set fade">
+      <div className="eyebrow">Settings</div>
+      <h1 className="display">Yours to run anywhere.</h1>
 
-      <section>
-        <h3>Language</h3>
-        <label>
-          Language pack
-          <select value={settings.packId} onChange={(e) => selectPack(e.target.value)}>
-            <option value="">None (freeform)</option>
-            {packs.map(({ pack: p, origin, verified }) => (
-              <option key={p.id} value={p.id}>
-                {p.emoji} {p.name} — {p.nativeName} {verified ? "" : "· ⚠️ "}[{originLabel(origin)}]
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="muted">
-          Packs are labelled <strong>Official</strong>, <strong>Community</strong> (both reviewed), or{" "}
-          <strong>Unverified</strong> (imported by you, not reviewed).
-        </p>
-        <label>
-          I am learning
-          <input value={settings.targetLang} onChange={(e) => set({ targetLang: e.target.value })} />
-        </label>
-        <label>
-          My native language
-          <input value={settings.nativeLang} onChange={(e) => set({ nativeLang: e.target.value })} />
-        </label>
-        <label>
-          My level
-          <select value={settings.cefr} onChange={(e) => set({ cefr: e.target.value })}>
-            {CEFR.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </select>
-        </label>
-        <p className="muted">Level is self-reported — Speaksy gives soft feedback, not an official CEFR assessment.</p>
-        {level && (
-          <p className="muted">
-            Recent AI estimate: <strong>{level.estimate}</strong> ({level.confidence} confidence)
-            {level.rationale ? ` — ${level.rationale}` : ""}
-          </p>
-        )}
-      </section>
+      {msg && (
+        <div className="err" style={{ borderColor: "var(--good)", color: "var(--good)" }}>
+          {msg}
+        </div>
+      )}
+      {err && <div className="err">{err}</div>}
 
-      <section>
-        <h3>Speech</h3>
-        <label className="row">
-          <input
-            type="checkbox"
-            checked={settings.speak}
-            onChange={(e) => set({ speak: e.target.checked })}
-          />
-          Read replies and reading text aloud (offline TTS)
-        </label>
-        <p className="muted">
-          {speech.canSpeak ? "🔊 Text-to-speech available." : "Text-to-speech not available in this webview."}{" "}
-          {speech.canListen ? "🎤 Voice input available." : "Voice input not available here."}
-        </p>
-        <label>
-          Speech engine
-          <select
-            value={settings.speechEngine}
-            onChange={(e) => set({ speechEngine: e.target.value as SpeechEngine })}
-          >
-            <option value="web">Native (offline)</option>
-            <option value="elevenlabs">ElevenLabs (cloud TTS)</option>
-            <option value="deepgram">Deepgram (cloud STT)</option>
-          </select>
-        </label>
-        {settings.speechEngine === "elevenlabs" && (
-          <label>
-            ElevenLabs API key
-            <input
-              type="password"
-              value={settings.elevenLabsKey}
-              onChange={(e) => set({ elevenLabsKey: e.target.value })}
-            />
-          </label>
-        )}
-        {settings.speechEngine === "deepgram" && (
-          <label>
-            Deepgram API key
-            <input
-              type="password"
-              value={settings.deepgramKey}
-              onChange={(e) => set({ deepgramKey: e.target.value })}
-            />
-          </label>
-        )}
-        <p className="muted">
-          Cloud engines cover one half of the loop (ElevenLabs speaks, Deepgram listens); the other half falls back to
-          the native webview.
-        </p>
-      </section>
+      {/* ---- language ---- */}
+      <div className="sec">Language</div>
+      {packs.map((p) => {
+        const origin = packOrigin(p.id);
+        return (
+          <button key={p.id} className="srow" onClick={() => onChange({ packId: p.id, targetLang: p.name })}>
+            <div className={`radio ${settings.packId === p.id ? "on" : ""}`} />
+            <div style={{ flex: 1 }}>
+              <div className="name">
+                {p.emoji} {p.name} — {p.nativeName}
+                <span>{origin ? originLabel(origin) : ""}</span>
+              </div>
+              <div className="desc">
+                {p.grammar.length} grammar notes, {p.pronunciation.length} pronunciation notes · voice{" "}
+                {p.speech.locale}
+              </div>
+            </div>
+            {origin === "imported" && (
+              <span
+                className="model"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeImportedPack(p.id);
+                  bump((n) => n + 1);
+                }}
+              >
+                remove
+              </span>
+            )}
+          </button>
+        );
+      })}
 
-      <section>
-        <h3>Import language pack</h3>
-        <p className="muted">Paste a pack JSON to add or update a language (community packs, format v1).</p>
-        <textarea
-          className="import"
-          value={importText}
-          placeholder='{ "formatVersion": 1, "id": "it", "name": "Italian", … }'
-          onChange={(e) => setImportText(e.target.value)}
+      <div className="field" style={{ marginTop: 10 }}>
+        <label>I speak</label>
+        <input value={settings.nativeLang} onChange={(e) => onChange({ nativeLang: e.target.value })} />
+      </div>
+      <div className="field">
+        <label>My level</label>
+        <select value={settings.cefr} onChange={(e) => onChange({ cefr: e.target.value })}>
+          {["A1", "A2", "B1", "B2", "C1", "C2"].map((l) => (
+            <option key={l}>{l}</option>
+          ))}
+        </select>
+      </div>
+      <div className="field" style={{ marginBottom: 36 }}>
+        <label>Minutes a day</label>
+        <input
+          type="number"
+          min={5}
+          max={180}
+          value={settings.dailyMinutes}
+          onChange={(e) => onChange({ dailyMinutes: Number(e.target.value) || 45 })}
         />
-        <button onClick={doImport} disabled={!importText.trim()}>
+      </div>
+
+      {/* ---- offline ---- */}
+      <div className="sec">Offline mode</div>
+      {toggleRow(
+        "Never leave this machine",
+        "Forces local providers only. Cloud options are disabled and no learner data ever leaves your device.",
+        settings.offline,
+        () => {
+          const offline = !settings.offline;
+          // Switching offline on while a cloud provider is active would silently break
+          // every call — fall back to the local default instead of failing later.
+          const patch: Partial<Settings> = { offline };
+          if (offline && !isLocalProvider(settings.provider)) patch.provider = "ollama";
+          if (offline && settings.speechEngine !== "web") patch.speechEngine = "web";
+          onChange(patch);
+        },
+      )}
+
+      {/* ---- provider ---- */}
+      <div className="sec">AI Provider</div>
+      {PROVIDERS.map((p) => {
+        const local = isLocalProvider(p.id);
+        const disabled = settings.offline && !local;
+        return (
+          <button
+            key={p.id}
+            className={`srow ${disabled ? "off" : ""}`}
+            disabled={disabled}
+            onClick={() => onChange({ provider: p.id })}
+          >
+            <div className={`radio ${settings.provider === p.id ? "on" : ""}`} />
+            <div style={{ flex: 1 }}>
+              <div className="name">
+                {p.name} <span>{local ? "● local" : "☁ cloud"}</span>
+              </div>
+              <div className="desc">{p.desc}</div>
+            </div>
+            <div className="model">{String(settings[p.model])}</div>
+          </button>
+        );
+      })}
+
+      {active && (
+        <div style={{ marginTop: 10, marginBottom: 36 }}>
+          <div className="field">
+            <label>Model</label>
+            <input
+              value={String(settings[active.model])}
+              onChange={(e) => onChange({ [active.model]: e.target.value } as Partial<Settings>)}
+            />
+          </div>
+          {active.host && (
+            <div className="field">
+              <label>Host</label>
+              <input
+                value={String(settings[active.host])}
+                onChange={(e) => onChange({ [active.host!]: e.target.value } as Partial<Settings>)}
+              />
+            </div>
+          )}
+          {active.key && (
+            <div className="field">
+              <label>API key</label>
+              <input
+                type="password"
+                placeholder="sk-…"
+                value={String(settings[active.key])}
+                onChange={(e) => onChange({ [active.key!]: e.target.value } as Partial<Settings>)}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---- speech ---- */}
+      <div className="sec">Speech</div>
+      {SPEECH.map((s) => {
+        const disabled = settings.offline && !s.local;
+        return (
+          <button
+            key={s.id}
+            className={`srow ${disabled ? "off" : ""}`}
+            disabled={disabled}
+            onClick={() => onChange({ speechEngine: s.id })}
+          >
+            <div className={`radio ${settings.speechEngine === s.id ? "on" : ""}`} />
+            <div style={{ flex: 1 }}>
+              <div className="name">
+                {s.name} <span>{s.local ? "● local" : "☁ cloud"}</span>
+              </div>
+              <div className="desc">{s.desc}</div>
+            </div>
+          </button>
+        );
+      })}
+      {speechCfg?.key && (
+        <div className="field" style={{ marginTop: 10 }}>
+          <label>API key</label>
+          <input
+            type="password"
+            value={String(settings[speechCfg.key])}
+            onChange={(e) => onChange({ [speechCfg.key!]: e.target.value } as Partial<Settings>)}
+          />
+        </div>
+      )}
+      {toggleRow(
+        "Read replies aloud",
+        "The coach speaks each turn as it arrives.",
+        settings.speak,
+        () => onChange({ speak: !settings.speak }),
+      )}
+
+      {/* ---- coaching ---- */}
+      <div className="sec">Coaching</div>
+      {TIMINGS.map(([id, name, desc]) => (
+        <button key={id} className="srow" onClick={() => onChange({ correctionTiming: id })}>
+          <div className={`radio ${settings.correctionTiming === id ? "on" : ""}`} />
+          <div style={{ flex: 1 }}>
+            <div className="name">{name}</div>
+            <div className="desc">{desc}</div>
+          </div>
+        </button>
+      ))}
+      {toggleRow(
+        "Keyboard hints",
+        "The small shortcut lines under each screen.",
+        settings.showHints,
+        () => onChange({ showHints: !settings.showHints }),
+      )}
+
+      {/* ---- extensions ---- */}
+      <div className="sec">Community extensions</div>
+      <div style={{ padding: "15px 4px", borderBottom: "1px solid var(--line2)" }}>
+        <div className="name">
+          Scenarios <span>{listScenarios().length} installed</span>
+        </div>
+        <div className="desc" style={{ marginBottom: 10 }}>
+          Paste a scenario JSON to add a role-play to the Talk picker.
+        </div>
+        <textarea
+          value={scenarioJson}
+          onChange={(e) => setScenarioJson(e.target.value)}
+          placeholder={`{ "formatVersion": 1, "id": "market", "title": "At the market", "emoji": "🧺", "setup": "You are a market vendor…" }`}
+        />
+        <button className="btn sm ghost" onClick={() => tryImport("scenario")} disabled={!scenarioJson.trim()}>
+          Import scenario
+        </button>
+      </div>
+
+      <div style={{ padding: "15px 4px", borderBottom: "1px solid var(--line2)" }}>
+        <div className="name">
+          Language packs <span>{importedCount} imported</span>
+        </div>
+        <div className="desc" style={{ marginBottom: 10 }}>
+          Paste a pack JSON to teach Speaksy a new language. Imported packs are unverified — nobody has reviewed them.
+        </div>
+        <textarea
+          value={packJson}
+          onChange={(e) => setPackJson(e.target.value)}
+          placeholder={`{ "formatVersion": 1, "id": "nl", "name": "Dutch", "nativeName": "Nederlands", … }`}
+        />
+        <button className="btn sm ghost" onClick={() => tryImport("pack")} disabled={!packJson.trim()}>
           Import pack
         </button>
-        {importMsg && <p className="test" style={{ whiteSpace: "pre-line" }}>{importMsg}</p>}
-      </section>
+      </div>
 
-      <section>
-        <h3>AI provider</h3>
-        <label>
-          Provider
-          <select
-            value={settings.provider}
-            onChange={(e) => set({ provider: e.target.value as ProviderId })}
-          >
-            <option value="ollama">Ollama (offline / local)</option>
-            <option value="lmstudio">LM Studio (offline / local)</option>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="gemini">Gemini (Google)</option>
-            <option value="openrouter">OpenRouter</option>
-          </select>
-        </label>
-
-        {settings.provider === "ollama" && (
-          <>
-            <label>
-              Host
-              <input value={settings.ollamaHost} onChange={(e) => set({ ollamaHost: e.target.value })} />
-            </label>
-            <label>
-              Model
-              <input value={settings.ollamaModel} onChange={(e) => set({ ollamaModel: e.target.value })} />
-            </label>
-          </>
-        )}
-        {settings.provider === "openai" && (
-          <>
-            <label>
-              Model
-              <input value={settings.openaiModel} onChange={(e) => set({ openaiModel: e.target.value })} />
-            </label>
-            <label>
-              API key
-              <input type="password" value={settings.openaiKey} onChange={(e) => set({ openaiKey: e.target.value })} />
-            </label>
-          </>
-        )}
-        {settings.provider === "anthropic" && (
-          <>
-            <label>
-              Model
-              <input value={settings.anthropicModel} onChange={(e) => set({ anthropicModel: e.target.value })} />
-            </label>
-            <label>
-              API key
-              <input
-                type="password"
-                value={settings.anthropicKey}
-                onChange={(e) => set({ anthropicKey: e.target.value })}
-              />
-            </label>
-          </>
-        )}
-        {settings.provider === "gemini" && (
-          <>
-            <label>
-              Model
-              <input value={settings.geminiModel} onChange={(e) => set({ geminiModel: e.target.value })} />
-            </label>
-            <label>
-              API key
-              <input type="password" value={settings.geminiKey} onChange={(e) => set({ geminiKey: e.target.value })} />
-            </label>
-          </>
-        )}
-        {settings.provider === "openrouter" && (
-          <>
-            <label>
-              Model
-              <input value={settings.openrouterModel} onChange={(e) => set({ openrouterModel: e.target.value })} />
-            </label>
-            <label>
-              API key
-              <input
-                type="password"
-                value={settings.openrouterKey}
-                onChange={(e) => set({ openrouterKey: e.target.value })}
-              />
-            </label>
-          </>
-        )}
-        {settings.provider === "lmstudio" && (
-          <>
-            <label>
-              Host
-              <input value={settings.lmstudioHost} onChange={(e) => set({ lmstudioHost: e.target.value })} />
-            </label>
-            <label>
-              Model
-              <input value={settings.lmstudioModel} onChange={(e) => set({ lmstudioModel: e.target.value })} />
-            </label>
-          </>
-        )}
-
-        <button onClick={testConnection}>Test connection</button>
-        {test && <p className="test">{test}</p>}
-      </section>
+      <div style={{ fontSize: 12, color: "var(--ink3)", marginTop: 16 }}>
+        Speaksy is open source. Extensions are sandboxed content packs — see CONTRIBUTING.md for the format.
+      </div>
     </div>
   );
 }

@@ -76,6 +76,9 @@ async function init(): Promise<Database> {
       created_at INTEGER NOT NULL
     );
   `);
+  // Added after the first release: the Coach breaks the composite back out into
+  // its components, and that needs avg word length. Existing DBs get it here.
+  await db.execute("ALTER TABLE session_metrics ADD COLUMN avg_word_len REAL NOT NULL DEFAULT 0").catch(() => {});
   return db;
 }
 
@@ -192,14 +195,43 @@ export async function latestLevelSignal(
 
 export async function saveMetrics(
   lang: string,
-  m: { messages: number; words: number; uniqueWords: number; avgSentenceLen: number; corrections: number; deckSize: number },
+  m: {
+    messages: number;
+    words: number;
+    uniqueWords: number;
+    avgSentenceLen: number;
+    avgWordLen: number;
+    corrections: number;
+    deckSize: number;
+  },
   score: number,
 ): Promise<void> {
   const db = await getDb();
   await db.execute(
-    `INSERT INTO session_metrics (lang, messages, words, unique_words, avg_sentence_len, corrections, deck_size, score, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [lang, m.messages, m.words, m.uniqueWords, m.avgSentenceLen, m.corrections, m.deckSize, score, Date.now()],
+    `INSERT INTO session_metrics (lang, messages, words, unique_words, avg_sentence_len, avg_word_len, corrections, deck_size, score, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [lang, m.messages, m.words, m.uniqueWords, m.avgSentenceLen, m.avgWordLen, m.corrections, m.deckSize, score, Date.now()],
+  );
+}
+
+export interface MetricsRow {
+  messages: number;
+  words: number;
+  unique_words: number;
+  avg_sentence_len: number;
+  avg_word_len: number;
+  corrections: number;
+  deck_size: number;
+  score: number;
+}
+
+/** The last n sessions' raw metrics, newest first — the Coach re-derives its components from these. */
+export async function recentMetrics(lang: string, n = 2): Promise<MetricsRow[]> {
+  const db = await getDb();
+  return db.select<MetricsRow[]>(
+    `SELECT messages, words, unique_words, avg_sentence_len, avg_word_len, corrections, deck_size, score
+     FROM session_metrics WHERE lang = $1 ORDER BY created_at DESC LIMIT $2`,
+    [lang, n],
   );
 }
 
@@ -210,6 +242,38 @@ export async function latestMetricScore(lang: string): Promise<number | null> {
     [lang],
   );
   return rows[0]?.score ?? null;
+}
+
+/** Composite scores of the last n sessions, oldest first — the Coach momentum line. */
+export async function recentMetricScores(lang: string, n = 12): Promise<number[]> {
+  const db = await getDb();
+  const rows = await db.select<{ score: number }[]>(
+    "SELECT score FROM session_metrics WHERE lang = $1 ORDER BY created_at DESC LIMIT $2",
+    [lang, n],
+  );
+  return rows.map((r) => r.score).reverse();
+}
+
+/**
+ * Which of the last 7 days had any activity. Index 0 = 6 days ago, index 6 = today.
+ * Reads local-midnight boundaries, so "today" means the learner's today.
+ */
+export async function activeDays(now = Date.now()): Promise<boolean[]> {
+  const db = await getDb();
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const start = midnight.getTime() - 6 * 24 * 60 * 60 * 1000;
+  const rows = await db.select<{ t: number }[]>(
+    `SELECT started_at AS t FROM sessions WHERE started_at >= $1
+     UNION ALL SELECT created_at AS t FROM review_log WHERE created_at >= $1`,
+    [start],
+  );
+  const days = [false, false, false, false, false, false, false];
+  for (const r of rows) {
+    const i = Math.floor((r.t - start) / (24 * 60 * 60 * 1000));
+    if (i >= 0 && i < 7) days[i] = true;
+  }
+  return days;
 }
 
 // ---- Phase 3: daily learning sessions ----
@@ -243,6 +307,28 @@ export async function saveDailySession(
      ON CONFLICT(date) DO UPDATE SET plan = excluded.plan, done = excluded.done, recap = excluded.recap`,
     [date, lang, JSON.stringify(plan), JSON.stringify(done), recap ? JSON.stringify(recap) : null, Date.now()],
   );
+}
+
+/** How many days the learner has shown up — the "Day 41" on the Today screen. */
+export async function dayNumber(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM daily_sessions");
+  return rows[0]?.n ?? 1;
+}
+
+/** The most recent day's recap — its nextFocus seeds the next plan's weak-area drills. */
+export async function latestRecap(lang: string, before: string): Promise<{ recap: string; nextFocus: string[] } | null> {
+  const db = await getDb();
+  const rows = await db.select<{ recap: string }[]>(
+    "SELECT recap FROM daily_sessions WHERE lang = $1 AND date < $2 AND recap IS NOT NULL ORDER BY date DESC LIMIT 1",
+    [lang, before],
+  );
+  if (!rows[0]) return null;
+  try {
+    return JSON.parse(rows[0].recap);
+  } catch {
+    return null;
+  }
 }
 
 // ---- Phase 3: weekly coaching stats ----

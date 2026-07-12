@@ -32,3 +32,22 @@ export function schedule(card: CardState, grade: Grade, now: number): CardState 
   ease = grade === 2 ? ease + 0.15 : Math.max(1.3, ease - 0.02);
   return { ease, interval, reps, due: now + interval * DAY_MS };
 }
+
+const BLANK = "‗‗‗‗‗";
+
+/**
+ * Blank a term out of the sentence it was met in — recall in context beats recall
+ * in isolation. Falls back to appending the blank when the term doesn't appear
+ * verbatim (an inflected form, or no example at all).
+ */
+export function cloze(term: string, example: string): string {
+  if (!example.trim()) return BLANK;
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const out = example.replace(new RegExp(escaped, "i"), BLANK);
+  return out === example ? `${example} — ${BLANK}` : out;
+}
+
+/** How settled a card is, 0..1: a fresh card reads weak, a three-week interval solid. */
+export function strength(card: { interval: number }): number {
+  return Math.max(0.08, Math.min(1, card.interval / 21));
+}

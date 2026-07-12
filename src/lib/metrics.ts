@@ -59,6 +59,29 @@ export function computeMetrics(
   };
 }
 
+/** Rebuild the metric bundle from a stored session_metrics row (Coach reads these back). */
+export function metricsFromRow(r: {
+  messages: number;
+  words: number;
+  unique_words: number;
+  avg_sentence_len: number;
+  avg_word_len: number;
+  corrections: number;
+  deck_size: number;
+}): LevelMetrics {
+  return {
+    messages: r.messages,
+    words: r.words,
+    uniqueWords: r.unique_words,
+    typeTokenRatio: r.words ? r.unique_words / r.words : 0,
+    avgSentenceLen: r.avg_sentence_len,
+    avgWordLen: r.avg_word_len,
+    corrections: r.corrections,
+    errorRate: r.messages ? r.corrections / r.messages : 0,
+    deckSize: r.deck_size,
+  };
+}
+
 /** clamp x into 0..1 */
 const unit = (x: number) => Math.max(0, Math.min(1, x));
 

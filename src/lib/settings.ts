@@ -1,5 +1,11 @@
 export type ProviderId = "ollama" | "openai" | "anthropic" | "gemini" | "openrouter" | "lmstudio";
 export type SpeechEngine = "web" | "elevenlabs" | "deepgram";
+/** When a correction is shown inline: as it happens, only when severe, or only at reflection. */
+export type CorrectionTiming = "adaptive" | "live" | "delayed";
+
+/** Providers that run on the learner's own machine — the only ones allowed in offline mode. */
+export const LOCAL_PROVIDERS: ProviderId[] = ["ollama", "lmstudio"];
+export const isLocalProvider = (p: ProviderId) => LOCAL_PROVIDERS.includes(p);
 
 export interface Settings {
   provider: ProviderId;
@@ -23,6 +29,13 @@ export interface Settings {
   speechEngine: SpeechEngine; // TTS/STT backend — web (offline) or a cloud API
   elevenLabsKey: string;
   deepgramKey: string;
+  onboarded: boolean; // false → the welcome flow runs instead of the app
+  dailyMinutes: number; // how long a session should be, from onboarding
+  goal: string; // why they're learning — steers scenarios and reading topics
+  theme: "light" | "dark";
+  correctionTiming: CorrectionTiming;
+  offline: boolean; // hard-forces local providers; cloud options are disabled
+  showHints: boolean; // keyboard hint lines under each screen
 }
 
 const KEY = "speaksy.settings";
@@ -49,6 +62,13 @@ export const defaultSettings: Settings = {
   speechEngine: "web",
   elevenLabsKey: "",
   deepgramKey: "",
+  onboarded: false,
+  dailyMinutes: 45,
+  goal: "Travel",
+  theme: "light",
+  correctionTiming: "adaptive",
+  offline: true,
+  showHints: true,
 };
 
 export function loadSettings(): Settings {

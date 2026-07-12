@@ -32,21 +32,43 @@ export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack
     `You MUST answer with ONLY a valid JSON object, no prose outside it, in this exact shape:`,
     `{`,
     `  "reply": "your natural conversational reply in ${s.targetLang} (1-3 sentences)",`,
-    `  "corrections": [ { "original": "the learner's exact wording that was wrong", "fixed": "the corrected version", "note": "a short explanation written in ${s.nativeLang}" } ],`,
+    `  "corrections": [ { "original": "the learner's exact wording that was wrong", "fixed": "the corrected version", "note": "a short explanation written in ${s.nativeLang}", "severity": "minor or severe" } ],`,
     `  "suggestions": [ "a short example reply the learner could send next, in ${s.targetLang}", "another option" ]`,
     `}`,
     ``,
     `Rules:`,
     `- Do NOT correct the learner inside "reply". Put every correction only in the "corrections" array.`,
     `- Only add a correction for a real grammar, word-choice, or spelling mistake. If the learner's message was fine, return "corrections": [].`,
+    `- "severity" is "severe" when the mistake breaks meaning or grammar rules, "minor" when it is understandable but unnatural.`,
     `- Give 2-3 "suggestions". Keep them natural and at the learner's level.`,
     `- Never mention that you are returning JSON.`,
   ].join("\n");
 }
 
+export type Severity = "minor" | "severe";
+
+/**
+ * Correction policy: does this break the conversation open now, or wait for the
+ * reflection? "adaptive" is the default — only a meaning-breaking mistake is
+ * worth interrupting a learner mid-flow for.
+ */
+export function shouldShowInline(timing: "adaptive" | "live" | "delayed", severity?: Severity): boolean {
+  if (!severity) return false;
+  if (timing === "live") return true;
+  if (timing === "delayed") return false;
+  return severity === "severe";
+}
+
+export interface Correction {
+  original: string;
+  fixed: string;
+  note: string;
+  severity: Severity;
+}
+
 export interface TurnResult {
   reply: string;
-  corrections: { original: string; fixed: string; note: string }[];
+  corrections: Correction[];
   suggestions: string[];
 }
 
@@ -62,6 +84,9 @@ export function parseTurn(raw: string): TurnResult {
             original: String(c.original),
             fixed: String(c.fixed),
             note: String(c.note ?? ""),
+            // Unknown / missing severity is treated as minor: never escalate an
+            // interruption the model didn't actually ask for.
+            severity: c.severity === "severe" ? ("severe" as const) : ("minor" as const),
           }))
       : [],
     suggestions: Array.isArray(obj?.suggestions)

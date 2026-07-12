@@ -11,11 +11,17 @@ import { packGuidance } from "./prompts.ts";
 export interface Sentence {
   target: string; // sentence in the language being learned
   native: string; // its translation in the learner's language
+  note?: string; // optional coach note — shown in the reader's margin
 }
 
 export interface ReadingText {
   title: string;
   sentences: Sentence[];
+}
+
+/** Strip punctuation off a tapped word so "mercado," and "mercado" look up the same. */
+export function bareWord(w: string): string {
+  return w.toLowerCase().replace(/[.,:;¡!¿?“”"'()…—–-]/g, "");
 }
 
 export interface StoryOptions {
@@ -26,8 +32,9 @@ export interface StoryOptions {
 
 const jsonShape =
   `Answer with ONLY a JSON object in this exact shape: ` +
-  `{ "title": "a short title in TARGET", "sentences": [ { "target": "one sentence in TARGET", "native": "its translation in NATIVE" } ] }. ` +
-  `Split the text into individual sentences — one object per sentence — so the two languages line up.`;
+  `{ "title": "a short title in TARGET", "sentences": [ { "target": "one sentence in TARGET", "native": "its translation in NATIVE", "note": "optional one-line coach note in NATIVE about a grammar point or word choice in this sentence, or null" } ] }. ` +
+  `Split the text into individual sentences — one object per sentence — so the two languages line up. ` +
+  `Add a "note" to only 2-3 of the sentences — the ones that teach something worth pausing on. Use null elsewhere.`;
 
 function base(s: Settings, pack?: LanguagePack): string {
   return [
@@ -86,7 +93,11 @@ export function parseReading(raw: string): ReadingText {
   const sentences = Array.isArray(obj.sentences)
     ? obj.sentences
         .filter((x: any) => x && (x.target || x.native))
-        .map((x: any) => ({ target: String(x.target ?? ""), native: String(x.native ?? "") }))
+        .map((x: any) => ({
+          target: String(x.target ?? ""),
+          native: String(x.native ?? ""),
+          note: x.note ? String(x.note) : undefined,
+        }))
     : [];
   return { title: typeof obj.title === "string" ? obj.title : "", sentences };
 }
