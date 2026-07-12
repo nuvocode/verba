@@ -1,0 +1,66 @@
+export type ProviderId = "ollama" | "openai" | "anthropic" | "gemini" | "openrouter" | "lmstudio";
+export type SpeechEngine = "web" | "elevenlabs" | "deepgram";
+
+export interface Settings {
+  provider: ProviderId;
+  ollamaModel: string;
+  ollamaHost: string;
+  openaiModel: string;
+  openaiKey: string;
+  anthropicModel: string;
+  anthropicKey: string;
+  geminiModel: string;
+  geminiKey: string;
+  openrouterModel: string;
+  openrouterKey: string;
+  lmstudioModel: string;
+  lmstudioHost: string;
+  nativeLang: string; // learner's first language — explanations are given in it
+  targetLang: string; // language being practised
+  cefr: string; // self-reported level (A1–C2)
+  packId: string; // active language pack (see lib/packs) — "" for none
+  speak: boolean; // read AI replies / reading text aloud (TTS)
+  speechEngine: SpeechEngine; // TTS/STT backend — web (offline) or a cloud API
+  elevenLabsKey: string;
+  deepgramKey: string;
+}
+
+const KEY = "speaksy.settings";
+
+export const defaultSettings: Settings = {
+  provider: "ollama",
+  ollamaModel: "gemma4:e2b-mlx",
+  ollamaHost: "http://localhost:11434",
+  openaiModel: "gpt-4o-mini",
+  openaiKey: "",
+  anthropicModel: "claude-sonnet-5",
+  anthropicKey: "",
+  geminiModel: "gemini-2.5-flash",
+  geminiKey: "",
+  openrouterModel: "openai/gpt-4o-mini",
+  openrouterKey: "",
+  lmstudioModel: "local-model",
+  lmstudioHost: "http://localhost:1234/v1",
+  nativeLang: "Turkish",
+  targetLang: "Spanish",
+  cefr: "B1",
+  packId: "es",
+  speak: true,
+  speechEngine: "web",
+  elevenLabsKey: "",
+  deepgramKey: "",
+};
+
+export function loadSettings(): Settings {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return { ...defaultSettings };
+    return { ...defaultSettings, ...JSON.parse(raw) };
+  } catch {
+    return { ...defaultSettings };
+  }
+}
+
+export function saveSettings(s: Settings): void {
+  localStorage.setItem(KEY, JSON.stringify(s));
+}
