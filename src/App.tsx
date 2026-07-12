@@ -49,15 +49,6 @@ export default function App() {
   // A view (Memory's review) can claim the keyboard; global shortcuts stand down.
   const [captured, setCaptured] = useState(false);
 
-  const day = useDay(settings);
-  const talk = useTalk(settings);
-  const read = useRead(settings);
-  const paletteInput = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    document.body.dataset.vtheme = settings.theme;
-  }, [settings.theme]);
-
   const update = useCallback((patch: Partial<Settings>) => {
     setSettings((s) => {
       const next = { ...s, ...patch };
@@ -65,6 +56,16 @@ export default function App() {
       return next;
     });
   }, []);
+
+  const day = useDay(settings);
+  // Talk can write a level back: if onboarding was skipped, the first conversation places them.
+  const talk = useTalk(settings, update);
+  const read = useRead(settings);
+  const paletteInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    document.body.dataset.vtheme = settings.theme;
+  }, [settings.theme]);
 
   const go = useCallback((s: Space) => {
     setSpace(s);
@@ -226,13 +227,9 @@ export default function App() {
       <div className="shell">
         <Onboarding
           settings={settings}
-          onDone={(patch) => {
+          onDone={(patch, dest = "today") => {
             update({ ...patch, onboarded: true });
-            go("today");
-          }}
-          onSkip={() => {
-            update({ onboarded: true });
-            go("today");
+            go(dest);
           }}
         />
       </div>

@@ -1,6 +1,16 @@
 import { fetch } from "@tauri-apps/plugin-http";
 import type { ChatMessage, ChatOpts, Provider } from "./types";
 
+/** Is a local Ollama answering? Used by onboarding to tell the learner where the AI runs. */
+export async function ollamaUp(host = "http://localhost:11434"): Promise<boolean> {
+  try {
+    const res = await fetch(`${host}/api/tags`, { method: "GET" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Ollama local server. Offline-capable. Default endpoint localhost:11434. */
 export function ollama(model: string, host = "http://localhost:11434"): Provider {
   return {

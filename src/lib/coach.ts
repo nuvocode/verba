@@ -1,4 +1,4 @@
-import type { Settings } from "./settings";
+import { level, type Settings } from "./settings.ts";
 
 // Advanced coaching — the two AI features the phase asks for on top of the
 // learning engine: a weekly progress report and targeted weak-area drills.
@@ -17,7 +17,7 @@ export interface WeekStats {
 
 export function weeklyReportPrompt(s: Settings, w: WeekStats): string {
   return [
-    `You are a ${s.targetLang} learning coach writing a short weekly progress report for a ${s.cefr} learner.`,
+    `You are a ${s.targetLang} learning coach writing a short weekly progress report for a ${level(s)} learner.`,
     `Write in ${s.nativeLang}. Be specific and encouraging, not generic.`,
     `This week's data:`,
     `- practice sessions: ${w.sessions}`,
@@ -27,9 +27,9 @@ export function weeklyReportPrompt(s: Settings, w: WeekStats): string {
     `- vocabulary cards reviewed: ${w.vocabReviewed}`,
     // Speaksy is CEFR-based, not XP: never expose the raw composite as a number.
     // Feed it only as a qualitative band relative to their CEFR level.
-    w.avgLevelScore != null ? `- performance this week: ${scoreBand(w.avgLevelScore)} within ${s.cefr}` : "",
+    w.avgLevelScore != null ? `- performance this week: ${scoreBand(w.avgLevelScore)} within ${level(s)}` : "",
     w.focusAreas.length ? `- recurring weak areas: ${w.focusAreas.join("; ")}` : "",
-    `Describe progress in CEFR terms (e.g. "progressing within ${s.cefr}"). Never state a numeric score, points, or percentage.`,
+    `Describe progress in CEFR terms (e.g. "progressing within ${level(s)}"). Never state a numeric score, points, or percentage.`,
     `Answer with ONLY a JSON object: { "headline": "one upbeat sentence", "report": "2-4 sentences of substance", "wins": ["short win", ...], "focus": ["short area to drill next", ...] }.`,
   ]
     .filter(Boolean)
@@ -57,8 +57,8 @@ export function parseWeeklyReport(raw: string): WeeklyReport {
 export function drillPrompt(s: Settings, areas: string[], count = 4): string {
   const focus = areas.filter(Boolean);
   return [
-    `Create ${count} short ${s.targetLang} practice drills for a ${s.cefr} learner.`,
-    focus.length ? `Target these weak areas: ${focus.join("; ")}.` : `Target common ${s.cefr} sticking points.`,
+    `Create ${count} short ${s.targetLang} practice drills for a ${level(s)} learner.`,
+    focus.length ? `Target these weak areas: ${focus.join("; ")}.` : `Target common ${level(s)} sticking points.`,
     `Each drill is one small task the learner can answer in a sentence or two.`,
     `Answer with ONLY a JSON object: { "drills": [ { "area": "the skill being drilled", "prompt": "the task in ${s.targetLang}", "hint": "a short hint in ${s.nativeLang}", "example": "a model answer in ${s.targetLang}" } ] }.`,
   ].join("\n");

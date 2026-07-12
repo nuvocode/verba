@@ -40,7 +40,7 @@ const CONF_START = 50;
  * One conversation with the coach. Lives above the router so switching to Read
  * or opening ⌘K mid-sentence doesn't throw the session away.
  */
-export function useTalk(settings: Settings) {
+export function useTalk(settings: Settings, onSettings?: (patch: Partial<Settings>) => void) {
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [msgs, setMsgs] = useState<TalkMsg[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -207,7 +207,11 @@ export function useTalk(settings: Settings) {
           json: true,
         });
         const lvl = parseLevel(lvlRaw);
-        if (lvl) await saveLevelSignal(settings.targetLang, lvl);
+        if (lvl) {
+          await saveLevelSignal(settings.targetLang, lvl);
+          // Onboarding was skipped, so this conversation is the placement — commit the level.
+          if (!settings.cefr) onSettings?.({ cefr: lvl.estimate });
+        }
       } catch {
         /* level signal is best-effort */
       }

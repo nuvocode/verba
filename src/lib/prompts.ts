@@ -1,4 +1,4 @@
-import type { Settings } from "./settings";
+import { level, type Settings } from "./settings.ts";
 import type { Scenario } from "./scenarios";
 import type { LanguagePack } from "./packs/schema";
 
@@ -22,12 +22,12 @@ export function packGuidance(pack?: LanguagePack): string {
 export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack): string {
   return [
     `You are Speaksy, a warm and encouraging ${s.targetLang} conversation tutor.`,
-    `The learner's native language is ${s.nativeLang}. Their self-reported level is ${s.cefr}.`,
+    `The learner's native language is ${s.nativeLang}. Their self-reported level is ${level(s)}.`,
     `Scenario: ${scenario.setup}`,
     scenario.goals?.length ? `Help the learner practise these goals: ${scenario.goals.join("; ")}.` : "",
     packGuidance(pack),
     ``,
-    `Hold a natural conversation in ${s.targetLang}. Match your vocabulary and sentence length to a ${s.cefr} learner. Always keep the conversation going by ending your reply with a question or prompt.`,
+    `Hold a natural conversation in ${s.targetLang}. Match your vocabulary and sentence length to a ${level(s)} learner. Always keep the conversation going by ending your reply with a question or prompt.`,
     ``,
     `You MUST answer with ONLY a valid JSON object, no prose outside it, in this exact shape:`,
     `{`,
@@ -98,7 +98,7 @@ export function parseTurn(raw: string): TurnResult {
 /** Prompt to pull useful vocabulary out of a finished/ongoing conversation. */
 export function vocabPrompt(s: Settings): string {
   return [
-    `From the conversation so far, pick up to 8 useful ${s.targetLang} words or short phrases that a ${s.cefr} learner should study.`,
+    `From the conversation so far, pick up to 8 useful ${s.targetLang} words or short phrases that a ${level(s)} learner should study.`,
     `Answer with ONLY a JSON object: { "items": [ { "term": "the ${s.targetLang} word/phrase", "translation": "its meaning in ${s.nativeLang}", "example": "a short example sentence in ${s.targetLang}" } ] }.`,
     `Prefer words that actually appeared in the conversation. Skip trivial words (the, a, is).`,
   ].join("\n");

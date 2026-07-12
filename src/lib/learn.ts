@@ -1,4 +1,4 @@
-import type { Settings } from "./settings";
+import { level, type Settings } from "./settings.ts";
 
 // Learning engine — turns the app's separate activities into one coherent daily
 // session. Everything a learner does in a day hangs off a single theme so the
@@ -49,15 +49,25 @@ const THEMES = [
   "health and the body",
 ];
 
+// What each onboarding interest chip narrows the rotation to. No chips → the full rotation.
+const INTEREST_THEMES: Record<string, string[]> = {
+  Travel: ["travel and directions", "shopping and money", "food and cooking"],
+  Work: ["work and studies", "daily routines", "shopping and money"],
+  "Family & friends": ["friends and family", "daily routines", "health and the body"],
+  "Books & film": ["hobbies and free time", "friends and family", "work and studies"],
+};
+
 /** Deterministic theme for a date, so the same day always yields the same plan. */
-export function themeForDate(date: string): string {
+export function themeForDate(date: string, interests: string[] = []): string {
+  const pool = [...new Set(interests.flatMap((i) => INTEREST_THEMES[i] ?? []))];
+  const list = pool.length ? pool : THEMES;
   const day = Number(date.replace(/-/g, "")) || 0;
-  return THEMES[day % THEMES.length];
+  return list[day % list.length];
 }
 
 /** Build a personalised daily session. Pure — no I/O, no clock. */
 export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
-  const theme = ctx.theme?.trim() || themeForDate(ctx.date);
+  const theme = ctx.theme?.trim() || themeForDate(ctx.date, s.goals);
   const focus = (ctx.focus ?? []).filter(Boolean).slice(0, 3);
   const drill = focus[0];
 
@@ -73,7 +83,7 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
     {
       kind: "reading",
       title: `Reading — ${theme}`,
-      detail: `Read a short level-${s.cefr} story about ${theme}.`,
+      detail: `Read a short level-${level(s)} story about ${theme}.`,
       minutes: 5,
       goal: focus[1] ?? drill,
     },
@@ -105,7 +115,7 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
   return {
     date: ctx.date,
     theme,
-    level: s.cefr,
+    level: level(s),
     focus,
     blocks,
     totalMinutes: blocks.reduce((n, b) => n + b.minutes, 0),

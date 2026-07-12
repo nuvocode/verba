@@ -192,6 +192,7 @@ export default function SettingsView({
       <div className="field">
         <label>My level</label>
         <select value={settings.cefr} onChange={(e) => onChange({ cefr: e.target.value })}>
+          <option value="">Not set — placed in your first conversation</option>
           {["A1", "A2", "B1", "B2", "C1", "C2"].map((l) => (
             <option key={l}>{l}</option>
           ))}

@@ -6,6 +6,28 @@ import { PACK_FORMAT_VERSION, type LanguagePack } from "./schema.ts";
 export const BUNDLED_PACKS: LanguagePack[] = [
   {
     formatVersion: PACK_FORMAT_VERSION,
+    id: "en",
+    name: "English",
+    nativeName: "English",
+    emoji: "🇬🇧",
+    direction: "ltr",
+    writingSystem: "Latin",
+    pronunciation: [
+      "Spelling is not phonetic — the same letters take many sounds (through, tough, though).",
+      "Stress carries meaning: REcord (noun) vs reCORD (verb).",
+      "Unstressed vowels collapse to a schwa /ə/ (banana, about).",
+    ],
+    grammar: [
+      "Word order is fixed: subject–verb–object. There is no gender on nouns.",
+      "Articles (a/an/the) are obligatory and a common source of error.",
+      "Phrasal verbs (get up, put off, run into) carry much of everyday meaning.",
+    ],
+    promptHint:
+      "Use a neutral, friendly register. Prefer common contractions (I'm, don't, it's) and everyday phrasal verbs over formal Latinate synonyms.",
+    speech: { locale: "en-US", voiceHint: "English" },
+  },
+  {
+    formatVersion: PACK_FORMAT_VERSION,
     id: "es",
     name: "Spanish",
     nativeName: "Español",
@@ -69,5 +91,27 @@ export const BUNDLED_PACKS: LanguagePack[] = [
     promptHint:
       "Use du for casual scenarios, Sie for formal ones. Keep sentences short at lower levels; introduce cases gradually.",
     speech: { locale: "de-DE", voiceHint: "German" },
+  },
+  {
+    formatVersion: PACK_FORMAT_VERSION,
+    id: "ja",
+    name: "Japanese",
+    nativeName: "日本語",
+    emoji: "🇯🇵",
+    direction: "ltr",
+    writingSystem: "Kana + Kanji",
+    pronunciation: [
+      "Pitch accent, not stress, distinguishes words (hashi: bridge vs chopsticks).",
+      "Every mora takes the same length; long vowels (おばあさん) count double.",
+      "The 'r' sounds are a single tap, between English r and l.",
+    ],
+    grammar: [
+      "Word order is subject–object–verb; the verb always comes last.",
+      "Particles mark role: は (topic), が (subject), を (object), に/で (place).",
+      "Politeness is grammatical — choose です/ます or plain form and stay consistent.",
+    ],
+    promptHint:
+      "Default to です/ます form. At A1–A2 write kana with spaces between words and gloss any kanji in parentheses; drop the spacing from B1.",
+    speech: { locale: "ja-JP", voiceHint: "Japanese" },
   },
 ];

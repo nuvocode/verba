@@ -103,6 +103,23 @@ input { font: inherit; }
 .plan-row { display: flex; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--line2); }
 .plan-row .key { font-family: var(--mono); font-size: 11px; color: var(--ink3); width: 110px; flex: none; padding-top: 3px; }
 .plan-row .val { font-size: 14px; line-height: 1.6; }
+.plan-row .val.warn strong { color: var(--accent); }
+/* pack provenance, corner of the card */
+.pick { position: relative; }
+.pick .tag { position: absolute; top: 10px; right: 10px; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
+.pick.on .tag { color: var(--accent); }
+/* the quiet native-language line + its inline picker */
+.native { margin-top: 22px; font-size: 13.5px; color: var(--ink2); }
+.plan-row .native { margin-top: 0; font-size: inherit; color: inherit; }
+.link { padding: 0; font-size: inherit; color: var(--ink3); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.link:hover { color: var(--accent); }
+.lang-search { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px; font-size: 13.5px; background: transparent; color: var(--ink); }
+.lang-search:focus { outline: none; border-color: var(--accent); }
+.lang-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.lang-opt { border: 1px solid var(--line); border-radius: 20px; padding: 6px 14px; font-size: 12.5px; cursor: pointer; }
+.lang-opt:hover, .lang-opt.on { border-color: var(--accent); background: var(--surface); }
+.lang-opt.off { border: none; color: var(--ink3); cursor: default; padding-left: 0; }
+.eyebrow .opt { margin-left: 8px; color: var(--ink3); opacity: .55; text-transform: lowercase; letter-spacing: .06em; }
 
 /* ---------- today ---------- */
 .today { max-width: 860px; margin: 0 auto; padding: 72px 32px 80px; }

@@ -17,7 +17,10 @@ export interface LevelSignal {
 export function levelPrompt(s: Settings): string {
   return [
     `Estimate the learner's ${s.targetLang} level from their own messages in this conversation (ignore your own).`,
-    `Use the CEFR scale: ${CEFR_LEVELS.join(", ")}. Their self-reported level is ${s.cefr} — adjust only if the evidence is clear.`,
+    s.cefr
+      ? `Use the CEFR scale: ${CEFR_LEVELS.join(", ")}. Their self-reported level is ${s.cefr} — adjust only if the evidence is clear.`
+      : // Onboarding was skipped — this conversation IS the placement, so judge on the evidence alone.
+        `Use the CEFR scale: ${CEFR_LEVELS.join(", ")}. They never reported a level — place them purely on what they wrote.`,
     `Answer with ONLY a JSON object: { "estimate": "one of ${CEFR_LEVELS.join("/")}", "confidence": "low|medium|high", "rationale": "one short sentence in ${s.nativeLang}" }.`,
   ].join("\n");
 }

@@ -34,7 +34,10 @@ export function registry(): RegisteredPack[] {
   add(BUNDLED_PACKS, "official");
   add(COMMUNITY_PACKS, "community");
   add(imported(), "imported");
-  return [...byId.values()];
+  // The order learners see, everywhere. Anything not listed (an imported pack) trails it.
+  const ORDER = ["en", "es", "fr", "de", "it", "pt", "ja"];
+  const rank = (id: string) => (ORDER.indexOf(id) + 1 || ORDER.length + 1) - 1;
+  return [...byId.values()].sort((a, b) => rank(a.pack.id) - rank(b.pack.id));
 }
 
 /** Bundled + community + imported packs, deduped by id. */

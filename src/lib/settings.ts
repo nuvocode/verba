@@ -1,3 +1,5 @@
+import { detectNativeLang } from "./langs.ts";
+
 export type ProviderId = "ollama" | "openai" | "anthropic" | "gemini" | "openrouter" | "lmstudio";
 export type SpeechEngine = "web" | "elevenlabs" | "deepgram";
 /** When a correction is shown inline: as it happens, only when severe, or only at reflection. */
@@ -23,7 +25,7 @@ export interface Settings {
   lmstudioHost: string;
   nativeLang: string; // learner's first language — explanations are given in it
   targetLang: string; // language being practised
-  cefr: string; // self-reported level (A1–C2)
+  cefr: string; // self-reported level (A1–C2), "" until the first conversation places them
   packId: string; // active language pack (see lib/packs) — "" for none
   speak: boolean; // read AI replies / reading text aloud (TTS)
   speechEngine: SpeechEngine; // TTS/STT backend — web (offline) or a cloud API
@@ -31,12 +33,18 @@ export interface Settings {
   deepgramKey: string;
   onboarded: boolean; // false → the welcome flow runs instead of the app
   dailyMinutes: number; // how long a session should be, from onboarding
-  goal: string; // why they're learning — steers scenarios and reading topics
+  goals: string[]; // why they're learning — steers scenarios and reading topics; may be empty
   theme: "light" | "dark";
   correctionTiming: CorrectionTiming;
   offline: boolean; // hard-forces local providers; cloud options are disabled
   showHints: boolean; // keyboard hint lines under each screen
 }
+
+/** The level to write prompts against. "" (skipped) reads as A2 until the first conversation places them. */
+export const level = (s: Settings) => s.cefr || "A2";
+
+/** What "Skip setup" from step 2 onward leaves behind: level unset, a short session, no interests. */
+export const SKIP_DEFAULTS = { cefr: "", dailyMinutes: 20, goals: [] as string[] };
 
 const KEY = "speaksy.settings";
 
@@ -54,7 +62,7 @@ export const defaultSettings: Settings = {
   openrouterKey: "",
   lmstudioModel: "local-model",
   lmstudioHost: "http://localhost:1234/v1",
-  nativeLang: "Turkish",
+  nativeLang: detectNativeLang(),
   targetLang: "Spanish",
   cefr: "B1",
   packId: "es",
@@ -64,7 +72,7 @@ export const defaultSettings: Settings = {
   deepgramKey: "",
   onboarded: false,
   dailyMinutes: 45,
-  goal: "Travel",
+  goals: [],
   theme: "light",
   correctionTiming: "adaptive",
   offline: true,

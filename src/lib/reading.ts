@@ -1,4 +1,4 @@
-import type { Settings } from "./settings";
+import { level, type Settings } from "./settings.ts";
 import type { LanguagePack } from "./packs/schema";
 import { packGuidance } from "./prompts.ts";
 
@@ -39,7 +39,7 @@ const jsonShape =
 function base(s: Settings, pack?: LanguagePack): string {
   return [
     `You generate graded reading material for a ${s.targetLang} learner whose native language is ${s.nativeLang}.`,
-    `Target CEFR level: ${s.cefr}. Keep vocabulary and grammar appropriate for that level.`,
+    `Target CEFR level: ${level(s)}. Keep vocabulary and grammar appropriate for that level.`,
     packGuidance(pack),
   ]
     .filter(Boolean)

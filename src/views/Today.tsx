@@ -47,6 +47,17 @@ export default function Today({
       </div>
       <h1 className="display">{greeting()}.</h1>
 
+      {/* Level was skipped in onboarding — say so, once, until the first conversation places them. */}
+      {!settings.cefr && (
+        <div className="lede" style={{ maxWidth: 640, marginBottom: 20 }}>
+          <div className="bullet" />
+          <p style={{ fontSize: 15, color: "var(--ink2)" }}>
+            I'll calibrate your level in our first conversation. Session length is {settings.dailyMinutes} min — change
+            anytime.
+          </p>
+        </div>
+      )}
+
       <div className="lede" style={{ maxWidth: 640, marginBottom: 52 }}>
         <div className="bullet live" />
         <p>
