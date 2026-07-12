@@ -34,7 +34,7 @@ export function parseLevel(raw: string): LevelSignal | null {
   return { estimate: estimate as Cefr, confidence, rationale: String(o.rationale ?? "") };
 }
 
-function extractJson(raw: string): any {
+export function extractJson(raw: string): any {
   if (!raw) return null;
   try {
     return JSON.parse(raw);

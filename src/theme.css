@@ -303,3 +303,16 @@ input { font: inherit; }
 .pitem.on { background: var(--bg2); }
 .pitem .k { font-family: var(--mono); font-size: 10px; color: var(--ink3); }
 .palette .foot { display: flex; gap: 16px; padding: 10px 16px; border-top: 1px solid var(--line2); font-size: 10.5px; color: var(--ink3); font-family: var(--mono); }
+
+/* ---------- escape: the way out is always visible ---------- */
+.escape { position: fixed; bottom: 18px; right: 18px; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 8px 13px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); color: var(--ink3); font-size: 12px; box-shadow: var(--shadow); }
+.escape:hover { color: var(--ink); border-color: var(--ink3); }
+.onb .onb-esc { position: absolute; top: 24px; right: 32px; display: flex; align-items: center; gap: 18px; }
+.onb .onb-esc .skip { position: static; display: flex; align-items: center; gap: 7px; }
+.onb .native .warn strong { color: var(--accent); }
+
+/* ---------- confirm ---------- */
+.confirm { padding: 26px 26px 20px; }
+.confirm h2 { font-family: var(--serif); font-size: 26px; font-weight: 500; margin: 0 0 12px; }
+.confirm p { font-size: 13.5px; line-height: 1.65; color: var(--ink2); margin: 0 0 24px; }
+.confirm .btn .kbd { background: transparent; border-color: currentColor; opacity: .5; }

@@ -217,6 +217,12 @@ export default function Talk({
                   onChange={(e) => talk.setInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void talk.send(talk.input);
+                    // The composer is the whole screen — Esc ends the session rather than
+                    // just leaving the box (App blurs first for every other input).
+                    if (e.key === "Escape" && !talk.busy) {
+                      e.stopPropagation();
+                      void talk.end();
+                    }
                   }}
                   placeholder={`Answer in ${settings.targetLang}…`}
                   autoFocus

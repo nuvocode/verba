@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadSettings, saveSettings, isLocalProvider, type Settings } from "./lib/settings";
+import { loadSettings, saveSettings, isLocalProvider, onboardingReset, type Settings } from "./lib/settings";
 import type { BlockKind } from "./lib/learn";
 import { useDay } from "./lib/useDay";
 import { useTalk } from "./lib/useTalk";
@@ -48,6 +48,8 @@ export default function App() {
   const [reviewSignal, setReviewSignal] = useState(0);
   // A view (Memory's review) can claim the keyboard; global shortcuts stand down.
   const [captured, setCaptured] = useState(false);
+  // Replaying onboarding throws away the current setup — never on one stray click.
+  const [confirmReplay, setConfirmReplay] = useState(false);
 
   const update = useCallback((patch: Partial<Settings>) => {
     setSettings((s) => {
@@ -126,7 +128,13 @@ export default function App() {
         label: `Switch to ${settings.theme === "dark" ? "light" : "dark"} theme`,
         run: () => update({ theme: settings.theme === "dark" ? "light" : "dark" }),
       },
-      { label: "Replay onboarding", run: () => go("onboarding") },
+      {
+        label: "Replay onboarding — clears your setup",
+        run: () => {
+          setPaletteOpen(false);
+          setConfirmReplay(true);
+        },
+      },
     ];
 
     const q = query.trim();
@@ -148,12 +156,35 @@ export default function App() {
     return hits;
   }, [query, go, begin, day, read, talk, settings.theme, update]);
 
+  // The one thing Esc does on this screen. The key and the visible pill run it, so nobody
+  // has to know the shortcut exists. Memory's review owns its own Esc while it's captured.
+  const escape: { label: string; run: () => void } | null = captured
+    ? null
+    : read.popover
+      ? { label: "close the word", run: () => read.closePopover() }
+      : space === "read" && read.focusIdx >= 0
+        ? { label: "clear focus", run: () => read.setFocusIdx(-1) }
+        : space === "talk" && talk.started && !talk.reflecting
+          ? { label: "end the session", run: () => void talk.end() }
+          : space !== "today" && space !== "onboarding"
+            ? { label: "back to Today", run: () => go("today") }
+            : null;
+
   // ---- keyboard: every screen is reachable without the mouse ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(el?.tagName ?? "") || !!el?.isContentEditable;
 
+      if (confirmReplay) {
+        if (e.key === "Escape") setConfirmReplay(false);
+        if (e.key === "Enter") {
+          update({ ...onboardingReset() });
+          setConfirmReplay(false);
+          go("onboarding");
+        }
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((o) => !o);
@@ -179,9 +210,8 @@ export default function App() {
         return;
       }
       if (e.key === "Escape") {
-        if (read.popover) return read.closePopover();
-        if (space === "read" && read.focusIdx >= 0) return read.setFocusIdx(-1);
-        if (space === "talk" && talk.started && !talk.reflecting) return void talk.end();
+        if (typing) return (el as HTMLInputElement).blur(); // out of the field first, then out of the screen
+        escape?.run();
         return;
       }
       if (typing || captured || space === "onboarding") return;
@@ -216,7 +246,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [space, paletteOpen, pIdx, paletteItems, talk, read, day, begin, go, captured]);
+  }, [space, paletteOpen, pIdx, paletteItems, talk, read, day, begin, go, captured, escape, confirmReplay, update]);
 
   useEffect(() => {
     if (paletteOpen) paletteInput.current?.focus();
@@ -231,6 +261,8 @@ export default function App() {
             update({ ...patch, onboarded: true });
             go(dest);
           }}
+          // Only a learner who already finished setup has somewhere to escape to.
+          onExit={settings.onboarded ? () => go("today") : undefined}
         />
       </div>
     );
@@ -305,6 +337,41 @@ export default function App() {
         {space === "coach" && <Coach settings={settings} day={day} />}
         {space === "settings" && <SettingsView settings={settings} onChange={update} />}
       </div>
+
+      {escape && !paletteOpen && !confirmReplay && (
+        <button className="escape" onClick={escape.run}>
+          <span className="kbd">esc</span> {escape.label}
+        </button>
+      )}
+
+      {confirmReplay && (
+        <div className="scrim" onClick={() => setConfirmReplay(false)}>
+          <div className="palette confirm" onClick={(e) => e.stopPropagation()}>
+            <h2>Start setup over?</h2>
+            <p>
+              Your language, level, daily rhythm and interests are cleared, and Verba walks you through setup from the
+              first screen. Your saved words, conversations and progress are <strong>not</strong> touched — neither is
+              your AI provider.
+            </p>
+            <div className="row" style={{ justifyContent: "flex-end" }}>
+              <button className="btn sm ghost" onClick={() => setConfirmReplay(false)}>
+                <span className="kbd">esc</span> Keep my setup
+              </button>
+              <button
+                className="btn sm"
+                autoFocus
+                onClick={() => {
+                  update({ ...onboardingReset() });
+                  setConfirmReplay(false);
+                  go("onboarding");
+                }}
+              >
+                <span className="kbd">↵</span> Clear it and replay
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {paletteOpen && (
         <div className="scrim" onClick={() => setPaletteOpen(false)}>

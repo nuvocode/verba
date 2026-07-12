@@ -46,6 +46,20 @@ export const level = (s: Settings) => s.cefr || "A2";
 /** What "Skip setup" from step 2 onward leaves behind: level unset, a short session, no interests. */
 export const SKIP_DEFAULTS = { cefr: "", dailyMinutes: 20, goals: [] as string[] };
 
+/**
+ * Replaying onboarding starts the setup over: language, level, rhythm and interests are
+ * cleared so nothing is silently pre-answered. Provider config, saved vocabulary and
+ * history survive — the confirm dialog says so before anything is written.
+ */
+export const onboardingReset = (): Partial<Settings> => ({
+  onboarded: false,
+  packId: defaultSettings.packId,
+  targetLang: defaultSettings.targetLang,
+  cefr: defaultSettings.cefr,
+  dailyMinutes: defaultSettings.dailyMinutes,
+  goals: [],
+});
+
 const KEY = "verba.settings";
 
 export const defaultSettings: Settings = {
