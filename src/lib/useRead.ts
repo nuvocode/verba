@@ -94,7 +94,9 @@ export function useRead(settings: Settings) {
         const w = parseWordExplanation(raw);
         const gloss = w.meaning || "—";
         setPopover((p) => (p && p.term === term ? { ...p, gloss } : p));
-        await addVocab({ term: w.lemma || term, translation: gloss, example: sentence }).catch(() => {});
+        await addVocab(settings.targetLang, { term: w.lemma || term, translation: gloss, example: sentence }).catch(
+          () => {},
+        );
         setSaved((s) => (s.includes(term) ? s : [...s, term]));
       } catch (e: any) {
         setPopover((p) => (p && p.term === term ? { ...p, gloss: String(e?.message ?? e) } : p));
@@ -107,6 +109,9 @@ export function useRead(settings: Settings) {
     text,
     focusIdx,
     setFocusIdx,
+    /** The pack's locale and direction — the reader cuts words and lays out text with them. */
+    locale: pack?.speech.locale ?? "en",
+    dir: pack?.direction ?? "ltr",
     bilingual,
     toggleBilingual: () => setBilingual((b) => !b),
     popover,

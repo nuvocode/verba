@@ -1,6 +1,7 @@
 import type { Settings } from "../lib/settings";
 import type { BlockKind } from "../lib/learn";
 import type { Day } from "../lib/useDay";
+import { tokens } from "../lib/text";
 import { bare, type Read as ReadState } from "../lib/useRead";
 
 export default function Read({
@@ -44,29 +45,42 @@ export default function Read({
         <div className="eyebrow">
           Generated for you · {settings.cefr} · ~{Math.max(1, Math.round(text.sentences.length / 3))} min
         </div>
-        <h1>{text.title}</h1>
+        <h1 dir={read.dir}>{text.title}</h1>
         <div className="cap">Click a sentence to focus it; click a word to have it explained and saved.</div>
 
-        <div className="passage">
+        {/* Words are cut by the target language's own rules, and the spaces and
+            punctuation between them are rendered as-is — which is the only way a
+            script that doesn't use spaces (Japanese, Chinese, Thai) can be both
+            readable and tappable. */}
+        <div className="passage" dir={read.dir}>
           {text.sentences.map((s, i) => (
             <span
               key={i}
               className={`sent ${focusIdx === i ? "on" : ""}`}
               onClick={() => read.setFocusIdx(focusIdx === i ? -1 : i)}
             >
-              {s.target.split(" ").map((w, wi) => (
-                <span
-                  key={wi}
-                  className={`w ${read.saved.includes(bare(w)) ? "saved" : ""}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void read.explain(w, s.target, e.currentTarget.getBoundingClientRect());
-                  }}
-                >
-                  {w}
+              {tokens(s.target, read.locale).map((t, wi) =>
+                t.word ? (
+                  <span
+                    key={wi}
+                    className={`w ${read.saved.includes(bare(t.text)) ? "saved" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void read.explain(t.text, s.target, e.currentTarget.getBoundingClientRect());
+                    }}
+                  >
+                    {t.text}
+                  </span>
+                ) : (
+                  <span key={wi}>{t.text}</span>
+                ),
+              )}
+              {read.bilingual && (
+                <span className="en" dir="auto">
+                  {" "}
+                  {s.native}{" "}
                 </span>
-              )).reduce((acc: any[], el, i) => (i ? [...acc, " ", el] : [el]), [])}
-              {read.bilingual && <span className="en"> {s.native} </span>}{" "}
+              )}{" "}
             </span>
           ))}
         </div>
@@ -153,7 +167,9 @@ export default function Read({
               : { top: popover.y + 10 }),
           }}
         >
-          <div className="t">{popover.term}</div>
+          <div className="t" dir={read.dir}>
+            {popover.term}
+          </div>
           <div className="g">{popover.gloss}</div>
           {popover.gloss !== "…" && <div className="s">✓ Saved to Memory</div>}
         </div>

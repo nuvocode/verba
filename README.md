@@ -90,6 +90,7 @@ lists your installed Ollama models.
 node --experimental-strip-types src/lib/srs.check.ts      # SRS scheduling
 node --experimental-strip-types src/lib/phase2.check.ts   # pack/scenario validators + reading/level parsers
 node --experimental-strip-types src/lib/phase3.check.ts   # daily plan engine + metrics v2 + coaching + registry
+node --experimental-strip-types src/lib/lang.check.ts     # segmentation, punctuation, and pack guidance reaching every prompt
 ```
 
 ## Not yet (later phases)

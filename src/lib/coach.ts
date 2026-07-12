@@ -1,4 +1,5 @@
 import { level, type Settings } from "./settings.ts";
+import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 
 // Advanced coaching — the two AI features the phase asks for on top of the
 // learning engine: a weekly progress report and targeted weak-area drills.
@@ -15,10 +16,11 @@ export interface WeekStats {
   focusAreas: string[]; // recurring "focus next" points from summaries
 }
 
-export function weeklyReportPrompt(s: Settings, w: WeekStats): string {
+export function weeklyReportPrompt(s: Settings, w: WeekStats, pack?: LanguagePack): string {
   return [
     `You are a ${s.targetLang} learning coach writing a short weekly progress report for a ${level(s)} learner.`,
     `Write in ${s.nativeLang}. Be specific and encouraging, not generic.`,
+    packGuidance(pack),
     `This week's data:`,
     `- practice sessions: ${w.sessions}`,
     `- messages written: ${w.messages}`,
@@ -54,14 +56,17 @@ export function parseWeeklyReport(raw: string): WeeklyReport {
 }
 
 /** Generate a small set of focused exercises for the learner's weak areas. */
-export function drillPrompt(s: Settings, areas: string[], count = 4): string {
+export function drillPrompt(s: Settings, areas: string[], count = 4, pack?: LanguagePack): string {
   const focus = areas.filter(Boolean);
   return [
     `Create ${count} short ${s.targetLang} practice drills for a ${level(s)} learner.`,
+    packGuidance(pack),
     focus.length ? `Target these weak areas: ${focus.join("; ")}.` : `Target common ${level(s)} sticking points.`,
     `Each drill is one small task the learner can answer in a sentence or two.`,
     `Answer with ONLY a JSON object: { "drills": [ { "area": "the skill being drilled", "prompt": "the task in ${s.targetLang}", "hint": "a short hint in ${s.nativeLang}", "example": "a model answer in ${s.targetLang}" } ] }.`,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export interface Drill {

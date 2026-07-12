@@ -1,22 +1,9 @@
 import { level, type Settings } from "./settings.ts";
 import type { Scenario } from "./scenarios";
-import type { LanguagePack } from "./packs/schema";
+import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 
 export type { Scenario } from "./scenarios";
-
-/** Fold a language pack's guidance into a system prompt (empty string if none). */
-export function packGuidance(pack?: LanguagePack): string {
-  if (!pack) return "";
-  return [
-    ``,
-    `Language notes for ${pack.name}:`,
-    ...pack.pronunciation.map((p) => `- Pronunciation: ${p}`),
-    ...pack.grammar.map((g) => `- Grammar: ${g}`),
-    pack.promptHint ? `- ${pack.promptHint}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
+export { packGuidance } from "./packs/schema.ts";
 
 /** System prompt for a normal conversational turn. Model must return the turn JSON. */
 export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack): string {
@@ -96,12 +83,18 @@ export function parseTurn(raw: string): TurnResult {
 }
 
 /** Prompt to pull useful vocabulary out of a finished/ongoing conversation. */
-export function vocabPrompt(s: Settings): string {
+export function vocabPrompt(s: Settings, pack?: LanguagePack): string {
   return [
     `From the conversation so far, pick up to 8 useful ${s.targetLang} words or short phrases that a ${level(s)} learner should study.`,
-    `Answer with ONLY a JSON object: { "items": [ { "term": "the ${s.targetLang} word/phrase", "translation": "its meaning in ${s.nativeLang}", "example": "a short example sentence in ${s.targetLang}" } ] }.`,
+    packGuidance(pack),
+    `Answer with ONLY a JSON object: { "items": [ { "term": "the ${s.targetLang} word/phrase in its dictionary form", "translation": "its meaning in ${s.nativeLang}", "example": "a short example sentence in ${s.targetLang} that uses the term" } ] }.`,
     `Prefer words that actually appeared in the conversation. Skip trivial words (the, a, is).`,
-  ].join("\n");
+    // The card is studied as a cloze: Memory blanks "term" out of "example", so
+    // the two must match literally or the learner gets a blank tacked on the end.
+    `The "example" MUST contain "term" written exactly as you wrote it — do not inflect, conjugate or decline it there.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function parseVocab(raw: string): { term: string; translation: string; example: string }[] {
@@ -117,12 +110,15 @@ export function parseVocab(raw: string): { term: string; translation: string; ex
 }
 
 /** Prompt for an end-of-session summary. */
-export function summaryPrompt(s: Settings): string {
+export function summaryPrompt(s: Settings, pack?: LanguagePack): string {
   return [
     `Summarise this ${s.targetLang} practice session for the learner.`,
+    packGuidance(pack),
     `Answer with ONLY a JSON object: { "summary": "2-3 sentences on what was practised, written in ${s.nativeLang}", "strengths": ["short point", ...], "focus": ["short thing to work on next", ...] }.`,
     `Base "strengths" and "focus" on the learner's actual messages. Keep each point under 12 words.`,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export interface SessionSummary {

@@ -19,9 +19,13 @@ export interface ReadingText {
   sentences: Sentence[];
 }
 
-/** Strip punctuation off a tapped word so "mercado," and "mercado" look up the same. */
+/**
+ * Strip punctuation off a tapped word so "mercado," and "mercado" look up the
+ * same. \p{P} is every punctuation mark Unicode knows about — the hand-written
+ * Latin set this replaced had no idea 。、！？「」، or । existed.
+ */
 export function bareWord(w: string): string {
-  return w.toLowerCase().replace(/[.,:;¡!¿?“”"'()…—–-]/g, "");
+  return w.toLowerCase().replace(/\p{P}/gu, "");
 }
 
 export interface StoryOptions {

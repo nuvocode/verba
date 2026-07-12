@@ -29,17 +29,26 @@ const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined
 const Recognition: any =
   typeof window !== "undefined" ? (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition : undefined;
 
+/** "pt-BR" → "pt". The language subtag, which is all some APIs accept. */
+const baseLang = (locale?: string) => (locale ?? "").split(/[-_]/)[0].toLowerCase();
+
 function pickVoice(locale?: string, hint?: string): SpeechSynthesisVoice | undefined {
   if (!synth) return undefined;
   const voices = synth.getVoices();
-  const lang = locale?.toLowerCase();
-  const byLocale = lang ? voices.filter((v) => v.lang.toLowerCase().startsWith(lang.slice(0, 2))) : voices;
+  if (!locale) return voices[0];
+  const want = locale.toLowerCase().replace("_", "-");
+  const norm = (v: SpeechSynthesisVoice) => v.lang.toLowerCase().replace("_", "-");
+  // Exact region first: pt-BR and pt-PT are different accents, and picking either
+  // for the other is the kind of thing a learner copies for months.
+  const exact = voices.filter((v) => norm(v) === want);
+  const sameLang = voices.filter((v) => baseLang(norm(v)) === baseLang(want));
+  const pool = exact.length ? exact : sameLang;
   if (hint) {
     const h = hint.toLowerCase();
-    const match = byLocale.find((v) => v.name.toLowerCase().includes(h));
+    const match = pool.find((v) => v.name.toLowerCase().includes(h));
     if (match) return match;
   }
-  return byLocale[0] ?? voices[0];
+  return pool[0] ?? voices[0];
 }
 
 /** Native webview speech adapter. */
@@ -124,13 +133,25 @@ export function elevenLabs(apiKey: string, voiceId = "21m00Tcm4TlvDq8ikWAM"): Sp
   return {
     canSpeak: true,
     canListen: web.canListen,
-    async speak(text) {
+    // `opts` used to be dropped on the floor here: the adapter never saw the
+    // pack's locale, so every language was synthesised as whatever the model
+    // guessed from the text. Turbo v2.5 takes an explicit language_code (ISO
+    // 639-1); multilingual_v2 refuses it, which is why the model changed.
+    // ponytail: the voice is still one fixed multilingual voice, so an Arabic
+    // sentence comes out accented. Per-pack voice ids are the upgrade — add a
+    // `speech.elevenVoiceId` to the pack schema when someone asks for it.
+    async speak(text, opts = {}) {
       if (!apiKey) throw new Error("ElevenLabs API key is not set (Settings).");
       if (!text.trim()) return;
+      const lang = baseLang(opts.locale);
       const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
         method: "POST",
         headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({ text, model_id: "eleven_multilingual_v2" }),
+        body: JSON.stringify({
+          text,
+          model_id: "eleven_turbo_v2_5",
+          ...(lang ? { language_code: lang } : {}),
+        }),
       });
       if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${await res.text()}`);
       const buf = await res.arrayBuffer();
@@ -159,15 +180,22 @@ export function deepgram(apiKey: string): SpeechAdapter {
     async listen(locale) {
       if (!apiKey) throw new Error("Deepgram API key is not set (Settings).");
       const clip = await recordClip();
-      const lang = locale ? locale.slice(0, 2) : "en";
-      const res = await fetch(
-        `https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&language=${lang}`,
-        {
+      const audio = await clip.arrayBuffer();
+
+      const transcribe = async (lang: string) =>
+        fetch(`https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&language=${lang}`, {
           method: "POST",
           headers: { Authorization: `Token ${apiKey}`, "Content-Type": clip.type },
-          body: await clip.arrayBuffer(),
-        },
-      );
+          body: audio,
+        });
+
+      // Nova-3 recognises regional tags for some languages (pt-BR, pt-PT, es-419,
+      // fr-CA) and only the base tag for others (ja, de, "es-ES" is not a thing).
+      // Ask for the pack's exact locale, fall back to the language on a reject —
+      // the old code just truncated to two letters and threw pt-BR away.
+      const wanted = (locale ?? "en-US").replace("_", "-");
+      let res = await transcribe(wanted);
+      if (!res.ok && baseLang(wanted) !== wanted) res = await transcribe(baseLang(wanted));
       if (!res.ok) throw new Error(`Deepgram ${res.status}: ${await res.text()}`);
       const data = await res.json();
       return data.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";

@@ -1,4 +1,5 @@
 import { CEFR_LEVELS, type Cefr } from "./level.ts";
+import { sentenceCount, words } from "./text.ts";
 
 // Level estimation v2 — a measured signal to sit alongside the v1 AI soft
 // estimate. It reads the learner's own messages (never the tutor's) and derives
@@ -31,18 +32,18 @@ export interface LevelEstimateV2 {
   components: { complexity: number; coverage: number; accuracy: number };
 }
 
-const words = (text: string): string[] => (text.toLowerCase().match(/\p{L}+(?:['’]\p{L}+)?/gu) ?? []);
-const sentences = (text: string): number => Math.max(1, (text.match(/[.!?]+/g) ?? []).length);
-
 export function computeMetrics(
   userTexts: string[],
-  opts: { corrections?: number; deckSize?: number } = {},
+  opts: { corrections?: number; deckSize?: number; locale?: string } = {},
 ): LevelMetrics {
+  // Words and sentences are cut by the target language's own rules (lib/text) —
+  // a whitespace split would read a whole Japanese message as one long word.
+  const locale = opts.locale ?? "en";
   const texts = userTexts.filter((t) => t && t.trim());
-  const allWords = texts.flatMap(words);
+  const allWords = texts.flatMap((t) => words(t, locale));
   const totalWords = allWords.length;
   const unique = new Set(allWords).size;
-  const sentenceCount = texts.reduce((n, t) => n + sentences(t), 0) || 1;
+  const sentences = texts.reduce((n, t) => n + sentenceCount(t, locale), 0) || 1;
   const chars = allWords.reduce((n, w) => n + w.length, 0);
   const corrections = opts.corrections ?? 0;
   const messages = texts.length;
@@ -51,7 +52,7 @@ export function computeMetrics(
     words: totalWords,
     uniqueWords: unique,
     typeTokenRatio: totalWords ? unique / totalWords : 0,
-    avgSentenceLen: totalWords / sentenceCount,
+    avgSentenceLen: totalWords / sentences,
     avgWordLen: totalWords ? chars / totalWords : 0,
     corrections,
     errorRate: messages ? corrections / messages : 0,
@@ -92,6 +93,12 @@ const unit = (x: number) => Math.max(0, Math.min(1, x));
  */
 export function estimateLevelV2(m: LevelMetrics): LevelEstimateV2 {
   // complexity: ~4 words/sentence (A1) → ~18 (C2); word length ~3.5 → ~6 chars.
+  // ponytail: one span for every language. A Han/kana word is 1–3 characters no
+  // matter how advanced the writer, so the word-length term reads low for
+  // Japanese and Chinese and their complexity score sits under a European
+  // learner's. It only nudges a self-reported level, so it is survivable —
+  // move the span onto the pack (a `metrics` block) when a CJK learner is
+  // visibly mis-levelled.
   const complexity = unit((m.avgSentenceLen - 4) / 14) * 0.6 + unit((m.avgWordLen - 3.5) / 2.5) * 0.4;
   // coverage: lexical variety + a bonus for a growing studied deck (caps at 100).
   const coverage = unit(m.typeTokenRatio / 0.6) * 0.6 + unit(m.deckSize / 100) * 0.4;

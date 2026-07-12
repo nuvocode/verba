@@ -25,6 +25,25 @@ export interface LanguagePack {
   speech: SpeechConfig;
 }
 
+/**
+ * Fold a pack's guidance into a prompt (empty string if none). Lives here, next
+ * to the pack contract, so every prompt module can reach it without importing
+ * prompts.ts — the pack is the only place language knowledge is written down,
+ * and every prompt that names the target language should carry it.
+ */
+export function packGuidance(pack?: LanguagePack): string {
+  if (!pack) return "";
+  return [
+    ``,
+    `Language notes for ${pack.name}:`,
+    ...pack.pronunciation.map((p) => `- Pronunciation: ${p}`),
+    ...pack.grammar.map((g) => `- Grammar: ${g}`),
+    pack.promptHint ? `- ${pack.promptHint}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export interface ValidationResult {
   ok: boolean;
   errors: string[];

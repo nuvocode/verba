@@ -110,8 +110,11 @@ export const BUNDLED_PACKS: LanguagePack[] = [
       "Particles mark role: は (topic), が (subject), を (object), に/で (place).",
       "Politeness is grammatical — choose です/ます or plain form and stay consistent.",
     ],
+    // The reader used to split target text on spaces, so this hint asked for
+    // spaced-out kana — Japanese that no Japanese person writes. lib/text now
+    // segments properly, so the pack can ask for the real language again.
     promptHint:
-      "Default to です/ます form. At A1–A2 write kana with spaces between words and gloss any kanji in parentheses; drop the spacing from B1.",
+      "Default to です/ます form. Write natural Japanese with no spaces between words. At A1–A2 keep kanji to the common ones and gloss each in parentheses on first use (学生(がくせい)); from B1 use kanji normally.",
     speech: { locale: "ja-JP", voiceHint: "Japanese" },
   },
 ];

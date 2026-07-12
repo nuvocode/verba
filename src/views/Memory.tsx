@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Settings } from "../lib/settings";
 import type { Day } from "../lib/useDay";
 import { allVocab, reviewVocab, type VocabRow } from "../lib/db";
+import { getPack } from "../lib/packs";
 import { cloze, strength, type Grade } from "../lib/srs";
 
 const GRADES: [string, Grade, string][] = [
@@ -31,13 +32,17 @@ export default function Memory({
   const [grades, setGrades] = useState<Grade[]>([]);
   const [error, setError] = useState("");
 
+  // The deck belongs to the language it was met in — switching language must not
+  // resurface the last one's cards.
+  const dir = getPack(settings.packId)?.direction ?? "ltr";
+
   const load = useCallback(async () => {
     try {
-      setWords(await allVocab());
+      setWords(await allVocab(settings.targetLang));
     } catch (e: any) {
       setError(String(e?.message ?? e));
     }
-  }, []);
+  }, [settings.targetLang]);
 
   useEffect(() => {
     void load();
@@ -121,7 +126,9 @@ export default function Memory({
               <div style={{ fontSize: 12.5, color: "var(--ink3)", marginBottom: 14 }}>
                 You met this {card.reps > 0 ? `${card.reps} review(s) ago` : "for the first time recently"}.
               </div>
-              <div className="cloze">{cloze(card.term, card.example)}</div>
+              <div className="cloze" dir={dir}>
+                {cloze(card.term, card.example)}
+              </div>
               <div style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 34 }}>
                 meaning: <span style={{ fontStyle: "italic" }}>{card.translation || "—"}</span>
               </div>
@@ -132,8 +139,12 @@ export default function Memory({
                 </button>
               ) : (
                 <div style={{ borderTop: "1px solid var(--line)", paddingTop: 24, animation: "vfade .25s ease both" }}>
-                  <div className="term">{card.term}</div>
-                  <div style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 28 }}>{card.example}</div>
+                  <div className="term" dir={dir}>
+                    {card.term}
+                  </div>
+                  <div dir={dir} style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 28 }}>
+                    {card.example}
+                  </div>
                   <div style={{ display: "flex", gap: 10 }}>
                     {GRADES.map(([label, g, kbd]) => (
                       <button key={g} className={`grade ${g === 0 ? "miss" : ""}`} onClick={() => void grade(g)}>
@@ -211,9 +222,13 @@ export default function Memory({
             const str = strength(w);
             return (
               <div className="wrow" key={w.id}>
-                <div className="term">{w.term}</div>
+                <div className="term" dir={dir}>
+                  {w.term}
+                </div>
                 <div className="gloss">{w.translation}</div>
-                <div className="ctx">“{w.example}”</div>
+                <div className="ctx" dir={dir}>
+                  “{w.example}”
+                </div>
                 <div className="bar">
                   <div className={str < 0.4 ? "weak" : ""} style={{ width: `${Math.round(str * 100)}%` }} />
                 </div>

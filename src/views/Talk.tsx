@@ -255,7 +255,11 @@ export default function Talk({
               {talk.msgs.map((m, i) => (
                 <div className={`msg ${m.role}`} key={i}>
                   <div className="who">{m.role === "ai" ? (m.isAsk ? "COACH · ASIDE" : "COACH") : "YOU"}</div>
-                  <div className="text">{m.text}</div>
+                  {/* A ⌘K aside is answered in the learner's own language, so it
+                      keeps the app's direction; everything else is target text. */}
+                  <div className="text" dir={m.isAsk ? undefined : talk.dir}>
+                    {m.text}
+                  </div>
 
                   {m.inline &&
                     m.corrections.map((c, j) => (
@@ -284,6 +288,7 @@ export default function Talk({
             <div className="bar">
               <div className="wrap">
                 <input
+                  dir={talk.dir}
                   value={talk.input}
                   onChange={(e) => talk.setInput(e.target.value)}
                   onKeyDown={(e) => {

@@ -3,6 +3,7 @@ import type { Settings } from "../lib/settings";
 import type { Day } from "../lib/useDay";
 import { getProvider } from "../lib/providers";
 import { weeklyReportPrompt, parseWeeklyReport, type WeeklyReport } from "../lib/coach";
+import { getPack } from "../lib/packs";
 import { CEFR_LEVELS } from "../lib/level";
 import { estimateLevelV2, metricsFromRow } from "../lib/metrics";
 import { activeDays, latestLevelSignal, recentMetricScores, recentMetrics, weekStats } from "../lib/db";
@@ -72,7 +73,11 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
           [
             {
               role: "user",
-              content: weeklyReportPrompt(settings, { ...stats, focusAreas: day.plan?.focus ?? [] }),
+              content: weeklyReportPrompt(
+                settings,
+                { ...stats, focusAreas: day.plan?.focus ?? [] },
+                getPack(settings.packId),
+              ),
             },
           ],
           { json: true },

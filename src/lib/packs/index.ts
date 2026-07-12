@@ -1,11 +1,11 @@
-import { type LanguagePack } from "./schema";
-import { BUNDLED_PACKS } from "./bundled";
-import { COMMUNITY_PACKS } from "./community";
-import { checkCompatibility, type PackOrigin, type RegisteredPack } from "./registry";
+import { type LanguagePack } from "./schema.ts";
+import { BUNDLED_PACKS } from "./bundled.ts";
+import { COMMUNITY_PACKS } from "./community.ts";
+import { checkCompatibility, type PackOrigin, type RegisteredPack } from "./registry.ts";
 
-export type { LanguagePack } from "./schema";
-export { validatePack, PACK_FORMAT_VERSION } from "./schema";
-export { checkCompatibility, originLabel, type PackOrigin, type RegisteredPack } from "./registry";
+export type { LanguagePack } from "./schema.ts";
+export { validatePack, PACK_FORMAT_VERSION } from "./schema.ts";
+export { checkCompatibility, originLabel, type PackOrigin, type RegisteredPack } from "./registry.ts";
 
 // ponytail: imported packs live in localStorage (paste-JSON in Settings), so
 // "loadable" works with zero new deps. Add @tauri-apps/plugin-fs + a file

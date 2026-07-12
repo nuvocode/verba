@@ -180,32 +180,40 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
     try {
       const provider = getProvider(settings);
-      const vocabRaw = await provider.chat([...history.current, { role: "user", content: vocabPrompt(settings) }], {
-        json: true,
-      });
+      const vocabRaw = await provider.chat(
+        [...history.current, { role: "user", content: vocabPrompt(settings, pack) }],
+        { json: true },
+      );
       const items = parseVocab(vocabRaw);
-      for (const it of items) await addVocab(it).catch(() => {});
+      for (const it of items) await addVocab(settings.targetLang, it).catch(() => {});
       words = items.map((i) => ({ term: i.term, translation: i.translation }));
 
-      const sumRaw = await provider.chat([...history.current, { role: "user", content: summaryPrompt(settings) }], {
-        json: true,
-      });
+      const sumRaw = await provider.chat(
+        [...history.current, { role: "user", content: summaryPrompt(settings, pack) }],
+        { json: true },
+      );
       summary = parseSummary(sumRaw);
       if (sessionId.current) await setSummary(sessionId.current, summary.summary).catch(() => {});
 
-      // Measured level signal (v2) — from the learner's own messages only.
+      // Measured level signal (v2) — from the learner's own messages only, cut
+      // into words and sentences by the target language's own rules.
       try {
-        const deckSize = (await vocabCounts()).total;
-        const m = computeMetrics(userTexts, { corrections: corrections.length, deckSize });
+        const deckSize = (await vocabCounts(settings.targetLang)).total;
+        const m = computeMetrics(userTexts, {
+          corrections: corrections.length,
+          deckSize,
+          locale: pack?.speech.locale,
+        });
         await saveMetrics(settings.targetLang, m, estimateLevelV2(m).score);
       } catch {
         /* metrics are best-effort */
       }
       // Soft AI level signal (v1).
       try {
-        const lvlRaw = await provider.chat([...history.current, { role: "user", content: levelPrompt(settings) }], {
-          json: true,
-        });
+        const lvlRaw = await provider.chat(
+          [...history.current, { role: "user", content: levelPrompt(settings, pack) }],
+          { json: true },
+        );
         const lvl = parseLevel(lvlRaw);
         if (lvl) {
           await saveLevelSignal(settings.targetLang, lvl);
@@ -221,7 +229,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       setBusy(false);
     }
     setReflection({ ...summary, turns: userTexts.length, corrections, words });
-  }, [scenario, busy, msgs, settings]);
+  }, [scenario, busy, msgs, settings, pack]);
 
   /** ⌘K → "ask the coach": a side question, answered in the learner's own language. */
   const ask = useCallback(
@@ -254,6 +262,8 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   return {
     scenario,
     scenarios: listScenarios(),
+    /** Writing direction of the target language — target text is laid out with it. */
+    dir: pack?.direction ?? "ltr",
     msgs,
     suggestions,
     input,

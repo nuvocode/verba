@@ -26,14 +26,16 @@ async function init(): Promise<Database> {
     );
     CREATE TABLE IF NOT EXISTS vocab (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      term TEXT NOT NULL UNIQUE,
+      lang TEXT NOT NULL,
+      term TEXT NOT NULL,
       translation TEXT,
       example TEXT,
       ease REAL NOT NULL,
       interval INTEGER NOT NULL,
       due INTEGER NOT NULL,
       reps INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      UNIQUE(lang, term)     -- the same spelling is a different card in a different language
     );
     CREATE TABLE IF NOT EXISTS reading_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,7 +81,50 @@ async function init(): Promise<Database> {
   // Added after the first release: the Coach breaks the composite back out into
   // its components, and that needs avg word length. Existing DBs get it here.
   await db.execute("ALTER TABLE session_metrics ADD COLUMN avg_word_len REAL NOT NULL DEFAULT 0").catch(() => {});
+  await migrateVocabToPerLanguage(db);
   return db;
+}
+
+/**
+ * v1 stored vocabulary as `term TEXT UNIQUE` with no language at all, so every
+ * language shared one deck: switching from Spanish to Japanese resurfaced the
+ * Spanish cards, and a term that exists in two languages (fr "pain", en "pain")
+ * silently kept only whichever was captured first. SQLite cannot drop a
+ * column-level UNIQUE, so the table has to be rebuilt.
+ *
+ * Existing rows are backfilled with the language the learner was actually
+ * studying (Settings.targetLang) — that is the language those cards came from.
+ */
+async function migrateVocabToPerLanguage(db: Database): Promise<void> {
+  const cols = await db.select<{ name: string }[]>("PRAGMA table_info(vocab)");
+  if (!cols.length || cols.some((c) => c.name === "lang")) return; // fresh DB, or already migrated
+
+  let lang = "";
+  try {
+    lang = JSON.parse(localStorage.getItem("verba.settings") ?? "{}").targetLang ?? "";
+  } catch {
+    /* no settings to read — the cards land under "" and the learner recaptures them */
+  }
+
+  await db.execute(`
+    ALTER TABLE vocab RENAME TO vocab_v1;
+    CREATE TABLE vocab (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lang TEXT NOT NULL,
+      term TEXT NOT NULL,
+      translation TEXT,
+      example TEXT,
+      ease REAL NOT NULL,
+      interval INTEGER NOT NULL,
+      due INTEGER NOT NULL,
+      reps INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE(lang, term)
+    );
+    INSERT INTO vocab (lang, term, translation, example, ease, interval, due, reps, created_at)
+      SELECT '${lang.replace(/'/g, "''")}', term, translation, example, ease, interval, due, reps, created_at FROM vocab_v1;
+    DROP TABLE vocab_v1;
+  `);
 }
 
 // ---- sessions & messages ----
@@ -145,30 +190,39 @@ export interface VocabRow {
   reps: number;
 }
 
-export async function addVocab(item: { term: string; translation: string; example: string }): Promise<void> {
+// Every read and write below is scoped to one language: a deck belongs to the
+// language it was met in, and switching language must not resurface the old one.
+
+export async function addVocab(
+  lang: string,
+  item: { term: string; translation: string; example: string },
+): Promise<void> {
   const db = await getDb();
   // INSERT OR IGNORE keeps existing SRS progress if the term was already captured.
   await db.execute(
-    `INSERT OR IGNORE INTO vocab (term, translation, example, ease, interval, due, reps, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [item.term, item.translation, item.example, newCard.ease, newCard.interval, Date.now(), newCard.reps, Date.now()],
+    `INSERT OR IGNORE INTO vocab (lang, term, translation, example, ease, interval, due, reps, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [lang, item.term, item.translation, item.example, newCard.ease, newCard.interval, Date.now(), newCard.reps, Date.now()],
   );
 }
 
-export async function dueVocab(now = Date.now()): Promise<VocabRow[]> {
+export async function dueVocab(lang: string, now = Date.now()): Promise<VocabRow[]> {
   const db = await getDb();
-  return db.select<VocabRow[]>("SELECT * FROM vocab WHERE due <= $1 ORDER BY due ASC", [now]);
+  return db.select<VocabRow[]>("SELECT * FROM vocab WHERE lang = $1 AND due <= $2 ORDER BY due ASC", [lang, now]);
 }
 
-export async function allVocab(): Promise<VocabRow[]> {
+export async function allVocab(lang: string): Promise<VocabRow[]> {
   const db = await getDb();
-  return db.select<VocabRow[]>("SELECT * FROM vocab ORDER BY created_at DESC");
+  return db.select<VocabRow[]>("SELECT * FROM vocab WHERE lang = $1 ORDER BY created_at DESC", [lang]);
 }
 
-export async function vocabCounts(now = Date.now()): Promise<{ total: number; due: number }> {
+export async function vocabCounts(lang: string, now = Date.now()): Promise<{ total: number; due: number }> {
   const db = await getDb();
-  const total = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM vocab");
-  const due = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM vocab WHERE due <= $1", [now]);
+  const total = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM vocab WHERE lang = $1", [lang]);
+  const due = await db.select<{ n: number }[]>(
+    "SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND due <= $2",
+    [lang, now],
+  );
   return { total: total[0]?.n ?? 0, due: due[0]?.n ?? 0 };
 }
 
@@ -374,7 +428,7 @@ export async function weekStats(
     "SELECT COUNT(*) AS n FROM messages WHERE role = 'user' AND created_at >= $1",
     [since],
   );
-  const vocabLearned = await one("SELECT COUNT(*) AS n FROM vocab WHERE created_at >= $1", [since]);
+  const vocabLearned = await one("SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND created_at >= $2", [lang, since]);
   const vocabReviewed = await one("SELECT COUNT(*) AS n FROM review_log WHERE created_at >= $1", [since]);
   const wordsPracticed = await one(
     "SELECT COALESCE(SUM(words),0) AS n FROM session_metrics WHERE lang = $1 AND created_at >= $2",

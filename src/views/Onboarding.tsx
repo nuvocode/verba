@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SKIP_DEFAULTS, type ProviderId, type Settings } from "../lib/settings";
-import { listPacks, packOrigin, originLabel } from "../lib/packs";
+import { getPack, listPacks, packOrigin, originLabel } from "../lib/packs";
 import { languages } from "../lib/langs";
 import { listModels, type LocalProvider } from "../lib/models";
 import { getProvider } from "../lib/providers";
@@ -189,7 +189,9 @@ export default function Onboarding({
     setTestErr("");
     try {
       const s = draft();
-      const raw = await getProvider(s).chat([{ role: "user", content: placementPrompt(s) }], { json: true });
+      const raw = await getProvider(s).chat([{ role: "user", content: placementPrompt(s, getPack(s.packId)) }], {
+        json: true,
+      });
       const qs = parsePlacement(raw);
       if (!qs) throw new Error("The model didn't return a usable test.");
       setQuiz(qs);

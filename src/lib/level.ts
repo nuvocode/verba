@@ -1,4 +1,5 @@
 import type { Settings } from "./settings";
+import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 
 // Level estimation v1 — self-reported CEFR (Settings) plus a soft AI signal
 // read off the learner's actual messages after a session. Deliberately framed
@@ -14,15 +15,18 @@ export interface LevelSignal {
 }
 
 /** Ask the model to estimate the learner's level from the conversation so far. */
-export function levelPrompt(s: Settings): string {
+export function levelPrompt(s: Settings, pack?: LanguagePack): string {
   return [
     `Estimate the learner's ${s.targetLang} level from their own messages in this conversation (ignore your own).`,
+    packGuidance(pack),
     s.cefr
       ? `Use the CEFR scale: ${CEFR_LEVELS.join(", ")}. Their self-reported level is ${s.cefr} — adjust only if the evidence is clear.`
       : // Onboarding was skipped — this conversation IS the placement, so judge on the evidence alone.
         `Use the CEFR scale: ${CEFR_LEVELS.join(", ")}. They never reported a level — place them purely on what they wrote.`,
     `Answer with ONLY a JSON object: { "estimate": "one of ${CEFR_LEVELS.join("/")}", "confidence": "low|medium|high", "rationale": "one short sentence in ${s.nativeLang}" }.`,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function parseLevel(raw: string): LevelSignal | null {

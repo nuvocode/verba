@@ -1,5 +1,6 @@
 import { CEFR_LEVELS, extractJson, type Cefr } from "./level.ts";
 import type { Settings } from "./settings.ts";
+import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 
 // The fixed placement stage of onboarding: a short written test the model writes,
 // the app grades locally. The learner can always overrule the result — it is a
@@ -15,15 +16,20 @@ export interface PlacementQ {
 /** One question per level, plus a second at A1/B1 — short enough that people finish it. */
 export const PLACEMENT_LADDER: Cefr[] = ["A1", "A1", "A2", "B1", "B1", "B2", "C1", "C2"];
 
-export function placementPrompt(s: Settings): string {
+export function placementPrompt(s: Settings, pack?: LanguagePack): string {
   return [
     `Write a ${PLACEMENT_LADDER.length}-question multiple-choice placement test in ${s.targetLang}.`,
+    // Without the pack the model picks its own script and register — a Japanese
+    // A1 question came back in unspaced kanji, which is not an A1 question.
+    packGuidance(pack),
     `The questions must follow this CEFR ladder, in order: ${PLACEMENT_LADDER.join(", ")}.`,
     `Each question tests grammar, vocabulary or idiom at exactly its level, has exactly 3 options, and exactly one correct option.`,
     `Write the questions and options in ${s.targetLang}; any instruction word goes in ${s.nativeLang}.`,
     `Vary which option is correct — do not always use the first.`,
     `Answer with ONLY a JSON object: { "questions": [ { "level": "A1", "prompt": "…", "options": ["…","…","…"], "answer": 0 } ] }`,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function parsePlacement(raw: string): PlacementQ[] | null {

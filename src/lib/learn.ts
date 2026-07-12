@@ -1,4 +1,5 @@
 import { level, type Settings } from "./settings.ts";
+import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 
 // Learning engine — turns the app's separate activities into one coherent daily
 // session. Everything a learner does in a day hangs off a single theme so the
@@ -131,9 +132,10 @@ function pickScenario(theme: string): string {
 }
 
 /** Prompt for the end-of-day recap that ties the whole session together. */
-export function recapPrompt(s: Settings, plan: DailyPlan, done: BlockKind[]): string {
+export function recapPrompt(s: Settings, plan: DailyPlan, done: BlockKind[], pack?: LanguagePack): string {
   return [
     `The learner just finished a daily ${s.targetLang} session themed "${plan.theme}" (level ${plan.level}).`,
+    packGuidance(pack),
     `They completed: ${done.join(", ") || "nothing"}.`,
     plan.focus.length ? `They are working on: ${plan.focus.join("; ")}.` : "",
     `Answer with ONLY a JSON object: { "recap": "2-3 encouraging sentences in ${s.nativeLang} on what they practised", "nextFocus": ["one short thing to work on tomorrow", ...] }.`,

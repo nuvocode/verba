@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Settings } from "./settings";
 import { getProvider } from "./providers";
 import { buildDailyPlan, recapPrompt, parseRecap, type BlockKind, type DailyPlan, type DayRecap } from "./learn";
+import { getPack } from "./packs";
 import { getDailySession, saveDailySession, latestRecap, vocabCounts } from "./db";
 
 /** Local YYYY-MM-DD — the day key the plan is stored under. */
@@ -49,7 +50,10 @@ export function useDay(settings: Settings): Day {
           return;
         }
         // No plan for today (or the learner switched language) — build a fresh one.
-        const [{ due }, prev] = await Promise.all([vocabCounts(), latestRecap(settings.targetLang, date)]);
+        const [{ due }, prev] = await Promise.all([
+          vocabCounts(settings.targetLang),
+          latestRecap(settings.targetLang, date),
+        ]);
         const fresh = buildDailyPlan(settings, { date, dueVocab: due, focus: prev?.nextFocus ?? [] });
         if (!live) return;
         setPlan(fresh);
@@ -100,7 +104,7 @@ export function useDay(settings: Settings): Day {
     };
     try {
       const raw = await getProvider(settings).chat(
-        [{ role: "user", content: recapPrompt(settings, plan, done) }],
+        [{ role: "user", content: recapPrompt(settings, plan, done, getPack(settings.packId)) }],
         { json: true },
       );
       result = parseRecap(raw);
