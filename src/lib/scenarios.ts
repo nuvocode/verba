@@ -83,7 +83,7 @@ export function validateScenario(raw: unknown): ScenarioValidation {
 
 // ---- importable scenarios (localStorage; same rationale as packs) ----
 
-const KEY = "speaksy.scenarios";
+const KEY = "verba.scenarios";
 
 function imported(): Scenario[] {
   try {

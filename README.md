@@ -1,4 +1,4 @@
-# ❄️ Speaksy
+# ❄️ Verba
 
 Local-first, provider-agnostic language-learning desktop app. Hold a full AI
 conversation — including **offline via Ollama** — with inline grammar
@@ -61,7 +61,7 @@ and drive it all by voice.
 
 ### License & sustainability
 
-Speaksy is **MIT** (see [LICENSE](./LICENSE)). We chose MIT over AGPL
+Verba is **MIT** (see [LICENSE](./LICENSE)). We chose MIT over AGPL
 deliberately: the whole point is that anyone can bundle a language, fork the
 app, or ship it inside their own tool with the least possible friction — the
 growth of **community packs** matters more than defending against closed forks.

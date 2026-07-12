@@ -135,7 +135,7 @@ export default function Onboarding({
   return (
     <div className="onb">
       <div className="mark">
-        Speaksy<span style={{ color: "var(--accent)" }}>.</span>
+        Verba<span style={{ color: "var(--accent)" }}>.</span>
       </div>
       {/* No skip on step 1: without a target language there is nothing to generate. */}
       {(step === 1 || step === 2) && (

@@ -46,7 +46,7 @@ export const level = (s: Settings) => s.cefr || "A2";
 /** What "Skip setup" from step 2 onward leaves behind: level unset, a short session, no interests. */
 export const SKIP_DEFAULTS = { cefr: "", dailyMinutes: 20, goals: [] as string[] };
 
-const KEY = "speaksy.settings";
+const KEY = "verba.settings";
 
 export const defaultSettings: Settings = {
   provider: "ollama",

@@ -25,7 +25,7 @@ export function weeklyReportPrompt(s: Settings, w: WeekStats): string {
     `- words practised: ${w.wordsPracticed}`,
     `- new vocabulary captured: ${w.vocabLearned}`,
     `- vocabulary cards reviewed: ${w.vocabReviewed}`,
-    // Speaksy is CEFR-based, not XP: never expose the raw composite as a number.
+    // Verba is CEFR-based, not XP: never expose the raw composite as a number.
     // Feed it only as a qualitative band relative to their CEFR level.
     w.avgLevelScore != null ? `- performance this week: ${scoreBand(w.avgLevelScore)} within ${level(s)}` : "",
     w.focusAreas.length ? `- recurring weak areas: ${w.focusAreas.join("; ")}` : "",

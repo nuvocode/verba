@@ -10,7 +10,7 @@ export { checkCompatibility, originLabel, type PackOrigin, type RegisteredPack }
 // ponytail: imported packs live in localStorage (paste-JSON in Settings), so
 // "loadable" works with zero new deps. Add @tauri-apps/plugin-fs + a file
 // picker when packs should load straight off disk.
-const KEY = "speaksy.packs";
+const KEY = "verba.packs";
 
 function imported(): LanguagePack[] {
   try {

@@ -9,7 +9,7 @@ export function getDb(): Promise<Database> {
 }
 
 async function init(): Promise<Database> {
-  const db = await Database.load("sqlite:speaksy.db");
+  const db = await Database.load("sqlite:verba.db");
   await db.execute(`
     CREATE TABLE IF NOT EXISTS sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

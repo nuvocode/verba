@@ -362,7 +362,7 @@ export default function SettingsView({
           Language packs <span>{importedCount} imported</span>
         </div>
         <div className="desc" style={{ marginBottom: 10 }}>
-          Paste a pack JSON to teach Speaksy a new language. Imported packs are unverified — nobody has reviewed them.
+          Paste a pack JSON to teach Verba a new language. Imported packs are unverified — nobody has reviewed them.
         </div>
         <textarea
           value={packJson}
@@ -375,7 +375,7 @@ export default function SettingsView({
       </div>
 
       <div style={{ fontSize: 12, color: "var(--ink3)", marginTop: 16 }}>
-        Speaksy is open source. Extensions are sandboxed content packs — see CONTRIBUTING.md for the format.
+        Verba is open source. Extensions are sandboxed content packs — see CONTRIBUTING.md for the format.
       </div>
     </div>
   );

@@ -1,8 +1,8 @@
-# Contributing to Speaksy
+# Contributing to Verba
 
 Thanks for helping build an open, local-first language-learning app. The most
 valuable contributions are **language packs** and **scenarios** — the content
-that makes Speaksy useful in a new language.
+that makes Verba useful in a new language.
 
 ## Pack provenance & the "Unverified" label
 

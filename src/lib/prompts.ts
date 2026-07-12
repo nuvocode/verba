@@ -21,7 +21,7 @@ export function packGuidance(pack?: LanguagePack): string {
 /** System prompt for a normal conversational turn. Model must return the turn JSON. */
 export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack): string {
   return [
-    `You are Speaksy, a warm and encouraging ${s.targetLang} conversation tutor.`,
+    `You are Verba, a warm and encouraging ${s.targetLang} conversation tutor.`,
     `The learner's native language is ${s.nativeLang}. Their self-reported level is ${level(s)}.`,
     `Scenario: ${scenario.setup}`,
     scenario.goals?.length ? `Help the learner practise these goals: ${scenario.goals.join("; ")}.` : "",

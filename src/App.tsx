@@ -243,7 +243,7 @@ export default function App() {
     <div className="shell">
       <div className="topbar">
         <button className="logo" onClick={() => go("today")}>
-          Speaksy<b>.</b>
+          Verba<b>.</b>
         </button>
         <div className="nav">
           {NAV.map(([label, key, kbd]) => (

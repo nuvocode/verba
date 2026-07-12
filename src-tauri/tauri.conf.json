@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Speaksy",
+  "productName": "Verba",
   "version": "0.1.0",
-  "identifier": "com.nuvocode.speaksy",
+  "identifier": "com.nuvocode.verba",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Speaksy",
+        "title": "Verba",
         "width": 1040,
         "height": 720,
         "minWidth": 800,
