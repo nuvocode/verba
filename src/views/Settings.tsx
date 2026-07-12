@@ -1,11 +1,6 @@
 import { useState } from "react";
-import {
-  isLocalProvider,
-  type CorrectionTiming,
-  type ProviderId,
-  type Settings,
-  type SpeechEngine,
-} from "../lib/settings";
+import { isLocalProvider, type CorrectionTiming, type ProviderId, type Settings } from "../lib/settings";
+import { listenBlocker } from "../lib/speech";
 import { importPack, listPacks, originLabel, packOrigin, registry, removeImportedPack } from "../lib/packs";
 import { importScenario, listScenarios } from "../lib/scenarios";
 
@@ -55,24 +50,6 @@ const PROVIDERS: {
   },
 ];
 
-const SPEECH: { id: SpeechEngine; name: string; local: boolean; desc: string; key?: keyof Settings }[] = [
-  { id: "web", name: "System speech", local: true, desc: "Your OS dictation and voices. Offline, quality varies." },
-  {
-    id: "elevenlabs",
-    name: "ElevenLabs",
-    local: false,
-    desc: "Most natural tutor voice. API key required.",
-    key: "elevenLabsKey",
-  },
-  {
-    id: "deepgram",
-    name: "Deepgram",
-    local: false,
-    desc: "Sharper speech recognition. API key required.",
-    key: "deepgramKey",
-  },
-];
-
 const NAV: [string, string][] = [
   ["language", "Language"],
   ["offline", "Offline"],
@@ -103,8 +80,8 @@ export default function SettingsView({
 
   const packs = listPacks();
   const active = PROVIDERS.find((p) => p.id === settings.provider);
-  const speechCfg = SPEECH.find((s) => s.id === settings.speechEngine);
   const importedCount = registry().filter((r) => r.origin === "imported").length;
+  const micBlocked = listenBlocker(settings);
 
   function tryImport(kind: "pack" | "scenario") {
     setErr("");
@@ -241,7 +218,6 @@ export default function SettingsView({
           // every call — fall back to the local default instead of failing later.
           const patch: Partial<Settings> = { offline };
           if (offline && !isLocalProvider(settings.provider)) patch.provider = "ollama";
-          if (offline && settings.speechEngine !== "web") patch.speechEngine = "web";
           onChange(patch);
         },
       )}
@@ -302,37 +278,34 @@ export default function SettingsView({
         </div>
       )}
 
-      {/* ---- speech ---- */}
+      {/* ---- speech ----
+           Two independent halves, not rival engines: ElevenLabs only speaks and
+           Deepgram only listens. A key means "use it"; empty falls back to the OS
+           voices for TTS, and to nothing for STT — no webview ships a recogniser. */}
       <div className="sec" id="speech">Speech</div>
-      {SPEECH.map((s) => {
-        const disabled = settings.offline && !s.local;
-        return (
-          <button
-            key={s.id}
-            className={`srow ${disabled ? "off" : ""}`}
-            disabled={disabled}
-            onClick={() => onChange({ speechEngine: s.id })}
-          >
-            <div className={`radio ${settings.speechEngine === s.id ? "on" : ""}`} />
-            <div style={{ flex: 1 }}>
-              <div className="name">
-                {s.name} <span>{s.local ? "● local" : "☁ cloud"}</span>
-              </div>
-              <div className="desc">{s.desc}</div>
-            </div>
-          </button>
-        );
-      })}
-      {speechCfg?.key && (
-        <div className="field" style={{ marginTop: 10 }}>
-          <label>API key</label>
-          <input
-            type="password"
-            value={String(settings[speechCfg.key])}
-            onChange={(e) => onChange({ [speechCfg.key!]: e.target.value } as Partial<Settings>)}
-          />
-        </div>
-      )}
+      <div className="field">
+        <label>Voice — ElevenLabs key {settings.offline && <span>· disabled offline</span>}</label>
+        <input
+          type="password"
+          disabled={settings.offline}
+          placeholder="Empty → your system voices"
+          value={settings.elevenLabsKey}
+          onChange={(e) => onChange({ elevenLabsKey: e.target.value })}
+        />
+      </div>
+      <div className="field">
+        <label>Dictation — Deepgram key {settings.offline && <span>· disabled offline</span>}</label>
+        <input
+          type="password"
+          disabled={settings.offline}
+          placeholder="Required — the mic does not work without it"
+          value={settings.deepgramKey}
+          onChange={(e) => onChange({ deepgramKey: e.target.value })}
+        />
+      </div>
+      <div className="desc" style={{ marginBottom: 14 }}>
+        {micBlocked || "Microphone ready — click ◉ in Talk to speak, click again to send."}
+      </div>
       {toggleRow(
         "Read replies aloud",
         "The coach speaks each turn as it arrives.",

@@ -305,7 +305,7 @@ export default function Talk({
                 />
                 {talk.listening && (
                   <div className="listening">
-                    <em>Listening…</em>
+                    <em>{talk.micPhase === "transcribing" ? "Transcribing…" : "Listening… (click ◉ when done)"}</em>
                     <i />
                     <i />
                     <i />

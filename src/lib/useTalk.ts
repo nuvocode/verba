@@ -16,7 +16,7 @@ import { BUNDLED_SCENARIOS, listScenarios, type Scenario } from "./scenarios";
 import { getPack } from "./packs";
 import { levelPrompt, parseLevel } from "./level";
 import { computeMetrics, estimateLevelV2 } from "./metrics";
-import { getSpeech } from "./speech";
+import { getSpeech, listenBlocker } from "./speech";
 import { addMessage, addVocab, createSession, setSummary, saveLevelSignal, saveMetrics, vocabCounts } from "./db";
 
 export interface TalkMsg {
@@ -46,7 +46,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [listening, setListening] = useState(false);
+  // Cloud STT has two phases the learner can feel: the mic is open, then the clip
+  // is in flight. One "Listening…" bar covering both is a lie for the second half.
+  const [micPhase, setMicPhase] = useState<"" | "recording" | "transcribing">("");
   const [error, setError] = useState("");
   const [reflecting, setReflecting] = useState(false);
   const [reflection, setReflection] = useState<Reflection | null>(null);
@@ -57,7 +59,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   const pack = getPack(settings.packId);
   const speech = useMemo(
     () => getSpeech(settings),
-    [settings.speechEngine, settings.elevenLabsKey, settings.deepgramKey],
+    [settings.offline, settings.elevenLabsKey, settings.deepgramKey],
   );
 
   const userTurns = msgs.filter((m) => m.role === "user" && !m.isAsk).length;
@@ -152,20 +154,29 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     [busy, scenario, msgs.length, settings, say],
   );
 
+  /** Push-to-talk: click to open the mic, click again to stop and transcribe. */
   const mic = useCallback(async () => {
-    if (busy || listening) return speech.cancel();
-    if (!speech.canListen) return setError("Speech recognition is not available in this webview.");
+    if (busy) return;
+    if (micPhase === "recording") {
+      // Stops the recorder, which resolves the listen() promise still awaited below.
+      setMicPhase("transcribing");
+      return speech.cancel();
+    }
+    if (micPhase) return; // a clip is already in flight
+    const blocked = listenBlocker(settings);
+    if (blocked) return setError(blocked);
+
     setError("");
-    setListening(true);
+    setMicPhase("recording");
     try {
       const heard = await speech.listen(pack?.speech.locale);
       if (heard.trim()) setInput(heard);
     } catch (e: any) {
       setError(String(e?.message ?? e));
     } finally {
-      setListening(false);
+      setMicPhase("");
     }
-  }, [busy, listening, speech, pack]);
+  }, [busy, micPhase, speech, pack, settings]);
 
   /** Close the session: capture vocabulary, summarise, and record the level signals. */
   const end = useCallback(async () => {
@@ -269,7 +280,8 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     input,
     setInput,
     busy,
-    listening,
+    listening: micPhase !== "",
+    micPhase,
     error,
     reflecting,
     reflection,

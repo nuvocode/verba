@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Without this key macOS kills the process the moment getUserMedia is called,
+       rather than returning a permission error. tauri-build embeds it into the
+       dev binary too, so `tauri dev` gets the same prompt as the bundled app. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Verba records your speaking practice so it can be transcribed and corrected.</string>
+</dict>
+</plist>

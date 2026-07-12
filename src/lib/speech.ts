@@ -1,13 +1,17 @@
-// Offline speech loop: speak (TTS) → listen (STT) → respond → speak.
+// The speech loop: speak (TTS) → listen (STT) → respond → speak.
 //
-// The default adapter uses the webview's native SpeechSynthesis + Speech-
-// Recognition — zero dependencies and genuinely offline for TTS on macOS.
+// TTS and STT are separate halves, not competing "engines". No webview ships a
+// usable SpeechRecognition (WKWebView has none at all, WebView2 needs a Google
+// key), so dictation is Deepgram or nothing; TTS works offline via the OS voices
+// and ElevenLabs is the upgrade. Each half is picked independently — the old
+// single radio forced ElevenLabs users onto a recogniser that does not exist.
 //
 // ponytail: Whisper (STT) and Piper/Kokoro (TTS) are the real offline upgrade,
 // but they need a bundled sidecar binary + a Rust `#[tauri::command]` to shell
-// out to it — far more than a few lines and no binary to ship here. The
-// adapter seam below is the whole integration point: implement `listen`/`speak`
-// against a Tauri `invoke("transcribe"|"synthesize", …)` when the sidecar lands.
+// out to it. The seams below are the whole integration point: implement a `Stt`/
+// `Tts` against a Tauri `invoke("transcribe"|"synthesize", …)` when it lands.
+
+import { fetch } from "@tauri-apps/plugin-http";
 
 export interface SpeakOptions {
   locale?: string; // BCP-47, e.g. "es-ES"
@@ -15,19 +19,29 @@ export interface SpeakOptions {
   rate?: number; // 0.1–10, default ~0.95 for learners
 }
 
-export interface SpeechAdapter {
+/** Text → audio. */
+export interface Tts {
   canSpeak: boolean;
-  canListen: boolean;
   speak(text: string, opts?: SpeakOptions): Promise<void>;
-  /** Resolve with the recognised transcript in the given locale. */
+  cancel(): void;
+}
+
+/** Audio → text. `listen` resolves when `cancel` stops the recording. */
+export interface Stt {
+  canListen: boolean;
   listen(locale?: string): Promise<string>;
   cancel(): void;
 }
 
+export type SpeechAdapter = Tts & Stt;
+
 const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
-// Chrome/WebKit expose SpeechRecognition under a webkit prefix.
+// Chrome/WebKit expose SpeechRecognition under a webkit prefix. Present in no
+// Tauri webview today — kept as a feature-detect so it lights up if one gains it.
 const Recognition: any =
   typeof window !== "undefined" ? (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition : undefined;
+
+const hasMic = () => typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
 
 /** "pt-BR" → "pt". The language subtag, which is all some APIs accept. */
 const baseLang = (locale?: string) => (locale ?? "").split(/[-_]/)[0].toLowerCase();
@@ -51,7 +65,7 @@ function pickVoice(locale?: string, hint?: string): SpeechSynthesisVoice | undef
   return pool[0] ?? voices[0];
 }
 
-/** Native webview speech adapter. */
+/** The OS voices + whatever recogniser the webview has (in practice: none). */
 export function webSpeech(): SpeechAdapter {
   let recognition: any = null;
   return {
@@ -75,7 +89,7 @@ export function webSpeech(): SpeechAdapter {
 
     listen(locale) {
       return new Promise((resolve, reject) => {
-        if (!Recognition) return reject(new Error("Speech recognition is not available in this webview."));
+        if (!Recognition) return reject(new Error("This webview has no speech recognition."));
         recognition = new Recognition();
         recognition.lang = locale ?? "en-US";
         recognition.interimResults = false;
@@ -97,51 +111,56 @@ export function webSpeech(): SpeechAdapter {
 // Chrome loads voices asynchronously; kick a load so the first speak() has them.
 if (synth) synth.getVoices();
 
-// ---- cloud speech adapters (Phase 3) ----
-//
-// ElevenLabs (TTS) and Deepgram (STT) each cover one half of the loop, so each
-// adapter fills the other half from the native webView. They call the vendor
-// APIs through @tauri-apps/plugin-http (no browser CORS), record via
-// MediaRecorder, and play via a blob URL.
-// ponytail: fixed multilingual model + default voice — expose voice/model
-// pickers when someone actually wants to tune them.
+// ---- cloud speech ----
 
-import { fetch } from "@tauri-apps/plugin-http";
+/**
+ * Record until `onStart`'s recorder is stopped — push-to-talk, not a fixed
+ * window. A learner mid-sentence at second 6 was the old behaviour; the cap is
+ * only there so a mic left open doesn't record until the heat death.
+ */
+function record(onStart: (r: MediaRecorder) => void, maxMs = 60_000): Promise<Blob> {
+  return new Promise(async (resolve, reject) => {
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e: any) {
+      // macOS denies here when the user said no to the mic prompt (or Info.plist
+      // lacks NSMicrophoneUsageDescription, in which case we never even get here).
+      return reject(new Error(`Microphone unavailable: ${e?.message ?? e}. Check System Settings → Privacy → Microphone.`));
+    }
+    const rec = new MediaRecorder(stream);
+    const chunks: BlobPart[] = [];
+    const done = () => stream.getTracks().forEach((t) => t.stop());
+    const cap = setTimeout(() => rec.state !== "inactive" && rec.stop(), maxMs);
 
-/** Record a short mic clip and resolve with the audio Blob (webm/opus). */
-async function recordClip(ms = 6000): Promise<Blob> {
-  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia)
-    throw new Error("Microphone capture is not available in this webview.");
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const rec = new MediaRecorder(stream);
-  const chunks: BlobPart[] = [];
-  return new Promise((resolve, reject) => {
     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     rec.onstop = () => {
-      stream.getTracks().forEach((t) => t.stop());
+      clearTimeout(cap);
+      done();
       resolve(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
     };
-    rec.onerror = (e: any) => reject(new Error(e?.error?.message ?? "recording error"));
+    rec.onerror = (e: any) => {
+      clearTimeout(cap);
+      done();
+      reject(new Error(e?.error?.message ?? "recording error"));
+    };
     rec.start();
-    setTimeout(() => rec.state !== "inactive" && rec.stop(), ms);
+    onStart(rec);
   });
 }
 
-/** ElevenLabs TTS; STT falls back to the native webview recogniser. */
-export function elevenLabs(apiKey: string, voiceId = "21m00Tcm4TlvDq8ikWAM"): SpeechAdapter {
-  const web = webSpeech();
+/** ElevenLabs text-to-speech. */
+export function elevenLabs(apiKey: string, voiceId = "21m00Tcm4TlvDq8ikWAM"): Tts {
+  let audio: HTMLAudioElement | null = null;
   return {
     canSpeak: true,
-    canListen: web.canListen,
-    // `opts` used to be dropped on the floor here: the adapter never saw the
-    // pack's locale, so every language was synthesised as whatever the model
-    // guessed from the text. Turbo v2.5 takes an explicit language_code (ISO
-    // 639-1); multilingual_v2 refuses it, which is why the model changed.
-    // ponytail: the voice is still one fixed multilingual voice, so an Arabic
-    // sentence comes out accented. Per-pack voice ids are the upgrade — add a
-    // `speech.elevenVoiceId` to the pack schema when someone asks for it.
+    // Turbo v2.5 takes an explicit language_code (ISO 639-1) and multilingual_v2
+    // refuses it — without one the model just guesses the language from the text.
+    // ponytail: one fixed multilingual voice, so e.g. Arabic comes out accented.
+    // Per-pack voice ids are the upgrade — add `speech.elevenVoiceId` to the pack
+    // schema when someone asks for it.
     async speak(text, opts = {}) {
-      if (!apiKey) throw new Error("ElevenLabs API key is not set (Settings).");
+      if (!apiKey) throw new Error("ElevenLabs API key is not set (Settings → Speech).");
       if (!text.trim()) return;
       const lang = baseLang(opts.locale);
       const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
@@ -154,45 +173,51 @@ export function elevenLabs(apiKey: string, voiceId = "21m00Tcm4TlvDq8ikWAM"): Sp
         }),
       });
       if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${await res.text()}`);
-      const buf = await res.arrayBuffer();
-      const url = URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }));
-      const audio = new Audio(url);
+      const url = URL.createObjectURL(new Blob([await res.arrayBuffer()], { type: "audio/mpeg" }));
+      audio = new Audio(url);
+      const a = audio;
       await new Promise<void>((resolve) => {
-        audio.onended = audio.onerror = () => {
+        a.onended = a.onerror = () => {
           URL.revokeObjectURL(url);
           resolve();
         };
-        audio.play().catch(() => resolve());
+        a.play().catch(() => resolve());
       });
     },
-    listen: (locale) => web.listen(locale),
-    cancel: () => web.cancel(),
+    cancel() {
+      audio?.pause();
+      audio = null;
+    },
   };
 }
 
-/** Deepgram STT; TTS falls back to the native webview synthesiser. */
-export function deepgram(apiKey: string): SpeechAdapter {
-  const web = webSpeech();
+/** Deepgram speech-to-text. Records until `cancel()`, then transcribes the clip. */
+export function deepgram(apiKey: string): Stt {
+  let rec: MediaRecorder | null = null;
   return {
-    canSpeak: web.canSpeak,
-    canListen: typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia,
-    speak: (text, opts) => web.speak(text, opts),
-    async listen(locale) {
-      if (!apiKey) throw new Error("Deepgram API key is not set (Settings).");
-      const clip = await recordClip();
-      const audio = await clip.arrayBuffer();
+    canListen: hasMic(),
 
-      const transcribe = async (lang: string) =>
+    async listen(locale) {
+      if (!apiKey) throw new Error("Deepgram API key is not set (Settings → Speech).");
+      const clip = await record((r) => (rec = r));
+      rec = null;
+      if (!clip.size) return "";
+
+      // WebKit's MediaRecorder hands back "audio/mp4;codecs=mp4a.40.2"; Deepgram
+      // sniffs the container itself but chokes on the codecs parameter, so send
+      // the bare mime type.
+      const mime = clip.type.split(";")[0] || "audio/webm";
+      const audio = await clip.arrayBuffer();
+      const transcribe = (lang: string) =>
         fetch(`https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&language=${lang}`, {
           method: "POST",
-          headers: { Authorization: `Token ${apiKey}`, "Content-Type": clip.type },
+          headers: { Authorization: `Token ${apiKey}`, "Content-Type": mime },
           body: audio,
         });
 
-      // Nova-3 recognises regional tags for some languages (pt-BR, pt-PT, es-419,
-      // fr-CA) and only the base tag for others (ja, de, "es-ES" is not a thing).
-      // Ask for the pack's exact locale, fall back to the language on a reject —
-      // the old code just truncated to two letters and threw pt-BR away.
+      // Nova-3 takes regional tags for some languages (pt-BR, pt-PT, es-419, fr-CA)
+      // and only the base tag for others (ja, de — "es-ES" is not a thing). Ask for
+      // the pack's exact locale, fall back to the language on a reject.
       const wanted = (locale ?? "en-US").replace("_", "-");
       let res = await transcribe(wanted);
       if (!res.ok && baseLang(wanted) !== wanted) res = await transcribe(baseLang(wanted));
@@ -200,17 +225,42 @@ export function deepgram(apiKey: string): SpeechAdapter {
       const data = await res.json();
       return data.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";
     },
-    cancel: () => web.cancel(),
+
+    cancel() {
+      if (rec && rec.state !== "inactive") rec.stop(); // resolves the pending listen()
+    },
   };
 }
 
-/** Pick the speech adapter for the current settings. Cloud engines need a key. */
-export function getSpeech(s: {
-  speechEngine?: string;
+export interface SpeechSettings {
+  offline?: boolean;
   elevenLabsKey?: string;
   deepgramKey?: string;
-}): SpeechAdapter {
-  if (s.speechEngine === "elevenlabs" && s.elevenLabsKey) return elevenLabs(s.elevenLabsKey);
-  if (s.speechEngine === "deepgram" && s.deepgramKey) return deepgram(s.deepgramKey);
-  return webSpeech();
+}
+
+/** Why the mic is dead, in words a learner can act on. "" when it works. */
+export function listenBlocker(s: SpeechSettings): string {
+  if (webSpeech().canListen) return "";
+  if (s.offline) return "Dictation needs Deepgram, a cloud service. Turn Offline mode off in Settings to use it.";
+  if (!s.deepgramKey) return "Dictation needs a Deepgram API key (Settings → Speech) — this webview has no built-in speech recognition.";
+  if (!hasMic()) return "No microphone is available to this app.";
+  return "";
+}
+
+/** Compose the two halves independently. Offline mode pins both to the OS. */
+export function getSpeech(s: SpeechSettings): SpeechAdapter {
+  const web = webSpeech();
+  const cloud = !s.offline;
+  const tts: Tts = cloud && s.elevenLabsKey ? elevenLabs(s.elevenLabsKey) : web;
+  const stt: Stt = cloud && s.deepgramKey ? deepgram(s.deepgramKey) : web;
+  return {
+    canSpeak: tts.canSpeak,
+    canListen: stt.canListen,
+    speak: (text, opts) => tts.speak(text, opts),
+    listen: (locale) => stt.listen(locale),
+    cancel() {
+      tts.cancel();
+      stt.cancel();
+    },
+  };
 }

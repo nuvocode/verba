@@ -1,7 +1,6 @@
 import { detectNativeLang } from "./langs.ts";
 
 export type ProviderId = "ollama" | "openai" | "anthropic" | "gemini" | "openrouter" | "lmstudio";
-export type SpeechEngine = "web" | "elevenlabs" | "deepgram";
 /** When a correction is shown inline: as it happens, only when severe, or only at reflection. */
 export type CorrectionTiming = "adaptive" | "live" | "delayed";
 
@@ -28,9 +27,11 @@ export interface Settings {
   cefr: string; // self-reported level (A1–C2), "" until the first conversation places them
   packId: string; // active language pack (see lib/packs) — "" for none
   speak: boolean; // read AI replies / reading text aloud (TTS)
-  speechEngine: SpeechEngine; // TTS/STT backend — web (offline) or a cloud API
-  elevenLabsKey: string;
-  deepgramKey: string;
+  // The two halves of speech are picked independently: a key means "use it",
+  // empty means the OS voices (TTS) or no dictation at all (STT — no webview
+  // ships a recogniser). Offline mode pins both to the OS regardless.
+  elevenLabsKey: string; // TTS
+  deepgramKey: string; // STT
   onboarded: boolean; // false → the welcome flow runs instead of the app
   dailyMinutes: number; // how long a session should be, from onboarding
   goals: string[]; // why they're learning — steers scenarios and reading topics; may be empty
@@ -81,7 +82,6 @@ export const defaultSettings: Settings = {
   cefr: "B1",
   packId: "es",
   speak: true,
-  speechEngine: "web",
   elevenLabsKey: "",
   deepgramKey: "",
   onboarded: false,
