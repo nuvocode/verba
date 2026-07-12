@@ -278,8 +278,15 @@ input { font: inherit; }
 .weak p { font-size: 13px; color: var(--ink2); line-height: 1.6; margin: 0; }
 
 /* ---------- settings ---------- */
-.set { max-width: 720px; margin: 0 auto; padding: 64px 32px 90px; }
+.set { max-width: 900px; margin: 0 auto; padding: 64px 32px 90px; display: grid; grid-template-columns: 128px minmax(0, 1fr); column-gap: 40px; align-content: start; }
+.set > *:not(.setnav) { grid-column: 2; } /* nav owns column 1; everything else stacks in column 2 */
 .set h1 { font-size: 40px; margin: 12px 0 44px; }
+/* span 99: a sticky grid item can only travel inside its own grid area, and `-1` can't address implicit rows */
+.setnav { grid-column: 1; grid-row: 1 / span 99; position: sticky; top: 24px; align-self: start; display: flex; flex-direction: column; gap: 1px; }
+.setnav button { font-size: 12px; color: var(--ink3); text-align: left; padding: 5px 8px; border-radius: 6px; width: 100%; }
+.setnav button:hover { color: var(--ink); background: var(--surface); }
+.set .sec { scroll-margin-top: 24px; }
+@media (max-width: 860px) { .set { grid-template-columns: 1fr; } .setnav { display: none; } }
 .srow { display: flex; align-items: center; gap: 16px; padding: 15px 4px; border-bottom: 1px solid var(--line2); width: 100%; text-align: left; }
 .srow:hover { background: var(--surface); }
 .srow.off { opacity: .45; cursor: not-allowed; }

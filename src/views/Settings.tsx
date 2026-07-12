@@ -73,6 +73,15 @@ const SPEECH: { id: SpeechEngine; name: string; local: boolean; desc: string; ke
   },
 ];
 
+const NAV: [string, string][] = [
+  ["language", "Language"],
+  ["offline", "Offline"],
+  ["provider", "AI Provider"],
+  ["speech", "Speech"],
+  ["coaching", "Coaching"],
+  ["extensions", "Extensions"],
+];
+
 const TIMINGS: [CorrectionTiming, string, string][] = [
   ["adaptive", "Adaptive", "Interrupt only for mistakes that break meaning; the rest wait for the reflection."],
   ["live", "Live", "Show every correction the moment it happens."],
@@ -142,6 +151,17 @@ export default function SettingsView({
 
   return (
     <div className="set fade">
+      <nav className="setnav">
+        {NAV.map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
       <div className="eyebrow">Settings</div>
       <h1 className="display">Yours to run anywhere.</h1>
 
@@ -153,7 +173,7 @@ export default function SettingsView({
       {err && <div className="err">{err}</div>}
 
       {/* ---- language ---- */}
-      <div className="sec">Language</div>
+      <div className="sec" id="language">Language</div>
       {packs.map((p) => {
         const origin = packOrigin(p.id);
         return (
@@ -210,7 +230,7 @@ export default function SettingsView({
       </div>
 
       {/* ---- offline ---- */}
-      <div className="sec">Offline mode</div>
+      <div className="sec" id="offline">Offline mode</div>
       {toggleRow(
         "Never leave this machine",
         "Forces local providers only. Cloud options are disabled and no learner data ever leaves your device.",
@@ -227,7 +247,7 @@ export default function SettingsView({
       )}
 
       {/* ---- provider ---- */}
-      <div className="sec">AI Provider</div>
+      <div className="sec" id="provider">AI Provider</div>
       {PROVIDERS.map((p) => {
         const local = isLocalProvider(p.id);
         const disabled = settings.offline && !local;
@@ -283,7 +303,7 @@ export default function SettingsView({
       )}
 
       {/* ---- speech ---- */}
-      <div className="sec">Speech</div>
+      <div className="sec" id="speech">Speech</div>
       {SPEECH.map((s) => {
         const disabled = settings.offline && !s.local;
         return (
@@ -321,7 +341,7 @@ export default function SettingsView({
       )}
 
       {/* ---- coaching ---- */}
-      <div className="sec">Coaching</div>
+      <div className="sec" id="coaching">Coaching</div>
       {TIMINGS.map(([id, name, desc]) => (
         <button key={id} className="srow" onClick={() => onChange({ correctionTiming: id })}>
           <div className={`radio ${settings.correctionTiming === id ? "on" : ""}`} />
@@ -339,7 +359,7 @@ export default function SettingsView({
       )}
 
       {/* ---- extensions ---- */}
-      <div className="sec">Community extensions</div>
+      <div className="sec" id="extensions">Community extensions</div>
       <div style={{ padding: "15px 4px", borderBottom: "1px solid var(--line2)" }}>
         <div className="name">
           Scenarios <span>{listScenarios().length} installed</span>
