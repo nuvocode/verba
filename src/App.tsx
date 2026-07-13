@@ -32,6 +32,8 @@ const PROVIDER_NAMES: Record<string, string> = {
   openrouter: "OpenRouter",
 };
 
+const isSettingsHash = () => window.location.hash.startsWith("#settings");
+
 interface PaletteItem {
   section?: string;
   label: string;
@@ -41,7 +43,9 @@ interface PaletteItem {
 
 export default function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
-  const [space, setSpace] = useState<Space>(() => (loadSettings().onboarded ? "today" : "onboarding"));
+  const [space, setSpace] = useState<Space>(() =>
+    !loadSettings().onboarded ? "onboarding" : isSettingsHash() ? "settings" : "today",
+  );
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [pIdx, setPIdx] = useState(0);
@@ -72,6 +76,17 @@ export default function App() {
   const go = useCallback((s: Space) => {
     setSpace(s);
     setPaletteOpen(false);
+    // #settings/speech names a panel, not a place to come back to — leaving Settings
+    // drops it, or the next reload would land on Settings instead of Today.
+    if (s !== "settings" && isSettingsHash()) window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+
+  // A link to #settings/<panel> — the speech fallback notice is one — opens Settings.
+  // Which panel is Settings' own business; it reads the same hash.
+  useEffect(() => {
+    const onHash = () => isSettingsHash() && setSpace("settings");
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   /** Launch a block from the day's plan — each kind knows which space it opens. */

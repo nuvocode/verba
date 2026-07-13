@@ -285,7 +285,7 @@ input { font: inherit; }
 .setnav { grid-column: 1; grid-row: 1 / span 99; position: sticky; top: 24px; align-self: start; display: flex; flex-direction: column; gap: 1px; }
 .setnav button { font-size: 12px; color: var(--ink3); text-align: left; padding: 5px 8px; border-radius: 6px; width: 100%; }
 .setnav button:hover { color: var(--ink); background: var(--surface); }
-.set .sec { scroll-margin-top: 24px; }
+.setnav button.on { color: var(--accent); background: var(--surface); font-weight: 500; }
 @media (max-width: 860px) { .set { grid-template-columns: 1fr; } .setnav { display: none; } }
 .srow { display: flex; align-items: center; gap: 16px; padding: 15px 4px; border-bottom: 1px solid var(--line2); width: 100%; text-align: left; }
 .srow:hover { background: var(--surface); }

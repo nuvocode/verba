@@ -4,7 +4,7 @@
 // which is exactly the macOS-webview situation this code exists to survive.
 // Run: node --experimental-strip-types src/lib/speech.check.ts
 import assert from "node:assert";
-import { getSpeech, listenBlocker } from "./speech.ts";
+import { deepgramHelp, getSpeech, listenBlocker } from "./speech.ts";
 
 // --- the original bug: an ElevenLabs key must not decide dictation ---
 // The old single-radio design made these mutually exclusive, so picking
@@ -111,5 +111,14 @@ await orphan.speak("otra vez");
 assert.equal(gone.length, 1, "a missing model must warn once, not once per turn");
 assert.match(gone[0], /Bundled voice unavailable/, "the banner names the tier that went away");
 assert.match(gone[0], /system voice/, "…and says what spoke instead");
+
+// --- what the Deepgram field promises, in tier order ---
+// The bug this fixes: the field said "required" while a bundled Whisper model was
+// already doing the listening, which reads as "pay up or no mic".
+assert.match(deepgramHelp({}, true), /^Optional/, "a bundled Whisper model outranks the key");
+assert.match(deepgramHelp(local, true), /Whisper/, "…and outranks a local server too");
+assert.match(deepgramHelp(local, false), /local server/, "no Whisper, but a server: still optional");
+assert.match(deepgramHelp({ localSpeech: true }, false), /^Required/, "a server with no URL is no server");
+assert.match(deepgramHelp({}, false), /^Required/, "neither: the key is the only way the mic works");
 
 console.log("speech.check: ok");

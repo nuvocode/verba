@@ -455,6 +455,22 @@ export function listenBlocker(s: SpeechSettings): string {
 }
 
 /**
+ * What the Deepgram key is actually worth, in the order the tiers are walked:
+ * bundled, then local, then this. "Required" is a lie the moment either of the
+ * first two is there — the mic works without a key, and telling a learner
+ * otherwise sells them a cloud account they do not need.
+ *
+ * `whisperReady` is asked for rather than read off the settings: a model *chosen*
+ * is not a model still *on disk*, and only the caller holding the install index
+ * knows the difference.
+ */
+export function deepgramHelp(s: SpeechSettings, whisperReady: boolean): string {
+  if (whisperReady) return "Optional — dictation already works offline via Whisper (bundled).";
+  if (localSttOn(s)) return "Optional — local server handles dictation.";
+  return "Required — the mic does not work without it";
+}
+
+/**
  * Compose the two halves independently. Precedence per half is BY_RANK: the
  * bundled models if one is installed, else a local server if one is configured,
  * else the cloud key, else the OS. Offline mode pins the *cloud* halves to the OS

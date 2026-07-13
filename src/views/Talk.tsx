@@ -281,10 +281,11 @@ export default function Talk({
 
               {talk.busy && <div className="typing">…</div>}
               {talk.error && <div className="err">{talk.error}</div>}
-              {/* A degraded turn, not a broken one — the conversation kept going. */}
+              {/* A degraded turn, not a broken one — the conversation kept going. The
+                  fix is always one panel away, so say where. */}
               {talk.notice && (
                 <div className="err" style={{ borderColor: "var(--ink3)", color: "var(--ink3)" }}>
-                  {talk.notice}
+                  {talk.notice} <a href="#settings/speech">Speech settings</a>
                 </div>
               )}
             </div>
