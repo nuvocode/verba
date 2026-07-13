@@ -1,5 +1,10 @@
 import { detectNativeLang } from "./langs.ts";
-import type { Tier } from "./speech.ts";
+import { migrateSpeech, type Tier } from "./speech.ts";
+
+/** What the documented Docker one-liners listen on — the placeholder, and the value
+ *  "Local server" seeds itself with when it has nothing yet. */
+export const LOCAL_TTS_URL = "http://localhost:8880/v1";
+export const LOCAL_STT_URL = "http://localhost:8000/v1";
 
 export type ProviderId = "ollama" | "openai" | "anthropic" | "gemini" | "openrouter" | "lmstudio";
 /** When a correction is shown inline: as it happens, only when severe, or only at reflection. */
@@ -35,8 +40,8 @@ export interface Settings {
   deepgramKey: string; // STT
   // The local tier: any OpenAI-compatible speech server the learner runs (Kokoro
   // for voice, speaches for dictation). It outranks the cloud keys for whichever
-  // half has a URL, and survives offline mode — localhost is not the network.
-  localSpeech: boolean; // master switch; off → the keys/OS behave exactly as before
+  // half has a URL, and survives offline mode — localhost is not the network. The
+  // URL is the whole on/off: blank means the tier isn't there.
   localTtsUrl: string; // "" → this half falls back to the cloud key / OS voices
   localTtsModel: string;
   localTtsVoice: string; // server-specific name, so the learner types it
@@ -48,9 +53,9 @@ export interface Settings {
   bundledTtsModel: string; // "" → no bundled voice; the tier is skipped
   bundledTtsVoice: number; // sherpa speaker id inside that model (Kokoro has many)
   bundledSttModel: string; // "" → likewise
-  // Per-half tier pin. "auto" walks bundled → local → cloud → OS, which is what
-  // almost everyone wants; the pin exists for the learner who has three of them
-  // installed and a strong opinion about which one speaks.
+  // Where each half gets its speech — the "source" the Speech panel asks for.
+  // "auto" walks bundled → local → cloud → OS, which is what almost everyone wants;
+  // anything else pins that half, and the panel then shows only that source's config.
   ttsTier: Tier;
   sttTier: Tier;
   onboarded: boolean; // false → the welcome flow runs instead of the app
@@ -105,13 +110,13 @@ export const defaultSettings: Settings = {
   speak: true,
   elevenLabsKey: "",
   deepgramKey: "",
-  // Pre-filled with the URLs the documented Docker one-liners actually listen on,
-  // so turning the switch on is the whole setup. Nothing is contacted until then.
-  localSpeech: false,
-  localTtsUrl: "http://localhost:8880/v1",
+  // Blank until the learner picks "Local server" as a source, which fills in the URL
+  // the documented Docker one-liner listens on — so picking it is the whole setup.
+  // Nothing is contacted until then.
+  localTtsUrl: "",
   localTtsModel: "kokoro",
   localTtsVoice: "af_heart",
-  localSttUrl: "http://localhost:8000/v1",
+  localSttUrl: "",
   localSttModel: "Systran/faster-whisper-small",
   // Nothing bundled until the learner downloads something — models are hundreds
   // of megabytes and never arrive without a click.
@@ -133,7 +138,7 @@ export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...defaultSettings };
-    return { ...defaultSettings, ...JSON.parse(raw) };
+    return { ...defaultSettings, ...migrateSpeech(JSON.parse(raw)) };
   } catch {
     return { ...defaultSettings };
   }

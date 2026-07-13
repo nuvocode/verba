@@ -67,12 +67,16 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       settings.offline,
       settings.elevenLabsKey,
       settings.deepgramKey,
-      settings.localSpeech,
       settings.localTtsUrl,
       settings.localTtsModel,
       settings.localTtsVoice,
       settings.localSttUrl,
       settings.localSttModel,
+      settings.bundledTtsModel,
+      settings.bundledTtsVoice,
+      settings.bundledSttModel,
+      settings.ttsTier,
+      settings.sttTier,
     ],
   );
 

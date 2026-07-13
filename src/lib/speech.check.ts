@@ -4,7 +4,7 @@
 // which is exactly the macOS-webview situation this code exists to survive.
 // Run: node --experimental-strip-types src/lib/speech.check.ts
 import assert from "node:assert";
-import { deepgramHelp, getSpeech, listenBlocker } from "./speech.ts";
+import { deepgramHelp, getSpeech, listenBlocker, migrateSpeech, resolveTier } from "./speech.ts";
 
 // --- the original bug: an ElevenLabs key must not decide dictation ---
 // The old single-radio design made these mutually exclusive, so picking
@@ -30,7 +30,8 @@ assert.match(listenBlocker({ deepgramKey: "dg", offline: true }), /Offline mode/
 assert(!getSpeech({}).canListen, "no webview ships a usable recogniser");
 
 // --- the local tier ---
-const local = { localSpeech: true, localTtsUrl: "http://localhost:8880/v1", localSttUrl: "http://localhost:8000/v1" };
+// The URL is the whole on/off switch: blank means the tier isn't there.
+const local = { localTtsUrl: "http://localhost:8880/v1", localSttUrl: "http://localhost:8000/v1" };
 
 // A local server is on the learner's own machine, so offline mode must not pin it
 // to the OS the way it pins the cloud halves. This is the whole point of the tier.
@@ -40,8 +41,6 @@ assert(
   "a local server outranks a cloud key that offline mode has disabled",
 );
 
-// The master switch off, or the URL blank, means nothing changed for anyone.
-assert(!getSpeech({ ...local, localSpeech: false, offline: true }).canSpeak, "switch off → the OS voices, as before");
 assert(
   !getSpeech({ ...local, localTtsUrl: "", offline: true, elevenLabsKey: "el" }).canSpeak,
   "a blank URL must not enable the local half",
@@ -118,7 +117,43 @@ assert.match(gone[0], /system voice/, "…and says what spoke instead");
 assert.match(deepgramHelp({}, true), /^Optional/, "a bundled Whisper model outranks the key");
 assert.match(deepgramHelp(local, true), /Whisper/, "…and outranks a local server too");
 assert.match(deepgramHelp(local, false), /local server/, "no Whisper, but a server: still optional");
-assert.match(deepgramHelp({ localSpeech: true }, false), /^Required/, "a server with no URL is no server");
+assert.match(deepgramHelp({ localSttUrl: "" }, false), /^Required/, "a server with no URL is no server");
 assert.match(deepgramHelp({}, false), /^Required/, "neither: the key is the only way the mic works");
+
+// --- what the Speech panel's status line prints ---
+// It must be the tier the adapter actually built, not a second guess at it: a panel
+// that says "Piper" while Talk speaks through ElevenLabs is worse than no panel.
+assert.equal(resolveTier(bundled, "tts"), "bundled", "a bundled model installed → bundled speaks");
+assert.equal(resolveTier(local, "tts"), "local", "no model, a server → the server speaks");
+assert.equal(resolveTier({ elevenLabsKey: "el" }, "tts"), "cloud", "neither, but a key → the cloud speaks");
+assert.equal(resolveTier({}, "tts"), "native", "none of the above → the OS speaks");
+assert.equal(resolveTier({ elevenLabsKey: "el", offline: true }, "tts"), "native", "offline retires the cloud tier");
+assert.equal(resolveTier({ ...bundled, ttsTier: "native" }, "tts"), "native", "a pin beats a better tier");
+assert.equal(resolveTier({ ttsTier: "cloud" }, "tts"), "native", "a pin that cannot serve degrades to the OS");
+// The halves are pinned independently — the decoupling this whole panel is built on.
+assert.equal(resolveTier({ ...bundled, ...local, ttsTier: "bundled" }, "stt"), "bundled", "stt follows its own auto…");
+assert.equal(resolveTier({ ...bundled, ...local, sttTier: "local" }, "stt"), "local", "…and its own pin");
+
+// --- v1 settings land somewhere sane ---
+// The switch was on: the halves that had a URL are pinned to it, and nothing else moves.
+const wasOn = migrateSpeech({ localSpeech: true, ...local, elevenLabsKey: "el" });
+assert.equal(resolveTier(wasOn, "tts"), "local", "localSpeech=true → the local server keeps speaking");
+assert.equal(resolveTier(wasOn, "stt"), "local", "…and keeps listening");
+assert(!("localSpeech" in wasOn), "the old switch is gone, not carried along");
+
+// The switch was off: the URLs were inert, so they must not come back to life as a
+// tier that outranks the key the learner is actually using.
+const wasOff = migrateSpeech({ localSpeech: false, ...local, elevenLabsKey: "el" });
+assert.equal(resolveTier(wasOff, "tts"), "cloud", "localSpeech=false → the cloud key still speaks, as before");
+assert.equal(resolveTier(migrateSpeech({ localSpeech: false, ...local }), "tts"), "native", "…or the OS, as before");
+
+// A half the switch left blank is not pinned to a server it never had.
+const halfOn = migrateSpeech({ localSpeech: true, localTtsUrl: "", localSttUrl: local.localSttUrl, elevenLabsKey: "el" });
+assert.equal(resolveTier(halfOn, "tts"), "cloud", "no TTS URL → that half was never local; leave it on the key");
+assert.equal(resolveTier(halfOn, "stt"), "local", "…while the half that had one is pinned");
+
+// Blank state, and anything already migrated, passes through untouched.
+assert.equal(resolveTier(migrateSpeech({}), "tts"), "native", "a fresh install is Automatic → the OS");
+assert.deepEqual(migrateSpeech({ ttsTier: "cloud" }), { ttsTier: "cloud" }, "migrating twice changes nothing");
 
 console.log("speech.check: ok");

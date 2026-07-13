@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
-import { isLocalProvider, type CorrectionTiming, type ProviderId, type Settings } from "../lib/settings";
-import { deepgramHelp, listenBlocker } from "../lib/speech";
+import {
+  isLocalProvider,
+  LOCAL_STT_URL,
+  LOCAL_TTS_URL,
+  type CorrectionTiming,
+  type ProviderId,
+  type Settings,
+} from "../lib/settings";
+import { deepgramHelp, listenBlocker, resolveTier, type Tier } from "../lib/speech";
 import {
   CATALOG,
+  catalogModel,
   download,
   installed as listInstalled,
   remove,
@@ -136,7 +144,7 @@ function ModelRow({
             className={`radio ${chosen ? "on" : ""}`}
             onClick={choose}
             aria-label={`Use ${m.label}`}
-            style={{ border: "none", padding: 0, cursor: "pointer" }}
+            style={{ padding: 0, cursor: "pointer" }}
           />
         )}
         <div style={{ flex: 1 }}>
@@ -190,11 +198,13 @@ function ModelRow({
 }
 
 /**
- * The bundled tier: models the app downloads and runs itself, grouped by the
- * language they speak. The language being learned leads — with Spanish active, the
- * Spanish voice is the first thing on screen and the other seven languages sit
- * behind one click. Nothing is hidden for good: Kokoro speaks no Turkish, but a
- * learner who wants to hear it try is one disclosure away.
+ * The bundled tier for one half: models the app downloads and runs itself. The
+ * voices are grouped by the language they speak, and the language being learned
+ * leads — with Spanish active, the Spanish voice is the first thing on screen and
+ * the other seven languages sit behind one click. Nothing is hidden for good:
+ * Kokoro speaks no Turkish, but a learner who wants to hear it try is one
+ * disclosure away. The Whisper models transcribe any language, so they are a plain
+ * list with nothing to group.
  *
  * ponytail: a multilingual model is filed under its first language (Kokoro → the
  * English group) rather than repeated under all six. One row per model keeps the
@@ -202,6 +212,7 @@ function ModelRow({
  * speaks. Split it per-language if learners start missing it.
  */
 function BundledModels(props: {
+  half: "tts" | "stt";
   settings: Settings;
   onChange: (patch: Partial<Settings>) => void;
   packLang: string;
@@ -210,35 +221,36 @@ function BundledModels(props: {
   refresh: () => Promise<void>;
   loaded: boolean;
 }) {
-  const { packLang, recommended, loaded } = props;
+  const { half, packLang, recommended, loaded } = props;
   const [showAll, setShowAll] = useState(false);
 
   if (!loaded) return <div className="desc">Bundled models · checking…</div>;
 
-  const tts = CATALOG.filter((m) => m.half === "tts");
-  const stt = CATALOG.filter((m) => m.half === "stt");
+  const models = CATALOG.filter((m) => m.half === half);
+  const row = (m: CatalogModel) => <ModelRow key={m.id} m={m} {...props} />;
+
+  if (half === "stt") return <div>{models.map(row)}</div>;
 
   // Recommended first, in the pack's own order; then whatever else speaks the language.
   const rank = (m: CatalogModel) => {
     const i = recommended.indexOf(m.id);
     return i >= 0 ? i : 50;
   };
-  const mine = tts.filter((m) => m.langs.includes(packLang)).sort((a, b) => rank(a) - rank(b) || a.mb - b.mb);
-  const rest = tts.filter((m) => !m.langs.includes(packLang));
+  const mine = models.filter((m) => m.langs.includes(packLang)).sort((a, b) => rank(a) - rank(b) || a.mb - b.mb);
+  const rest = models.filter((m) => !m.langs.includes(packLang));
 
   // Everything else, one group per language, ordered as the catalog lists them.
   const restLangs = [...new Set(rest.map((m) => m.langs[0]))];
 
-  const row = (m: CatalogModel) => <ModelRow key={m.id} m={m} {...props} />;
-  const group = (title: string, models: CatalogModel[]) => (
-    <div key={title} style={{ marginTop: 18 }}>
+  const group = (title: string, ms: CatalogModel[]) => (
+    <div key={title} style={{ marginTop: 14 }}>
       <div className="eyebrow" style={{ marginBottom: 4 }}>{title}</div>
-      {models.map(row)}
+      {ms.map(row)}
     </div>
   );
 
   return (
-    <div style={{ marginBottom: 36 }}>
+    <div>
       {mine.length > 0 && group(langNames([packLang]), mine)}
 
       {showAll ? (
@@ -248,8 +260,78 @@ function BundledModels(props: {
           Show all voices ({restLangs.length} language{restLangs.length === 1 ? "" : "s"})
         </button>
       )}
+    </div>
+  );
+}
 
-      {group("Dictation", stt)}
+/** The five answers to "where does this half get its speech". Order is the tier order. */
+const SOURCES: [Tier, string][] = [
+  ["auto", "Automatic"],
+  ["bundled", "Bundled"],
+  ["local", "Local server"],
+  ["cloud", "Cloud"],
+  ["native", "System"],
+];
+
+/**
+ * The source picker for one half. Selecting a source pins the half to it, and the
+ * panel below then shows that source's config and nothing else — the whole point of
+ * this screen is that a learner setting up a voice never has to look at a Deepgram
+ * key. Automatic carries its own resolution in its label, so "what happens if I
+ * leave this alone" is answered without picking anything.
+ *
+ * Cloud in offline mode is shown disabled rather than hidden: a missing option reads
+ * as a missing feature, a disabled one reads as a switch you flipped.
+ */
+function SourceSelect({
+  value,
+  onPick,
+  now,
+  offline,
+  dim,
+}: {
+  value: Tier;
+  onPick: (t: Tier) => void;
+  now: string; // what Automatic currently resolves to
+  offline: boolean;
+  dim?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "8px 20px",
+        padding: "12px 4px 14px",
+        borderBottom: "1px solid var(--line2)",
+        opacity: dim ? 0.55 : 1,
+      }}
+    >
+      {SOURCES.map(([id, label]) => {
+        const off = offline && id === "cloud";
+        return (
+          <button
+            key={id}
+            className={`model ${off ? "off" : ""}`}
+            disabled={off}
+            aria-pressed={value === id}
+            onClick={() => onPick(id)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 7,
+              background: "none",
+              border: "none",
+              padding: 0,
+              cursor: off ? "default" : "pointer",
+            }}
+          >
+            <span className={`radio ${value === id ? "on" : ""}`} />
+            {id === "auto" ? `Automatic — currently ${now}` : label}
+            {off && <span>· disabled offline</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -392,6 +474,102 @@ export default function SettingsView({
   const importedCount = registry().filter((r) => r.origin === "imported").length;
   const micBlocked = listenBlocker(settings);
   const whisperReady = CATALOG.some((m) => m.half === "stt" && installed[m.id]);
+
+  // Which half has its bundled catalog open from the Automatic hint. Automatic shows
+  // a one-line summary, not the catalog: a learner who hasn't chosen a source has no
+  // use for eight download buttons, and the one who does is one click away.
+  const [manage, setManage] = useState<"" | "tts" | "stt">("");
+
+  // The tier actually serving each half right now, through the same precedence the
+  // adapter walks — the status lines and the Automatic labels are read off this, so
+  // the panel cannot claim one thing while Talk does another.
+  const ttsNow = resolveTier(settings, "tts");
+  const sttNow = resolveTier(settings, "stt");
+
+  const bundledVoice = () => {
+    const m = catalogModel(settings.bundledTtsModel);
+    const v = voiceOf(settings.bundledTtsModel, settings.bundledTtsVoice);
+    return m ? `${m.label}${v ? ` · ${v.name}` : ""}` : "no voice chosen";
+  };
+  const bundledWhisper = () => catalogModel(settings.bundledSttModel)?.label ?? "no model chosen";
+
+  /** What each half is doing right now, and what it costs — the status line. */
+  const usingTts = (t: Exclude<Tier, "auto">) =>
+    t === "bundled"
+      ? `${bundledVoice()} (bundled) — offline, no key`
+      : t === "local"
+        ? "your local server — offline, no key"
+        : t === "cloud"
+          ? "ElevenLabs — cloud, needs the network and your key"
+          : "your system voice — basic, works everywhere";
+  const usingStt = (t: Exclude<Tier, "auto">) =>
+    t === "bundled"
+      ? `${bundledWhisper()} (bundled) — offline, no key`
+      : t === "local"
+        ? "your local server — offline, no key"
+        : t === "cloud"
+          ? "Deepgram — cloud, needs the network and your key"
+          : micBlocked
+            ? "nothing — this system has no speech recognition"
+            : "system recognition — basic, works everywhere";
+
+  /** The same thing in three words, for Automatic's own label. */
+  const shortTts = (t: Exclude<Tier, "auto">) =>
+    t === "bundled" ? bundledVoice() : t === "local" ? "local server" : t === "cloud" ? "ElevenLabs" : "system voice";
+  const shortStt = (t: Exclude<Tier, "auto">) =>
+    t === "bundled"
+      ? bundledWhisper()
+      : t === "local"
+        ? "local server"
+        : t === "cloud"
+          ? "Deepgram"
+          : micBlocked
+            ? "nothing"
+            : "system recognition";
+
+  // Picking "Local server" *is* the switch that used to sit above these fields, so it
+  // fills in the URL the documented one-liner listens on rather than handing over an
+  // empty box. A URL already typed is never overwritten.
+  const pickTts = (t: Tier) =>
+    onChange({ ttsTier: t, ...(t === "local" && !settings.localTtsUrl ? { localTtsUrl: LOCAL_TTS_URL } : {}) });
+  const pickStt = (t: Tier) =>
+    onChange({ sttTier: t, ...(t === "local" && !settings.localSttUrl ? { localSttUrl: LOCAL_STT_URL } : {}) });
+
+  const bundledProps = {
+    settings,
+    onChange,
+    packLang: settings.packId,
+    recommended: packs.find((p) => p.id === settings.packId)?.speech.recommendedVoices ?? [],
+    installed,
+    refresh,
+    loaded,
+  };
+
+  const statusLine = (text: string) => (
+    <div className="desc" style={{ padding: "2px 4px 12px", maxWidth: 480, lineHeight: 1.5 }}>
+      <strong style={{ color: "var(--fg)", fontWeight: 500 }}>Using:</strong> {text}
+    </div>
+  );
+
+  /** Automatic's config: what is installed, and a way in — not the whole catalog. */
+  const autoHint = (half: "tts" | "stt") => {
+    const n = CATALOG.filter((m) => m.half === half && installed[m.id]).length;
+    const noun = half === "tts" ? "voice" : "dictation model";
+    return (
+      <div style={{ padding: "12px 4px 4px" }}>
+        <button className="model" style={linkish} onClick={() => setManage(manage === half ? "" : half)}>
+          {n === 0 ? `No ${noun}s installed · browse` : `${n} ${noun}${n === 1 ? "" : "s"} installed · manage`}
+        </button>
+        {manage === half && <BundledModels half={half} {...bundledProps} />}
+      </div>
+    );
+  };
+
+  const nothingToSetUp = (what: string) => (
+    <div className="desc" style={{ padding: "14px 4px 4px" }}>
+      Uses the OS {what}. Nothing to set up.
+    </div>
+  );
 
   // The tab is the URL: reload lands back here, and #settings/speech is a link
   // anything in the app can hand out.
@@ -703,52 +881,53 @@ export default function SettingsView({
       )}
 
       {/* Two independent halves, not rival engines: ElevenLabs only speaks and
-          Deepgram only listens. A key means "use it"; empty falls back to the OS
-          voices for TTS, and to nothing for STT — no webview ships a recogniser. */}
+          Deepgram only listens. Each half answers one question — how does Verba
+          speak, how does it listen — and shows the config for the one source it is
+          actually using, so setting up a voice never means walking past a Deepgram
+          key. Nothing here is hidden; it is one radio away. */}
       {tab === "speech" && (
         <>
-          <div className="sec">Speech</div>
-
-          {/* The bundled tier leads, because it is the one that needs nothing: no
-              server to start, no key to paste, and it keeps working on a plane. */}
-          <div className="name" style={{ marginBottom: 2, marginTop: 4 }}>Bundled models</div>
-          <div className="desc" style={{ maxWidth: 460, lineHeight: 1.5, marginBottom: 10 }}>
-            Speech that runs inside this app — no server, no key, no network once it's here. Downloads only when you
-            ask. Picked ahead of everything below when a model is installed.
-          </div>
-          <BundledModels
-            settings={settings}
-            onChange={onChange}
-            packLang={settings.packId}
-            recommended={packs.find((p) => p.id === settings.packId)?.speech.recommendedVoices ?? []}
-            installed={installed}
-            refresh={refresh}
-            loaded={loaded}
-          />
+          <div className="sec">Voice</div>
+          <div className="desc" style={{ maxWidth: 460, lineHeight: 1.5, marginBottom: 4 }}>How Verba speaks.</div>
 
           {toggleRow(
-            "Local speech server",
-            "Speech from a server you run yourself. Any OpenAI-compatible server works — Kokoro-FastAPI for speech, speaches for transcription. Overrides the keys below and works in offline mode: localhost is not the network.",
-            settings.localSpeech,
-            () => onChange({ localSpeech: !settings.localSpeech }),
+            "Read replies aloud",
+            "The coach speaks each turn as it arrives.",
+            settings.speak,
+            () => onChange({ speak: !settings.speak }),
           )}
 
-          {settings.localSpeech && (
-            <div style={{ marginBottom: 36 }}>
+          {statusLine(usingTts(ttsNow))}
+          <SourceSelect
+            value={settings.ttsTier}
+            onPick={pickTts}
+            now={shortTts(resolveTier({ ...settings, ttsTier: "auto" }, "tts"))}
+            offline={settings.offline}
+            dim={!settings.speak}
+          />
+
+          {settings.ttsTier === "auto" && autoHint("tts")}
+          {settings.ttsTier === "bundled" && (
+            <div style={{ padding: "4px 0" }}>
+              <BundledModels half="tts" {...bundledProps} />
+            </div>
+          )}
+          {settings.ttsTier === "local" && (
+            <div style={{ paddingTop: 14 }}>
               <div className="field">
-                <label>Voice — server</label>
+                <label>Server</label>
                 <input
-                  placeholder="http://localhost:8880/v1"
+                  placeholder={LOCAL_TTS_URL}
                   value={settings.localTtsUrl}
                   onChange={(e) => onChange({ localTtsUrl: e.target.value })}
                 />
               </div>
               <div className="field">
-                <label>Voice — model</label>
+                <label>Model</label>
                 <input value={settings.localTtsModel} onChange={(e) => onChange({ localTtsModel: e.target.value })} />
               </div>
               <div className="field">
-                <label>Voice — voice</label>
+                <label>Voice</label>
                 <input
                   placeholder="af_heart"
                   value={settings.localTtsVoice}
@@ -756,66 +935,77 @@ export default function SettingsView({
                 />
               </div>
               <ServerStatus name="Kokoro server" url={settings.localTtsUrl} />
+            </div>
+          )}
+          {settings.ttsTier === "cloud" && (
+            <div className="field" style={{ marginTop: 14 }}>
+              <label>
+                ElevenLabs key {settings.offline && <span>· disabled offline</span>}
+              </label>
+              <input
+                type="password"
+                disabled={settings.offline}
+                placeholder="Empty → your system voices"
+                value={settings.elevenLabsKey}
+                onChange={(e) => onChange({ elevenLabsKey: e.target.value })}
+              />
+            </div>
+          )}
+          {settings.ttsTier === "native" && nothingToSetUp("voice")}
 
-              <div className="field" style={{ marginTop: 14 }}>
-                <label>Dictation — server</label>
+          <div className="sec" style={{ marginTop: 44 }}>Dictation</div>
+          <div className="desc" style={{ maxWidth: 460, lineHeight: 1.5, marginBottom: 4 }}>How Verba listens.</div>
+
+          {statusLine(usingStt(sttNow))}
+          <SourceSelect
+            value={settings.sttTier}
+            onPick={pickStt}
+            now={shortStt(resolveTier({ ...settings, sttTier: "auto" }, "stt"))}
+            offline={settings.offline}
+          />
+
+          {settings.sttTier === "auto" && autoHint("stt")}
+          {settings.sttTier === "bundled" && (
+            <div style={{ padding: "4px 0" }}>
+              <BundledModels half="stt" {...bundledProps} />
+            </div>
+          )}
+          {settings.sttTier === "local" && (
+            <div style={{ paddingTop: 14 }}>
+              <div className="field">
+                <label>Server</label>
                 <input
-                  placeholder="http://localhost:8000/v1"
+                  placeholder={LOCAL_STT_URL}
                   value={settings.localSttUrl}
                   onChange={(e) => onChange({ localSttUrl: e.target.value })}
                 />
               </div>
               <div className="field">
-                <label>Dictation — model</label>
+                <label>Model</label>
                 <input value={settings.localSttModel} onChange={(e) => onChange({ localSttModel: e.target.value })} />
               </div>
               <ServerStatus name="speaches server" url={settings.localSttUrl} />
             </div>
           )}
+          {settings.sttTier === "cloud" && (
+            <div className="field" style={{ marginTop: 14 }}>
+              <label>
+                Deepgram key {settings.offline && <span>· disabled offline</span>}
+              </label>
+              <input
+                type="password"
+                disabled={settings.offline}
+                placeholder={deepgramHelp(settings, whisperReady)}
+                value={settings.deepgramKey}
+                onChange={(e) => onChange({ deepgramKey: e.target.value })}
+              />
+            </div>
+          )}
+          {settings.sttTier === "native" && nothingToSetUp("speech recognition")}
 
-          <div className="field">
-            <label>
-              Voice — ElevenLabs key{" "}
-              {settings.localSpeech && settings.localTtsUrl ? (
-                <span>· using local server</span>
-              ) : (
-                settings.offline && <span>· disabled offline</span>
-              )}
-            </label>
-            <input
-              type="password"
-              disabled={settings.offline || (settings.localSpeech && !!settings.localTtsUrl)}
-              placeholder="Empty → your system voices"
-              value={settings.elevenLabsKey}
-              onChange={(e) => onChange({ elevenLabsKey: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label>
-              Dictation — Deepgram key{" "}
-              {settings.localSpeech && settings.localSttUrl ? (
-                <span>· using local server</span>
-              ) : (
-                settings.offline && <span>· disabled offline</span>
-              )}
-            </label>
-            <input
-              type="password"
-              disabled={settings.offline || (settings.localSpeech && !!settings.localSttUrl)}
-              placeholder={deepgramHelp(settings, whisperReady)}
-              value={settings.deepgramKey}
-              onChange={(e) => onChange({ deepgramKey: e.target.value })}
-            />
-          </div>
-          <div className="desc" style={{ marginBottom: 14 }}>
+          <div className="desc" style={{ margin: "18px 4px 14px" }}>
             {micBlocked || "Microphone ready — click ◉ in Talk to speak, click again to send."}
           </div>
-          {toggleRow(
-            "Read replies aloud",
-            "The coach speaks each turn as it arrives.",
-            settings.speak,
-            () => onChange({ speak: !settings.speak }),
-          )}
         </>
       )}
 

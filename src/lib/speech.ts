@@ -415,12 +415,14 @@ export type Tier = "auto" | "bundled" | "local" | "cloud" | "native";
 /** Best first. A tier that can't serve is skipped, so this is also the fallthrough. */
 const BY_RANK: Exclude<Tier, "auto">[] = ["bundled", "local", "cloud", "native"];
 
+/** The two things speech does. Every tier is picked for each of them separately. */
+export type Half = "tts" | "stt";
+
 export interface SpeechSettings {
   offline?: boolean;
   elevenLabsKey?: string;
   deepgramKey?: string;
-  localSpeech?: boolean; // master switch for the local-server tier
-  localTtsUrl?: string; // "" → this half stays on the cloud/OS choice below
+  localTtsUrl?: string; // "" → no local server for this half; the tier is skipped
   localTtsModel?: string;
   localTtsVoice?: string;
   localSttUrl?: string; // "" → likewise
@@ -435,17 +437,56 @@ export interface SpeechSettings {
   sttTier?: Tier;
 }
 
-/** A local server runs on the learner's own machine, so offline mode allows it. */
-const localTtsOn = (s: SpeechSettings) => !!(s.localSpeech && s.localTtsUrl);
-const localSttOn = (s: SpeechSettings) => !!(s.localSpeech && s.localSttUrl);
-/** Bundled models run in-process, so offline mode allows them too. */
-const bundledTtsOn = (s: SpeechSettings) => !!s.bundledTtsModel;
-const bundledSttOn = (s: SpeechSettings) => !!s.bundledSttModel;
+/**
+ * Can this tier serve this half right now? A URL is the whole on/off for the local
+ * tier — a server runs on the learner's own machine, so offline mode allows it, and
+ * so does an in-process bundled model. Only the cloud is the network.
+ */
+function available(s: SpeechSettings, half: Half, t: Exclude<Tier, "auto">): boolean {
+  const tts = half === "tts";
+  if (t === "bundled") return !!(tts ? s.bundledTtsModel : s.bundledSttModel);
+  if (t === "local") return !!(tts ? s.localTtsUrl : s.localSttUrl);
+  if (t === "cloud") return !s.offline && !!(tts ? s.elevenLabsKey : s.deepgramKey);
+  const web = webSpeech();
+  return tts ? web.canSpeak : web.canListen;
+}
+
+/** Dictation the learner owns: a bundled model or their own server — no key, no network. */
+const ownStt = (s: SpeechSettings) => available(s, "stt", "bundled") || available(s, "stt", "local");
+
+/**
+ * Which tier actually serves a half, right now — the one thing the Speech panel's
+ * status line has to get right. "auto" walks BY_RANK and takes the first tier that
+ * can serve; a pin takes that tier or, if it cannot serve, the OS.
+ */
+export function resolveTier(s: SpeechSettings, half: Half): Exclude<Tier, "auto"> {
+  const pin = half === "tts" ? s.ttsTier : s.sttTier;
+  const ranked = !pin || pin === "auto" ? BY_RANK : [pin as Exclude<Tier, "auto">];
+  return ranked.find((t) => available(s, half, t)) ?? "native";
+}
+
+/**
+ * v1 stored one on/off switch for the whole local tier; v2 stores a source pin per
+ * half, and a URL is the switch. Switch on → pin whichever halves had a URL. Switch
+ * off → those URLs were inert, so drop them: keeping them would silently promote
+ * localhost above the cloud keys the learner is actually using. One-way, and the
+ * only thing lost is text that was doing nothing.
+ */
+export function migrateSpeech<T extends Record<string, unknown>>(raw: T): T {
+  if (!("localSpeech" in raw)) return raw;
+  const { localSpeech, ...rest } = raw as T & { localSpeech?: boolean };
+  if (!localSpeech) return { ...rest, localTtsUrl: "", localSttUrl: "" } as unknown as T;
+  return {
+    ...rest,
+    ttsTier: rest.localTtsUrl ? "local" : (rest.ttsTier ?? "auto"),
+    sttTier: rest.localSttUrl ? "local" : (rest.sttTier ?? "auto"),
+  } as unknown as T;
+}
 
 /** Why the mic is dead, in words a learner can act on. "" when it works. */
 export function listenBlocker(s: SpeechSettings): string {
   if (webSpeech().canListen) return "";
-  if (bundledSttOn(s) || localSttOn(s)) return hasMic() ? "" : "No microphone is available to this app.";
+  if (ownStt(s)) return hasMic() ? "" : "No microphone is available to this app.";
   if (s.offline)
     return "Dictation needs a bundled Whisper model (Settings → Speech) — or Deepgram, a cloud service, with Offline mode off.";
   if (!s.deepgramKey)
@@ -466,7 +507,7 @@ export function listenBlocker(s: SpeechSettings): string {
  */
 export function deepgramHelp(s: SpeechSettings, whisperReady: boolean): string {
   if (whisperReady) return "Optional — dictation already works offline via Whisper (bundled).";
-  if (localSttOn(s)) return "Optional — local server handles dictation.";
+  if (available(s, "stt", "local")) return "Optional — local server handles dictation.";
   return "Required — the mic does not work without it";
 }
 
@@ -485,37 +526,29 @@ export function deepgramHelp(s: SpeechSettings, whisperReady: boolean): string {
  */
 export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void = () => {}): SpeechAdapter {
   const web = webSpeech();
-  const cloud = !s.offline;
 
-  const ttsFor = (t: Exclude<Tier, "auto">): Tts | undefined => {
-    if (t === "bundled") return bundledTtsOn(s) ? bundledTts(s.bundledTtsModel!, s.bundledTtsVoice ?? 0) : undefined;
-    if (t === "local")
-      return localTtsOn(s)
+  // resolveTier already asked whether the tier can serve, so these only ever build
+  // the one it named; "native" (and a pin that could not serve) lands on the web.
+  const ttsTier = resolveTier(s, "tts");
+  const sttTier = resolveTier(s, "stt");
+
+  const tts: Tts =
+    ttsTier === "bundled"
+      ? bundledTts(s.bundledTtsModel!, s.bundledTtsVoice ?? 0)
+      : ttsTier === "local"
         ? openaiTts(s.localTtsUrl!, s.localTtsModel || "kokoro", s.localTtsVoice || "af_heart")
-        : undefined;
-    if (t === "cloud") return cloud && s.elevenLabsKey ? elevenLabs(s.elevenLabsKey) : undefined;
-    return web.canSpeak ? web : undefined;
-  };
+        : ttsTier === "cloud"
+          ? elevenLabs(s.elevenLabsKey!)
+          : web;
 
-  const sttFor = (t: Exclude<Tier, "auto">): Stt | undefined => {
-    if (t === "bundled") return bundledSttOn(s) ? bundledStt(s.bundledSttModel!) : undefined;
-    if (t === "local")
-      return localSttOn(s) ? openaiStt(s.localSttUrl!, s.localSttModel || "Systran/faster-whisper-small") : undefined;
-    if (t === "cloud") return cloud && s.deepgramKey ? deepgram(s.deepgramKey) : undefined;
-    return web.canListen ? web : undefined;
-  };
-
-  const ranked = (pin?: Tier) => (!pin || pin === "auto" ? BY_RANK : [pin as Exclude<Tier, "auto">]);
-  const pick = <T,>(pin: Tier | undefined, build: (t: Exclude<Tier, "auto">) => T | undefined, fallback: T) => {
-    for (const t of ranked(pin)) {
-      const a = build(t);
-      if (a) return { tier: t, adapter: a };
-    }
-    return { tier: "native" as const, adapter: fallback };
-  };
-
-  const { tier: ttsTier, adapter: tts } = pick(s.ttsTier, ttsFor, web as Tts);
-  const { tier: sttTier, adapter: stt } = pick(s.sttTier, sttFor, web as Stt);
+  const stt: Stt =
+    sttTier === "bundled"
+      ? bundledStt(s.bundledSttModel!)
+      : sttTier === "local"
+        ? openaiStt(s.localSttUrl!, s.localSttModel || "Systran/faster-whisper-small")
+        : sttTier === "cloud"
+          ? deepgram(s.deepgramKey!)
+          : web;
 
   // One warning per half for the life of this adapter (it is rebuilt when the
   // speech settings change), so a tier that stays down doesn't nag every turn.
