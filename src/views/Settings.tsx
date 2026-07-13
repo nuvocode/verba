@@ -1,8 +1,45 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { isLocalProvider, type CorrectionTiming, type ProviderId, type Settings } from "../lib/settings";
 import { listenBlocker } from "../lib/speech";
+import { reachable } from "../lib/models";
 import { importPack, listPacks, originLabel, packDocs, packOrigin, registry, removeImportedPack } from "../lib/packs";
 import { importScenario, listScenarios } from "../lib/scenarios";
+
+/**
+ * Is the speech server the learner typed actually there? Same shape as the model
+ * probe in Onboarding: a `live` flag so a stale answer can't overwrite a fresh one.
+ * An unreachable server is reported, never enforced — settings still save.
+ */
+function ServerStatus({ name, url }: { name: string; url: string }) {
+  const [state, setState] = useState<"probing" | "up" | "down">("probing");
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    setState("probing");
+    // The URL changes on every keystroke; wait for the typing to stop rather than
+    // firing a request per character.
+    const t = setTimeout(() => {
+      void reachable(url).then((ok) => live && setState(ok ? "up" : "down"));
+    }, 400);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [url, retry]);
+
+  if (!url.trim()) return <div className="desc">Empty — this half stays on your system voice.</div>;
+  if (state === "probing") return <div className="desc">{name} · checking…</div>;
+  if (state === "up") return <div className="desc" style={{ color: "var(--good)" }}>{name} · reachable</div>;
+  return (
+    <div className="desc" style={{ color: "var(--sev)" }}>
+      {name} · no answer at {url} — start the server, or leave it: speech falls back to your system voice.{" "}
+      <button className="model" style={{ background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }} onClick={() => setRetry((n) => n + 1)}>
+        retry
+      </button>
+    </div>
+  );
+}
 
 const PROVIDERS: {
   id: ProviderId;
@@ -340,21 +377,82 @@ export default function SettingsView({
            Deepgram only listens. A key means "use it"; empty falls back to the OS
            voices for TTS, and to nothing for STT — no webview ships a recogniser. */}
       <div className="sec" id="speech">Speech</div>
+      {toggleRow(
+        "Local speech server",
+        "Speech from a server you run yourself. Any OpenAI-compatible server works — Kokoro-FastAPI for speech, speaches for transcription. Overrides the keys below and works in offline mode: localhost is not the network.",
+        settings.localSpeech,
+        () => onChange({ localSpeech: !settings.localSpeech }),
+      )}
+
+      {settings.localSpeech && (
+        <div style={{ marginBottom: 36 }}>
+          <div className="field">
+            <label>Voice — server</label>
+            <input
+              placeholder="http://localhost:8880/v1"
+              value={settings.localTtsUrl}
+              onChange={(e) => onChange({ localTtsUrl: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label>Voice — model</label>
+            <input value={settings.localTtsModel} onChange={(e) => onChange({ localTtsModel: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Voice — voice</label>
+            <input
+              placeholder="af_heart"
+              value={settings.localTtsVoice}
+              onChange={(e) => onChange({ localTtsVoice: e.target.value })}
+            />
+          </div>
+          <ServerStatus name="Kokoro server" url={settings.localTtsUrl} />
+
+          <div className="field" style={{ marginTop: 14 }}>
+            <label>Dictation — server</label>
+            <input
+              placeholder="http://localhost:8000/v1"
+              value={settings.localSttUrl}
+              onChange={(e) => onChange({ localSttUrl: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label>Dictation — model</label>
+            <input value={settings.localSttModel} onChange={(e) => onChange({ localSttModel: e.target.value })} />
+          </div>
+          <ServerStatus name="speaches server" url={settings.localSttUrl} />
+        </div>
+      )}
+
       <div className="field">
-        <label>Voice — ElevenLabs key {settings.offline && <span>· disabled offline</span>}</label>
+        <label>
+          Voice — ElevenLabs key{" "}
+          {settings.localSpeech && settings.localTtsUrl ? (
+            <span>· using local server</span>
+          ) : (
+            settings.offline && <span>· disabled offline</span>
+          )}
+        </label>
         <input
           type="password"
-          disabled={settings.offline}
+          disabled={settings.offline || (settings.localSpeech && !!settings.localTtsUrl)}
           placeholder="Empty → your system voices"
           value={settings.elevenLabsKey}
           onChange={(e) => onChange({ elevenLabsKey: e.target.value })}
         />
       </div>
       <div className="field">
-        <label>Dictation — Deepgram key {settings.offline && <span>· disabled offline</span>}</label>
+        <label>
+          Dictation — Deepgram key{" "}
+          {settings.localSpeech && settings.localSttUrl ? (
+            <span>· using local server</span>
+          ) : (
+            settings.offline && <span>· disabled offline</span>
+          )}
+        </label>
         <input
           type="password"
-          disabled={settings.offline}
+          disabled={settings.offline || (settings.localSpeech && !!settings.localSttUrl)}
           placeholder="Required — the mic does not work without it"
           value={settings.deepgramKey}
           onChange={(e) => onChange({ deepgramKey: e.target.value })}

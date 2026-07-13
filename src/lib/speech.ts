@@ -6,10 +6,14 @@
 // and ElevenLabs is the upgrade. Each half is picked independently — the old
 // single radio forced ElevenLabs users onto a recogniser that does not exist.
 //
-// ponytail: Whisper (STT) and Piper/Kokoro (TTS) are the real offline upgrade,
-// but they need a bundled sidecar binary + a Rust `#[tauri::command]` to shell
-// out to it. The seams below are the whole integration point: implement a `Stt`/
-// `Tts` against a Tauri `invoke("transcribe"|"synthesize", …)` when it lands.
+// The third tier is a local server the learner runs themselves: any
+// OpenAI-compatible endpoint (Kokoro-FastAPI speaks, speaches listens). It is
+// the offline upgrade without a bundled sidecar — no binary to ship, no Rust
+// command to write, and it beats the OS voices while never leaving the machine.
+//
+// ponytail: a bundled sidecar (Piper/whisper.cpp behind `invoke("synthesize")`)
+// is still the zero-setup version. These same `Tts`/`Stt` seams take it when
+// someone is willing to own the packaging.
 
 import { fetch } from "@tauri-apps/plugin-http";
 
@@ -149,6 +153,20 @@ function record(onStart: (r: MediaRecorder) => void, maxMs = 60_000): Promise<Bl
   });
 }
 
+/** Play returned audio bytes to the end. Resolves on error too — a TTS hiccup must not hang the turn. */
+function play(bytes: ArrayBuffer, mime: string, hold: (a: HTMLAudioElement) => void): Promise<void> {
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  const a = new Audio(url);
+  hold(a);
+  return new Promise<void>((resolve) => {
+    a.onended = a.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve();
+    };
+    a.play().catch(() => resolve());
+  });
+}
+
 /** ElevenLabs text-to-speech. */
 export function elevenLabs(apiKey: string, voiceId = "21m00Tcm4TlvDq8ikWAM"): Tts {
   let audio: HTMLAudioElement | null = null;
@@ -173,20 +191,89 @@ export function elevenLabs(apiKey: string, voiceId = "21m00Tcm4TlvDq8ikWAM"): Tt
         }),
       });
       if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${await res.text()}`);
-      const url = URL.createObjectURL(new Blob([await res.arrayBuffer()], { type: "audio/mpeg" }));
-      audio = new Audio(url);
-      const a = audio;
-      await new Promise<void>((resolve) => {
-        a.onended = a.onerror = () => {
-          URL.revokeObjectURL(url);
-          resolve();
-        };
-        a.play().catch(() => resolve());
-      });
+      await play(await res.arrayBuffer(), "audio/mpeg", (a) => (audio = a));
     },
     cancel() {
       audio?.pause();
       audio = null;
+    },
+  };
+}
+
+// ---- local speech: any OpenAI-compatible server ----
+
+const trimUrl = (u: string) => u.replace(/\/$/, "");
+
+/**
+ * `POST /audio/speech` — OpenAI's TTS shape, which Kokoro-FastAPI also serves.
+ * The voice is the learner's choice (`af_heart`, `alloy`, …), not something we
+ * infer from the pack: voice names are server-specific and guessing one gets a
+ * 400, where a wrong-but-valid voice merely sounds wrong.
+ */
+export function openaiTts(baseUrl: string, model: string, voice: string, apiKey = ""): Tts {
+  let audio: HTMLAudioElement | null = null;
+  return {
+    canSpeak: true,
+    async speak(text) {
+      if (!text.trim()) return;
+      const res = await fetch(`${trimUrl(baseUrl)}/audio/speech`, {
+        method: "POST",
+        // A local server ignores the key but the OpenAI client shape wants one;
+        // sending a dummy is what keeps this the same adapter for both.
+        headers: { Authorization: `Bearer ${apiKey || "local"}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model, voice, input: text, response_format: "mp3" }),
+      });
+      if (!res.ok) throw new Error(`Speech server ${res.status}: ${await res.text()}`);
+      await play(await res.arrayBuffer(), "audio/mpeg", (a) => (audio = a));
+    },
+    cancel() {
+      audio?.pause();
+      audio = null;
+    },
+  };
+}
+
+/**
+ * `POST /audio/transcriptions` — multipart, as speaches/faster-whisper serves it.
+ * Records until `cancel()`, like Deepgram.
+ */
+export function openaiStt(baseUrl: string, model: string, apiKey = ""): Stt {
+  let rec: MediaRecorder | null = null;
+  return {
+    canListen: hasMic(),
+
+    async listen(locale) {
+      const clip = await record((r) => (rec = r));
+      rec = null;
+      if (!clip.size) return "";
+
+      const form = new FormData();
+      form.append("model", model);
+      // Whisper servers sniff the container from the filename, not the mime type —
+      // an ".webm" clip named ".mp3" is rejected, and WebKit hands back mp4 where
+      // Chromium hands back webm. Name the file whatever the recorder actually made.
+      const ext = (clip.type.split(";")[0].split("/")[1] || "webm").replace("mpeg", "mp3");
+      form.append("file", clip, `speech.${ext}`);
+      // Whisper takes ISO-639-1, so the pack's "es-ES" goes in as "es". Without it
+      // the model auto-detects, and a beginner's accented Spanish detects as English.
+      const lang = baseLang(locale);
+      if (lang) form.append("language", lang);
+
+      const res = await fetch(`${trimUrl(baseUrl)}/audio/transcriptions`, {
+        method: "POST",
+        // No Content-Type: the boundary is generated when the body is serialised,
+        // and setting the header by hand loses it (the plugin only fills in headers
+        // the caller left empty). A hand-set multipart Content-Type = a 400.
+        headers: { Authorization: `Bearer ${apiKey || "local"}` },
+        body: form,
+      });
+      if (!res.ok) throw new Error(`Transcription server ${res.status}: ${await res.text()}`);
+      const data = await res.json();
+      return data.text ?? "";
+    },
+
+    cancel() {
+      if (rec && rec.state !== "inactive") rec.stop(); // resolves the pending listen()
     },
   };
 }
@@ -236,31 +323,94 @@ export interface SpeechSettings {
   offline?: boolean;
   elevenLabsKey?: string;
   deepgramKey?: string;
+  localSpeech?: boolean; // master switch for the local-server tier
+  localTtsUrl?: string; // "" → this half stays on the cloud/OS choice below
+  localTtsModel?: string;
+  localTtsVoice?: string;
+  localSttUrl?: string; // "" → likewise
+  localSttModel?: string;
 }
+
+/** A local server runs on the learner's own machine, so offline mode allows it. */
+const localTtsOn = (s: SpeechSettings) => !!(s.localSpeech && s.localTtsUrl);
+const localSttOn = (s: SpeechSettings) => !!(s.localSpeech && s.localSttUrl);
 
 /** Why the mic is dead, in words a learner can act on. "" when it works. */
 export function listenBlocker(s: SpeechSettings): string {
   if (webSpeech().canListen) return "";
-  if (s.offline) return "Dictation needs Deepgram, a cloud service. Turn Offline mode off in Settings to use it.";
-  if (!s.deepgramKey) return "Dictation needs a Deepgram API key (Settings → Speech) — this webview has no built-in speech recognition.";
+  if (localSttOn(s)) return hasMic() ? "" : "No microphone is available to this app.";
+  if (s.offline)
+    return "Dictation needs Deepgram, a cloud service — or a local server (Settings → Speech). Turn Offline mode off to use Deepgram.";
+  if (!s.deepgramKey)
+    return "Dictation needs a Deepgram API key or a local server (Settings → Speech) — this webview has no built-in speech recognition.";
   if (!hasMic()) return "No microphone is available to this app.";
   return "";
 }
 
-/** Compose the two halves independently. Offline mode pins both to the OS. */
-export function getSpeech(s: SpeechSettings): SpeechAdapter {
+/**
+ * Compose the two halves independently. Precedence per half: a local server if
+ * one is configured, else the cloud key, else the OS. Offline mode pins the
+ * cloud halves to the OS but leaves local alone — localhost never leaves the box.
+ *
+ * `onFallback` is told, once per half, when a configured local server failed and
+ * the OS voice covered for it. A speech box dying mid-sentence is a bad minute,
+ * not a dead conversation.
+ */
+export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void = () => {}): SpeechAdapter {
   const web = webSpeech();
   const cloud = !s.offline;
-  const tts: Tts = cloud && s.elevenLabsKey ? elevenLabs(s.elevenLabsKey) : web;
-  const stt: Stt = cloud && s.deepgramKey ? deepgram(s.deepgramKey) : web;
+  const tts: Tts = localTtsOn(s)
+    ? openaiTts(s.localTtsUrl!, s.localTtsModel || "kokoro", s.localTtsVoice || "af_heart")
+    : cloud && s.elevenLabsKey
+      ? elevenLabs(s.elevenLabsKey)
+      : web;
+  const stt: Stt = localSttOn(s)
+    ? openaiStt(s.localSttUrl!, s.localSttModel || "Systran/faster-whisper-small")
+    : cloud && s.deepgramKey
+      ? deepgram(s.deepgramKey)
+      : web;
+
+  // One warning per half for the life of this adapter (it is rebuilt when the
+  // speech settings change), so a server that stays down doesn't nag every turn.
+  let warnedTts = false;
+  let warnedStt = false;
+
   return {
     canSpeak: tts.canSpeak,
     canListen: stt.canListen,
-    speak: (text, opts) => tts.speak(text, opts),
-    listen: (locale) => stt.listen(locale),
+
+    async speak(text, opts) {
+      try {
+        await tts.speak(text, opts);
+      } catch (e) {
+        if (tts === web) throw e;
+        if (!warnedTts) {
+          warnedTts = true;
+          onFallback("Local voice unreachable — used your system voice instead.");
+        }
+        await web.speak(text, opts);
+      }
+    },
+
+    async listen(locale) {
+      try {
+        return await stt.listen(locale);
+      } catch (e) {
+        // No webview ships a recogniser, so there is nothing to fall back *to*:
+        // say what actually broke rather than "no speech recognition available".
+        if (stt === web || !web.canListen) throw e;
+        if (!warnedStt) {
+          warnedStt = true;
+          onFallback("Local transcription unreachable — used your system recogniser instead.");
+        }
+        return await web.listen(locale);
+      }
+    },
+
     cancel() {
       tts.cancel();
       stt.cancel();
+      web.cancel();
     },
   };
 }

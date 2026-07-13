@@ -60,7 +60,8 @@ and drive it all by voice.
   the official-vs-community review flow.
 - **More providers**: **Gemini**, **OpenRouter**, and **LM Studio** (local) for
   chat; **ElevenLabs** (cloud TTS) and **Deepgram** (cloud STT) as speech engines
-  behind the existing `SpeechAdapter` seam — selectable in Settings.
+  behind the existing `SpeechAdapter` seam — selectable in Settings. Speech also
+  runs entirely on your own machine — see [Local speech](#local-speech).
 - **Advanced coaching** (`src/lib/coach.ts`, on the Today tab): a weekly progress
   report over the last 7 days of activity, and on-demand weak-area drills.
 
@@ -89,6 +90,42 @@ npm run tauri build    # package the app
 Pick a **language pack** and provider in **Settings**. `Test connection`
 lists your installed Ollama models.
 
+## Local speech
+
+The OS voices are free and offline but flat, and no webview ships a usable
+speech recogniser — so dictation otherwise means a cloud key. The third option
+is a speech server you run yourself. Two containers, no accounts, nothing leaves
+the machine:
+
+```bash
+# Voice (TTS) — Kokoro-FastAPI, serves http://localhost:8880/v1
+docker run --rm -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
+
+# Dictation (STT) — speaches / faster-whisper, serves http://localhost:8000/v1
+docker run --rm -p 8000:8000 ghcr.io/speaches-ai/speaches:latest-cpu
+```
+
+Then **Settings → Speech → Local speech server**. The defaults already match the
+URLs above (`kokoro` / `af_heart`, `Systran/faster-whisper-small`), and Settings
+tells you whether each server is answering.
+
+**Any OpenAI-compatible server works** — this talks plain `POST /audio/speech`
+and `POST /audio/transcriptions`, so LocalAI, vLLM, or your own box on the LAN
+are all just a different URL. Point it at `api.openai.com` with a key and it is
+OpenAI's speech API.
+
+Two things worth knowing:
+
+- A local server **overrides** the ElevenLabs/Deepgram keys for whichever half
+  has a URL, and **survives offline mode** — localhost is not the network. Leave
+  a URL blank to keep that half on the cloud key or the OS voice.
+- If the server dies mid-conversation, that turn **falls back to your system
+  voice** and says so once. A speech box going down is a bad minute, not a dead
+  session.
+
+The transcriber is given the active pack's language (`es-ES` → `language=es`), so
+a beginner's accented Spanish is not auto-detected as English.
+
 ## Verify the pure logic
 
 ```bash
@@ -96,10 +133,11 @@ node --experimental-strip-types src/lib/srs.check.ts      # SRS scheduling
 node --experimental-strip-types src/lib/phase2.check.ts   # pack/scenario validators + reading/level parsers
 node --experimental-strip-types src/lib/phase3.check.ts   # daily plan engine + metrics v2 + coaching + registry
 node --experimental-strip-types src/lib/lang.check.ts     # segmentation, punctuation, and pack guidance reaching every prompt
-node --experimental-strip-types src/lib/speech.check.ts   # TTS/STT halves are picked independently; the mic explains itself
+node --experimental-strip-types src/lib/speech.check.ts   # TTS/STT halves are picked independently; local servers survive offline mode and degrade to the OS voice
 ```
 
 ## Not yet (later phases)
 
-Whisper/Piper offline-speech sidecars, pronunciation analysis, shadowing, mobile
-apps, and domain packs (technical/medical/business English).
+Bundled speech sidecars (Piper/whisper.cpp, so local speech needs no Docker),
+pronunciation analysis, shadowing, mobile apps, and domain packs
+(technical/medical/business English).

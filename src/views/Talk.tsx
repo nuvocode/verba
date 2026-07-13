@@ -281,6 +281,12 @@ export default function Talk({
 
               {talk.busy && <div className="typing">…</div>}
               {talk.error && <div className="err">{talk.error}</div>}
+              {/* A degraded turn, not a broken one — the conversation kept going. */}
+              {talk.notice && (
+                <div className="err" style={{ borderColor: "var(--ink3)", color: "var(--ink3)" }}>
+                  {talk.notice}
+                </div>
+              )}
             </div>
           </div>
 

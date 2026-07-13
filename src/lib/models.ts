@@ -23,3 +23,22 @@ export async function listModels(provider: LocalProvider, host: string): Promise
     return null;
   }
 }
+
+/**
+ * Is an OpenAI-compatible server answering at all? Used for the speech servers,
+ * where — unlike a chat provider — we never pick from the model list, so a plain
+ * yes/no is the whole question. A wrong URL must fail fast, not hang the settings
+ * page, hence the timeout.
+ */
+export async function reachable(baseUrl: string, timeoutMs = 2000): Promise<boolean> {
+  if (!baseUrl.trim()) return false;
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
+      method: "GET",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

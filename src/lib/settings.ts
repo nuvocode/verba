@@ -32,6 +32,15 @@ export interface Settings {
   // ships a recogniser). Offline mode pins both to the OS regardless.
   elevenLabsKey: string; // TTS
   deepgramKey: string; // STT
+  // The local tier: any OpenAI-compatible speech server the learner runs (Kokoro
+  // for voice, speaches for dictation). It outranks the cloud keys for whichever
+  // half has a URL, and survives offline mode — localhost is not the network.
+  localSpeech: boolean; // master switch; off → the keys/OS behave exactly as before
+  localTtsUrl: string; // "" → this half falls back to the cloud key / OS voices
+  localTtsModel: string;
+  localTtsVoice: string; // server-specific name, so the learner types it
+  localSttUrl: string; // "" → likewise
+  localSttModel: string;
   onboarded: boolean; // false → the welcome flow runs instead of the app
   dailyMinutes: number; // how long a session should be, from onboarding
   goals: string[]; // why they're learning — steers scenarios and reading topics; may be empty
@@ -84,6 +93,14 @@ export const defaultSettings: Settings = {
   speak: true,
   elevenLabsKey: "",
   deepgramKey: "",
+  // Pre-filled with the URLs the documented Docker one-liners actually listen on,
+  // so turning the switch on is the whole setup. Nothing is contacted until then.
+  localSpeech: false,
+  localTtsUrl: "http://localhost:8880/v1",
+  localTtsModel: "kokoro",
+  localTtsVoice: "af_heart",
+  localSttUrl: "http://localhost:8000/v1",
+  localSttModel: "Systran/faster-whisper-small",
   onboarded: false,
   dailyMinutes: 45,
   goals: [],

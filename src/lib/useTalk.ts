@@ -50,6 +50,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   // is in flight. One "Listening…" bar covering both is a lie for the second half.
   const [micPhase, setMicPhase] = useState<"" | "recording" | "transcribing">("");
   const [error, setError] = useState("");
+  // Not an error: something degraded (a local speech server went away) and the
+  // conversation carried on. Raised once per adapter, and cleared when the next
+  // turn starts so a server that came back doesn't leave a stale warning behind.
+  const [notice, setNotice] = useState("");
   const [reflecting, setReflecting] = useState(false);
   const [reflection, setReflection] = useState<Reflection | null>(null);
   const [confidence, setConfidence] = useState(CONF_START);
@@ -58,8 +62,18 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   const sessionId = useRef<number | null>(null);
   const pack = getPack(settings.packId);
   const speech = useMemo(
-    () => getSpeech(settings),
-    [settings.offline, settings.elevenLabsKey, settings.deepgramKey],
+    () => getSpeech(settings, setNotice),
+    [
+      settings.offline,
+      settings.elevenLabsKey,
+      settings.deepgramKey,
+      settings.localSpeech,
+      settings.localTtsUrl,
+      settings.localTtsModel,
+      settings.localTtsVoice,
+      settings.localSttUrl,
+      settings.localSttModel,
+    ],
   );
 
   const userTurns = msgs.filter((m) => m.role === "user" && !m.isAsk).length;
@@ -82,6 +96,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       setReflection(null);
       setConfidence(CONF_START);
       setError("");
+      setNotice("");
       const system = buildSystem(settings, sc, pack) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
       history.current = [{ role: "system", content: system }];
       setBusy(true);
@@ -114,6 +129,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       if (!msg || busy || !scenario) return;
       setInput("");
       setError("");
+      setNotice(""); // last turn's degrade notice is not this turn's news
       setSuggestions([]);
       const idx = msgs.length;
       setMsgs((m) => [...m, { role: "user", text: msg, corrections: [], inline: false }]);
@@ -283,6 +299,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     listening: micPhase !== "",
     micPhase,
     error,
+    notice,
     reflecting,
     reflection,
     confidence,
