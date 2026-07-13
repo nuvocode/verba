@@ -1,4 +1,5 @@
 import { detectNativeLang } from "./langs.ts";
+import type { Tier } from "./speech.ts";
 
 export type ProviderId = "ollama" | "openai" | "anthropic" | "gemini" | "openrouter" | "lmstudio";
 /** When a correction is shown inline: as it happens, only when severe, or only at reflection. */
@@ -41,6 +42,17 @@ export interface Settings {
   localTtsVoice: string; // server-specific name, so the learner types it
   localSttUrl: string; // "" → likewise
   localSttModel: string;
+  // The bundled tier: models the app downloads and runs itself (lib/bundled.ts).
+  // These hold a *catalog id*, written only once a download has verified — the
+  // model files themselves live under appDataDir, never in here.
+  bundledTtsModel: string; // "" → no bundled voice; the tier is skipped
+  bundledTtsVoice: number; // sherpa speaker id inside that model (Kokoro has many)
+  bundledSttModel: string; // "" → likewise
+  // Per-half tier pin. "auto" walks bundled → local → cloud → OS, which is what
+  // almost everyone wants; the pin exists for the learner who has three of them
+  // installed and a strong opinion about which one speaks.
+  ttsTier: Tier;
+  sttTier: Tier;
   onboarded: boolean; // false → the welcome flow runs instead of the app
   dailyMinutes: number; // how long a session should be, from onboarding
   goals: string[]; // why they're learning — steers scenarios and reading topics; may be empty
@@ -101,6 +113,13 @@ export const defaultSettings: Settings = {
   localTtsVoice: "af_heart",
   localSttUrl: "http://localhost:8000/v1",
   localSttModel: "Systran/faster-whisper-small",
+  // Nothing bundled until the learner downloads something — models are hundreds
+  // of megabytes and never arrive without a click.
+  bundledTtsModel: "",
+  bundledTtsVoice: 0,
+  bundledSttModel: "",
+  ttsTier: "auto",
+  sttTier: "auto",
   onboarded: false,
   dailyMinutes: 45,
   goals: [],

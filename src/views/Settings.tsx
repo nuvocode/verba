@@ -1,6 +1,17 @@
 import { useEffect, useState } from "react";
 import { isLocalProvider, type CorrectionTiming, type ProviderId, type Settings } from "../lib/settings";
 import { listenBlocker } from "../lib/speech";
+import {
+  CATALOG,
+  download,
+  installed as listInstalled,
+  remove,
+  sizeLabel,
+  voiceOf,
+  type CatalogModel,
+  type Installed,
+  type ModelState,
+} from "../lib/bundled";
 import { reachable } from "../lib/models";
 import { importPack, listPacks, originLabel, packDocs, packOrigin, registry, removeImportedPack } from "../lib/packs";
 import { importScenario, listScenarios } from "../lib/scenarios";
@@ -40,6 +51,193 @@ function ServerStatus({ name, url }: { name: string; url: string }) {
     </div>
   );
 }
+
+/**
+ * The bundled tier: models the app downloads and runs itself. One row per model,
+ * quiet about it. Nothing here downloads without a click — these are hundreds of
+ * megabytes, and a language app that helps itself to 350 MB because you opened
+ * Settings is a language app you uninstall.
+ *
+ * Rows are sorted by what the active language actually recommends (pack.speech
+ * .recommendedVoices), not by size or name: with Spanish active, the Spanish
+ * voice is the first thing on screen. Nothing is hidden — Kokoro speaks no
+ * Turkish, but a learner who wants to hear it try is welcome to.
+ */
+function BundledModels({
+  settings,
+  onChange,
+  packLang,
+  recommended,
+}: {
+  settings: Settings;
+  onChange: (patch: Partial<Settings>) => void;
+  packLang: string;
+  recommended: string[];
+}) {
+  const [installed, setInstalled] = useState<Record<string, Installed>>({});
+  const [state, setState] = useState<Record<string, ModelState>>({});
+  const [loaded, setLoaded] = useState(false);
+
+  const refresh = () =>
+    listInstalled().then((list) => {
+      setInstalled(Object.fromEntries(list.map((m) => [m.id, m])));
+      setLoaded(true);
+    });
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  // Recommended first (in the pack's own order), then everything else. A model the
+  // active language can't use at all still shows — it just sinks.
+  const rank = (m: CatalogModel) => {
+    const i = recommended.indexOf(m.id);
+    if (i >= 0) return i;
+    if (m.half === "stt") return 50; // whisper is multilingual; it has no opinion
+    return m.langs.includes(packLang) ? 80 : 90;
+  };
+  const rows = [...CATALOG].sort((a, b) => rank(a) - rank(b) || a.mb - b.mb);
+
+  /** The voice to start on: one that speaks the language being learned, if any. */
+  const defaultSid = (m: CatalogModel) => (m.voices.find((v) => v.lang === packLang) ?? m.voices[0])?.sid ?? 0;
+
+  const chosen = (m: CatalogModel) =>
+    m.half === "tts" ? settings.bundledTtsModel === m.id : settings.bundledSttModel === m.id;
+
+  const choose = (m: CatalogModel) =>
+    onChange(
+      m.half === "tts"
+        ? { bundledTtsModel: chosen(m) ? "" : m.id, bundledTtsVoice: defaultSid(m) }
+        : { bundledSttModel: chosen(m) ? "" : m.id },
+    );
+
+  async function get(m: CatalogModel) {
+    setState((s) => ({ ...s, [m.id]: { s: "downloading", pct: 0 } }));
+    try {
+      await download(m.id, (pct) => setState((s) => ({ ...s, [m.id]: { s: "downloading", pct } })));
+      setState((s) => ({ ...s, [m.id]: { s: "ready", bytes: 0 } }));
+      await refresh();
+      // A model nobody selected is a model nobody uses. The first one downloaded
+      // for a half becomes that half's choice — the click already said "I want this".
+      const half = m.half === "tts" ? settings.bundledTtsModel : settings.bundledSttModel;
+      if (!half) choose(m);
+    } catch (e: any) {
+      // Includes the checksum mismatch, which Rust reports having installed nothing.
+      setState((s) => ({ ...s, [m.id]: { s: "failed", why: String(e?.message ?? e) } }));
+    }
+  }
+
+  async function drop(m: CatalogModel) {
+    await remove(m.id);
+    if (chosen(m)) onChange(m.half === "tts" ? { bundledTtsModel: "" } : { bundledSttModel: "" });
+    setState((s) => ({ ...s, [m.id]: { s: "absent" } }));
+    await refresh();
+  }
+
+  if (!loaded) return <div className="desc">Bundled models · checking…</div>;
+
+  return (
+    <div style={{ marginBottom: 36 }}>
+      {rows.map((m) => {
+        const here = !!installed[m.id];
+        const st: ModelState = state[m.id] ?? (here ? { s: "ready", bytes: installed[m.id].bytes } : { s: "absent" });
+        const isRec = recommended.includes(m.id);
+        // Which voice this row is showing. A Piper model has exactly one, so it
+        // shows that one whether or not it's selected; Kokoro has fourteen, so it
+        // shows the one you picked — or, until you pick, the one that fits the
+        // language you're learning.
+        const voice =
+          m.half !== "tts"
+            ? undefined
+            : chosen(m) && m.voices.length > 1
+              ? voiceOf(m.id, settings.bundledTtsVoice)
+              : (m.voices.find((v) => v.lang === packLang) ?? m.voices[0]);
+
+        return (
+          <div key={m.id} style={{ padding: "12px 4px", borderBottom: "1px solid var(--line2)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              {here && (
+                <button
+                  className={`radio ${chosen(m) ? "on" : ""}`}
+                  onClick={() => choose(m)}
+                  aria-label={`Use ${m.label}`}
+                  style={{ border: "none", padding: 0, cursor: "pointer" }}
+                />
+              )}
+              <div style={{ flex: 1 }}>
+                <div className="name">
+                  {m.label}
+                  {voice ? ` · ${voice.name}` : ""} <span>{isRec ? "· recommended" : ""}</span>
+                </div>
+                <div className="desc">
+                  {m.half === "stt" ? "Dictation · any language" : langNames(m.langs)} · {sizeLabel(m)}
+                  {st.s === "failed" ? ` · ${st.why}` : ""}
+                </div>
+              </div>
+              <div className="model">
+                {st.s === "downloading" ? `${st.pct.toFixed(0)}%` : st.s === "failed" ? "failed" : here ? "ready" : ""}
+              </div>
+              {st.s !== "downloading" &&
+                (here ? (
+                  <button className="model" style={linkish} onClick={() => void drop(m)}>
+                    delete
+                  </button>
+                ) : (
+                  <button className="model" style={linkish} onClick={() => void get(m)}>
+                    {st.s === "failed" ? "retry" : "download"}
+                  </button>
+                ))}
+            </div>
+
+            {st.s === "downloading" && (
+              <div style={{ height: 2, background: "var(--line2)", marginTop: 8 }}>
+                <div style={{ height: 2, width: `${st.pct}%`, background: "var(--fg)" }} />
+              </div>
+            )}
+
+            {/* Kokoro carries 14 curated voices; Piper carries one, so there is
+                nothing to choose and we don't ask. */}
+            {chosen(m) && m.voices.length > 1 && (
+              <div className="field" style={{ marginTop: 10 }}>
+                <label>Voice</label>
+                <select
+                  value={settings.bundledTtsVoice}
+                  onChange={(e) => onChange({ bundledTtsVoice: Number(e.target.value) })}
+                >
+                  {m.voices.map((v) => (
+                    <option key={v.sid} value={v.sid}>
+                      {v.name} — {langNames([v.lang])}
+                      {v.lang === packLang ? " · matches your language" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const linkish = {
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  padding: 0,
+  textDecoration: "underline",
+} as const;
+
+const LANG_NAMES: Record<string, string> = {
+  en: "English",
+  es: "Spanish",
+  fr: "French",
+  de: "German",
+  it: "Italian",
+  pt: "Portuguese",
+  ja: "Japanese",
+  tr: "Turkish",
+};
+const langNames = (ls: string[]) => ls.map((l) => LANG_NAMES[l] ?? l).join(", ") || "any language";
 
 const PROVIDERS: {
   id: ProviderId;
@@ -377,6 +575,21 @@ export default function SettingsView({
            Deepgram only listens. A key means "use it"; empty falls back to the OS
            voices for TTS, and to nothing for STT — no webview ships a recogniser. */}
       <div className="sec" id="speech">Speech</div>
+
+      {/* The bundled tier leads, because it is the one that needs nothing: no
+          server to start, no key to paste, and it keeps working on a plane. */}
+      <div className="name" style={{ marginBottom: 2 }}>Bundled models</div>
+      <div className="desc" style={{ maxWidth: 460, lineHeight: 1.5, marginBottom: 10 }}>
+        Speech that runs inside this app — no server, no key, no network once it's here. Downloads only when you ask.
+        Picked ahead of everything below when a model is installed.
+      </div>
+      <BundledModels
+        settings={settings}
+        onChange={onChange}
+        packLang={settings.packId}
+        recommended={packs.find((p) => p.id === settings.packId)?.speech.recommendedVoices ?? []}
+      />
+
       {toggleRow(
         "Local speech server",
         "Speech from a server you run yourself. Any OpenAI-compatible server works — Kokoro-FastAPI for speech, speaches for transcription. Overrides the keys below and works in offline mode: localhost is not the network.",

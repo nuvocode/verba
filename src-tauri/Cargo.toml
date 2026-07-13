@@ -25,3 +25,19 @@ tauri-plugin-http = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# The bundled speech tier. `sherpa-onnx` is the k2-fsa project's own Rust binding,
+# version-locked to the C++ release; its build script downloads a prebuilt static
+# lib, so this costs no cmake and no C++ compile (~20s cold, then cached).
+sherpa-onnx = "1.13.4"
+# Model downloads: the catalog points at sherpa-onnx GitHub release assets, which
+# are .tar.bz2 — hence tar + bzip2. sha2 verifies before anything is unpacked.
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3"
+sha2 = "0.10"
+tar = "0.4"
+bzip2 = "0.4"
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
+

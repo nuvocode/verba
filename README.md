@@ -19,19 +19,22 @@ and drive it all by voice.
 
 - **Language pack format v1** (`src/lib/packs/`): a versioned, validated schema
   (metadata, writing system, pronunciation, grammar guidance, prompt hints,
-  speech locale). Three bundled packs — Spanish, French, German — plus paste-in
-  import for community packs. The active pack feeds the tutor's system prompt.
+  speech locale, recommended bundled voices). Official packs — English, Spanish,
+  French, German, Japanese, Turkish — plus community Italian and Portuguese, plus
+  paste-in import. The active pack feeds the tutor's system prompt, and tells the
+  bundled speech tier which voices its language actually has.
 - **Scenario system v2** (`src/lib/scenarios.ts`): structured, versioned
   scenarios with goals and a soft level range; bundled + importable.
 - **Reading** (`src/views/Reading.tsx`): dual-page reader (target | native) with
   synced sentence highlighting and tap-a-word explanations.
   - **Story mode** — adaptive stories from interests, grammar focus, and length.
   - **Flow reading** — *Continue* keeps generating level-appropriate text.
-- **Offline speech** (`src/lib/speech.ts`): a `SpeechAdapter` seam. The default
-  uses the webview's native SpeechSynthesis (TTS) + SpeechRecognition (STT) —
-  offline TTS on macOS, capability-gated STT. The speak → transcribe → respond →
-  speak loop is wired into Conversation (🎤). Whisper/Piper sidecar adapters are
-  the documented next step.
+- **Offline speech** (`src/lib/speech.ts`): a `SpeechAdapter` seam, with voice and
+  dictation resolved independently: **bundled → local server → cloud key → OS**.
+  The bundled tier (`src/lib/bundled.ts`, `src-tauri/src/speech.rs`) runs
+  Piper/Kokoro and Whisper in-process via sherpa-onnx, on models downloaded on
+  demand — see [Bundled speech](#bundled-speech-no-setup). The speak → transcribe
+  → respond → speak loop is wired into Conversation (🎤).
 - **Level estimation v1** (`src/lib/level.ts`): self-reported CEFR plus a soft AI
   estimate read off the learner's own messages after a session, shown in Settings.
 
@@ -90,12 +93,51 @@ npm run tauri build    # package the app
 Pick a **language pack** and provider in **Settings**. `Test connection`
 lists your installed Ollama models.
 
-## Local speech
+## Bundled speech (no setup)
 
-The OS voices are free and offline but flat, and no webview ships a usable
-speech recogniser — so dictation otherwise means a cloud key. The third option
-is a speech server you run yourself. Two containers, no accounts, nothing leaves
-the machine:
+The OS voices are free and offline but flat, and no webview ships a usable speech
+recogniser — so dictation used to mean a cloud key or a Docker container. It no
+longer does. **Settings → Speech → Bundled models** downloads a voice and a
+transcriber that run inside the app: no server, no key, and nothing on the
+network once they are on disk.
+
+| | Model | Size | Speed |
+|---|---|---|---|
+| Voice | **Piper** — one voice per language | ~21 MB | ~7× faster than real time |
+| Voice | **Kokoro** — 53 voices, six languages | 349 MB | ~2× faster than real time |
+| Dictation | **Whisper** base / small | 208 MB / 639 MB | faster than real time |
+
+Piper is what a pack recommends by default: it is a fiftieth of the download and
+several times quicker, and for a conversation turn that matters more than the
+last few percent of naturalness. Kokoro is there when you want the nicer voice
+and will wait for it. Downloads are verified by sha256 and unpacked atomically —
+a corrupt download installs nothing.
+
+Not every engine speaks every language, and the packs know it: Kokoro has **no
+German and no Turkish voice at all**, so those packs recommend Piper and Settings
+badges it. Kokoro is still selectable — it will speak Turkish with a confident
+foreign accent, which is your call to make, not ours.
+
+Whisper is given the active pack's language (`tr-TR` → `language=tr`), so a
+beginner's accent is not auto-detected as English.
+
+It runs **in-process**, not as a sidecar: sherpa-onnx ships no TTS server binary,
+so a sidecar would have meant building and shipping our own child process — with
+spawn/kill, crash-restart, a JSON-RPC protocol and a port — to save the ~0.6s of
+model loading that caching the model in memory saves anyway. The cost of that
+choice is honest: a crash inside onnxruntime takes the app with it, where a
+separate process would have contained it.
+
+**Bundle size:** the statically-linked engine adds **25 MB** to the app binary
+(19 MB → 44 MB on macOS arm64). Models are *not* bundled — they are downloaded on
+request, and only the ones you ask for. Verified on macOS arm64; the Rust binding
+fetches prebuilt static libraries for Windows, Linux and Intel macOS too, but
+those targets have not been built here.
+
+## Local speech (bring your own server)
+
+Prefer to run your own speech server — or already have one? That tier is
+untouched. Two containers, no accounts, nothing leaves the machine:
 
 ```bash
 # Voice (TTS) — Kokoro-FastAPI, serves http://localhost:8880/v1
@@ -121,10 +163,22 @@ Two things worth knowing:
   a URL blank to keep that half on the cloud key or the OS voice.
 - If the server dies mid-conversation, that turn **falls back to your system
   voice** and says so once. A speech box going down is a bad minute, not a dead
-  session.
+  session. (It is retried on the next turn — a server that comes back is picked
+  straight back up.)
 
 The transcriber is given the active pack's language (`es-ES` → `language=es`), so
 a beginner's accented Spanish is not auto-detected as English.
+
+## Which speech engine speaks?
+
+The two halves — voice and dictation — are chosen **independently**, each walking
+the same ladder and stopping at the first rung that can serve:
+
+**bundled → local server → cloud key → OS voice**
+
+Offline mode disables only the cloud rung; bundled models and localhost are not
+the network. Any half can be pinned to one tier in Settings if you have several
+installed and an opinion about which one speaks.
 
 ## Verify the pure logic
 
@@ -133,11 +187,17 @@ node --experimental-strip-types src/lib/srs.check.ts      # SRS scheduling
 node --experimental-strip-types src/lib/phase2.check.ts   # pack/scenario validators + reading/level parsers
 node --experimental-strip-types src/lib/phase3.check.ts   # daily plan engine + metrics v2 + coaching + registry
 node --experimental-strip-types src/lib/lang.check.ts     # segmentation, punctuation, and pack guidance reaching every prompt
-node --experimental-strip-types src/lib/speech.check.ts   # TTS/STT halves are picked independently; local servers survive offline mode and degrade to the OS voice
+node --experimental-strip-types src/lib/speech.check.ts   # TTS/STT halves are picked independently; bundled → local → cloud → OS, and every tier degrades to the OS voice
+```
+
+The bundled engine has its own tests, which really download a model, really speak
+Turkish, and really transcribe it back (~230 MB, once):
+
+```bash
+cd src-tauri && cargo test --release -- --nocapture
 ```
 
 ## Not yet (later phases)
 
-Bundled speech sidecars (Piper/whisper.cpp, so local speech needs no Docker),
-pronunciation analysis, shadowing, mobile apps, and domain packs
+Pronunciation analysis, shadowing, mobile apps, and domain packs
 (technical/medical/business English).

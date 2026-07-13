@@ -20,5 +20,5 @@ export const pack: LanguagePack = {
   ],
   promptHint:
     "Use du for casual scenarios, Sie for formal ones. Keep sentences short at lower levels; introduce cases gradually.",
-  speech: { locale: "de-DE", voiceHint: "German" },
+  speech: { locale: "de-DE", voiceHint: "German", recommendedVoices: ["piper-de"] },
 };

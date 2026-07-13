@@ -20,5 +20,5 @@ export const pack: LanguagePack = {
   ],
   promptHint:
     "Use a neutral, friendly register. Prefer common contractions (I'm, don't, it's) and everyday phrasal verbs over formal Latinate synonyms.",
-  speech: { locale: "en-US", voiceHint: "English" },
+  speech: { locale: "en-US", voiceHint: "English", recommendedVoices: ["piper-en", "kokoro"] },
 };

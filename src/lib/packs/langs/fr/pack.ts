@@ -20,5 +20,5 @@ export const pack: LanguagePack = {
   ],
   promptHint:
     "Default to tu for casual scenarios and vous for formal ones (hotel, interview). Keep contractions natural (j'ai, c'est).",
-  speech: { locale: "fr-FR", voiceHint: "French" },
+  speech: { locale: "fr-FR", voiceHint: "French", recommendedVoices: ["piper-fr", "kokoro"] },
 };

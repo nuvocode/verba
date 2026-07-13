@@ -20,5 +20,5 @@ export const pack: LanguagePack = {
   ],
   promptHint:
     "Use tú for a friendly register unless the scenario calls for usted. Prefer everyday peninsular or neutral Latin-American vocabulary.",
-  speech: { locale: "es-ES", voiceHint: "Spanish" },
+  speech: { locale: "es-ES", voiceHint: "Spanish", recommendedVoices: ["piper-es", "kokoro"] },
 };

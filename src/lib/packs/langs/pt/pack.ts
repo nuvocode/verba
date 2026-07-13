@@ -20,5 +20,5 @@ export const pack: LanguagePack = {
   ],
   promptHint:
     "Use você for everyday register in Brazilian Portuguese. Keep contractions natural (no, na, do, da).",
-  speech: { locale: "pt-BR", voiceHint: "Portuguese" },
+  speech: { locale: "pt-BR", voiceHint: "Portuguese", recommendedVoices: ["piper-pt", "kokoro"] },
 };

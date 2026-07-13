@@ -60,5 +60,56 @@ await dying.speak("hola");
 await dying.speak("otra vez");
 assert.equal(warnings.length, 1, "a server that stays down must warn once, not once per turn");
 assert.match(warnings[0], /system voice/, "the warning says what was used instead");
+assert.match(warnings[0], /Local voice unreachable/, "v1's wording for the local tier is unchanged");
+
+// --- the bundled tier ---
+// Models the app runs itself (sherpa-onnx, in-process). A model id is only ever
+// written to settings once its download verified, so a non-empty id means "there
+// are files on disk"; the tier is skipped entirely when it's blank.
+const bundled = { bundledTtsModel: "piper-es", bundledSttModel: "whisper-base" };
+
+// It outranks every other tier, and — like the local server, and unlike the cloud
+// keys — it survives offline mode: an in-process model is not the network.
+assert(getSpeech({ ...bundled, offline: true }).canSpeak, "offline must still reach a bundled model");
+assert(
+  getSpeech({ ...bundled, ...local, offline: true, elevenLabsKey: "el" }).canSpeak,
+  "bundled outranks a local server, which outranks a cloud key",
+);
+// (canListen is gated on real mic hardware, which this headless run has none of —
+// so the bundled recogniser is asserted through listenBlocker below, as in v1.)
+
+// Blank id → the tier isn't there, and the tiers below carry on exactly as in v1.
+assert(
+  !getSpeech({ bundledTtsModel: "", offline: true, elevenLabsKey: "el" }).canSpeak,
+  "a blank bundled id must not enable the tier",
+);
+assert(
+  !getSpeech({ ...local, localTtsUrl: "", bundledTtsModel: "", offline: true }).canSpeak,
+  "no bundled model and no local URL → the OS voices, as before",
+);
+
+// Dictation stops begging for a Deepgram key once a bundled model is installed.
+assert.doesNotMatch(listenBlocker(bundled), /Deepgram/, "a bundled whisper is an answer to 'how do I dictate'");
+assert.match(listenBlocker({}), /Deepgram/, "…and with nothing installed it still asks");
+
+// A half can be pinned to one tier. Pinning past an available tier really skips it:
+// with a bundled model installed AND a cloud key, pinning "cloud" must reach the key.
+assert(
+  getSpeech({ ...bundled, elevenLabsKey: "el", ttsTier: "cloud" }).canSpeak,
+  "a pinned tier is used even when a better one is installed",
+);
+// A pin at a tier that cannot serve degrades to the OS rather than throwing.
+assert(!getSpeech({ ttsTier: "cloud", offline: true, elevenLabsKey: "el" }).canSpeak, "a pin cannot beat offline mode");
+
+// --- the model is deleted mid-session ---
+// There is no Tauri IPC here, so every bundled call throws — which is exactly what
+// a deleted model looks like. One banner, fall through to the OS, never a crash.
+const gone: string[] = [];
+const orphan = getSpeech({ ...bundled, offline: true }, (m) => gone.push(m));
+await orphan.speak("hola");
+await orphan.speak("otra vez");
+assert.equal(gone.length, 1, "a missing model must warn once, not once per turn");
+assert.match(gone[0], /Bundled voice unavailable/, "the banner names the tier that went away");
+assert.match(gone[0], /system voice/, "…and says what spoke instead");
 
 console.log("speech.check: ok");

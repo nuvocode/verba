@@ -37,7 +37,7 @@ export function registry(): RegisteredPack[] {
   add(COMMUNITY_PACKS, "community");
   add(imported(), "imported");
   // The order learners see, everywhere. Anything not listed (an imported pack) trails it.
-  const ORDER = ["en", "es", "fr", "de", "it", "pt", "ja"];
+  const ORDER = ["en", "es", "fr", "de", "it", "pt", "ja", "tr"];
   const rank = (id: string) => (ORDER.indexOf(id) + 1 || ORDER.length + 1) - 1;
   return [...byId.values()].sort((a, b) => rank(a.pack.id) - rank(b.pack.id));
 }

@@ -20,5 +20,5 @@ export const pack: LanguagePack = {
   ],
   promptHint:
     "Use tu for friendly registers and Lei for formal ones (hotel, interview). Prefer standard central-Italian vocabulary.",
-  speech: { locale: "it-IT", voiceHint: "Italian" },
+  speech: { locale: "it-IT", voiceHint: "Italian", recommendedVoices: ["piper-it", "kokoro"] },
 };

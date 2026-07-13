@@ -23,5 +23,5 @@ export const pack: LanguagePack = {
   // segments properly, so the pack can ask for the real language again.
   promptHint:
     "Default to です/ます form. Write natural Japanese with no spaces between words. At A1–A2 keep kanji to the common ones and gloss each in parentheses on first use (学生(がくせい)); from B1 use kanji normally.",
-  speech: { locale: "ja-JP", voiceHint: "Japanese" },
+  speech: { locale: "ja-JP", voiceHint: "Japanese", recommendedVoices: ["kokoro"] },
 };

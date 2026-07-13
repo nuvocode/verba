@@ -9,6 +9,18 @@ export interface SpeechConfig {
   locale: string;
   /** Preferred TTS voice-name substring, used if the user has it installed. */
   voiceHint?: string;
+  /**
+   * Bundled-tier model ids this language prefers, best first — see the CATALOG in
+   * lib/bundled.ts. Settings badges these "recommended" and sorts them up; it never
+   * hides the rest, because a preference is not a restriction.
+   *
+   * This is where a language says what its engines can actually do. Kokoro carries
+   * no German or Turkish voice at all, so those packs list only Piper; Japanese is
+   * the reverse (Kokoro speaks it, Piper has no voice). Both facts are properties
+   * of the *language*, which is exactly why they live in the pack and not in a
+   * switch statement somewhere in the UI.
+   */
+  recommendedVoices?: string[];
 }
 
 export interface LanguagePack {

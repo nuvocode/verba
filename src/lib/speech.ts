@@ -11,11 +11,15 @@
 // the offline upgrade without a bundled sidecar — no binary to ship, no Rust
 // command to write, and it beats the OS voices while never leaving the machine.
 //
-// ponytail: a bundled sidecar (Piper/whisper.cpp behind `invoke("synthesize")`)
-// is still the zero-setup version. These same `Tts`/`Stt` seams take it when
-// someone is willing to own the packaging.
+// The fourth tier is the bundled one: sherpa-onnx (Kokoro/Piper to speak, Whisper
+// to listen) running inside this app, on models it downloads on demand. Zero setup
+// — no server, no key, no Docker — and it is the only tier that is both offline
+// and good. It outranks the rest when a model is installed, and simply is not
+// there when one isn't. See lib/bundled.ts for the models, src-tauri/src/speech.rs
+// for the engine.
 
 import { fetch } from "@tauri-apps/plugin-http";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface SpeakOptions {
   locale?: string; // BCP-47, e.g. "es-ES"
@@ -278,6 +282,92 @@ export function openaiStt(baseUrl: string, model: string, apiKey = ""): Stt {
   };
 }
 
+// ---- bundled speech: sherpa-onnx, in this process ----
+
+/**
+ * Kokoro or Piper, whichever the chosen model is — Rust works that out from the
+ * files on disk, so the voice model's layout never leaks into settings. Comes
+ * back as WAV bytes, which `play()` already knows what to do with.
+ */
+export function bundledTts(modelId: string, sid: number): Tts {
+  let audio: HTMLAudioElement | null = null;
+  return {
+    canSpeak: true,
+    async speak(text, opts = {}) {
+      if (!text.trim()) return;
+      // `speed` is the learner-rate knob the OS voices get via `rate`; Kokoro and
+      // Piper both take it as a multiplier, so 0.95 means the same thing here.
+      const bytes = await invoke<ArrayBuffer>("bundled_tts", {
+        id: modelId,
+        text,
+        sid,
+        speed: opts.rate ?? 0.95,
+      });
+      await play(bytes, "audio/wav", (a) => (audio = a));
+    },
+    cancel() {
+      audio?.pause();
+      audio = null;
+    },
+  };
+}
+
+/**
+ * Decode whatever the mic produced (webm on Chromium, mp4 on WebKit) down to the
+ * mono 16 kHz float samples Whisper wants. Doing it here means Rust needs no audio
+ * decoder at all — the webview already has one, and it is the only thing that
+ * knows what its own MediaRecorder just wrote.
+ */
+async function pcm16k(clip: Blob): Promise<Float32Array> {
+  const ctx = new AudioContext();
+  let decoded: AudioBuffer;
+  try {
+    decoded = await ctx.decodeAudioData(await clip.arrayBuffer());
+  } finally {
+    void ctx.close();
+  }
+  const frames = Math.max(1, Math.ceil(decoded.duration * 16000));
+  const off = new OfflineAudioContext(1, frames, 16000);
+  const src = off.createBufferSource();
+  src.buffer = decoded;
+  src.connect(off.destination);
+  src.start();
+  return (await off.startRendering()).getChannelData(0);
+}
+
+/** Whisper, in this process. Records until `cancel()`, like the others. */
+export function bundledStt(modelId: string): Stt {
+  let rec: MediaRecorder | null = null;
+  return {
+    canListen: hasMic(),
+
+    async listen(locale) {
+      const clip = await record((r) => (rec = r));
+      rec = null;
+      if (!clip.size) return "";
+      const samples = await pcm16k(clip);
+      if (!samples.length) return "";
+
+      // The samples ride the raw IPC channel, not JSON: a 15-second clip is a
+      // quarter of a million floats, and serialising that as a JSON array is
+      // several megabytes of text for no reason. Everything else goes in headers.
+      return await invoke<string>("bundled_stt", samples.buffer as ArrayBuffer, {
+        headers: {
+          "x-model": modelId,
+          // Whisper takes ISO-639-1: the pack's "es-ES" goes in as "es". Without
+          // it the model auto-detects, and a beginner's accent detects as English.
+          "x-language": baseLang(locale),
+          "x-rate": "16000",
+        },
+      });
+    },
+
+    cancel() {
+      if (rec && rec.state !== "inactive") rec.stop(); // resolves the pending listen()
+    },
+  };
+}
+
 /** Deepgram speech-to-text. Records until `cancel()`, then transcribes the clip. */
 export function deepgram(apiKey: string): Stt {
   let rec: MediaRecorder | null = null;
@@ -319,6 +409,12 @@ export function deepgram(apiKey: string): Stt {
   };
 }
 
+/** Which tier serves a half. "auto" walks BY_RANK; anything else pins it. */
+export type Tier = "auto" | "bundled" | "local" | "cloud" | "native";
+
+/** Best first. A tier that can't serve is skipped, so this is also the fallthrough. */
+const BY_RANK: Exclude<Tier, "auto">[] = ["bundled", "local", "cloud", "native"];
+
 export interface SpeechSettings {
   offline?: boolean;
   elevenLabsKey?: string;
@@ -329,82 +425,141 @@ export interface SpeechSettings {
   localTtsVoice?: string;
   localSttUrl?: string; // "" → likewise
   localSttModel?: string;
+  // The bundled tier. A model id is only ever written here once the download
+  // verified, so a non-empty id means "there are files on disk" — and if they go
+  // missing anyway, the first call throws and the half falls through.
+  bundledTtsModel?: string; // "" → this half skips the bundled tier
+  bundledTtsVoice?: number; // sherpa speaker id within that model
+  bundledSttModel?: string; // "" → likewise
+  ttsTier?: Tier; // default "auto"
+  sttTier?: Tier;
 }
 
 /** A local server runs on the learner's own machine, so offline mode allows it. */
 const localTtsOn = (s: SpeechSettings) => !!(s.localSpeech && s.localTtsUrl);
 const localSttOn = (s: SpeechSettings) => !!(s.localSpeech && s.localSttUrl);
+/** Bundled models run in-process, so offline mode allows them too. */
+const bundledTtsOn = (s: SpeechSettings) => !!s.bundledTtsModel;
+const bundledSttOn = (s: SpeechSettings) => !!s.bundledSttModel;
 
 /** Why the mic is dead, in words a learner can act on. "" when it works. */
 export function listenBlocker(s: SpeechSettings): string {
   if (webSpeech().canListen) return "";
-  if (localSttOn(s)) return hasMic() ? "" : "No microphone is available to this app.";
+  if (bundledSttOn(s) || localSttOn(s)) return hasMic() ? "" : "No microphone is available to this app.";
   if (s.offline)
-    return "Dictation needs Deepgram, a cloud service — or a local server (Settings → Speech). Turn Offline mode off to use Deepgram.";
+    return "Dictation needs a bundled Whisper model (Settings → Speech) — or Deepgram, a cloud service, with Offline mode off.";
   if (!s.deepgramKey)
-    return "Dictation needs a Deepgram API key or a local server (Settings → Speech) — this webview has no built-in speech recognition.";
+    return "Dictation needs a bundled Whisper model or a Deepgram API key (Settings → Speech) — this webview has no built-in speech recognition.";
   if (!hasMic()) return "No microphone is available to this app.";
   return "";
 }
 
 /**
- * Compose the two halves independently. Precedence per half: a local server if
- * one is configured, else the cloud key, else the OS. Offline mode pins the
- * cloud halves to the OS but leaves local alone — localhost never leaves the box.
+ * Compose the two halves independently. Precedence per half is BY_RANK: the
+ * bundled models if one is installed, else a local server if one is configured,
+ * else the cloud key, else the OS. Offline mode pins the *cloud* halves to the OS
+ * and leaves the other two alone — neither localhost nor an in-process model is
+ * the network. A learner can pin a half to one tier instead; a pinned tier that
+ * cannot serve still degrades to the OS rather than failing.
  *
- * `onFallback` is told, once per half, when a configured local server failed and
- * the OS voice covered for it. A speech box dying mid-sentence is a bad minute,
- * not a dead conversation.
+ * `onFallback` is told, once per half, when the chosen tier failed and the OS
+ * covered for it. A voice dying mid-sentence is a bad minute, not a dead
+ * conversation — and after one failure the half stays on the OS for the rest of
+ * the session rather than stalling on every turn to retry a model that is gone.
  */
 export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void = () => {}): SpeechAdapter {
   const web = webSpeech();
   const cloud = !s.offline;
-  const tts: Tts = localTtsOn(s)
-    ? openaiTts(s.localTtsUrl!, s.localTtsModel || "kokoro", s.localTtsVoice || "af_heart")
-    : cloud && s.elevenLabsKey
-      ? elevenLabs(s.elevenLabsKey)
-      : web;
-  const stt: Stt = localSttOn(s)
-    ? openaiStt(s.localSttUrl!, s.localSttModel || "Systran/faster-whisper-small")
-    : cloud && s.deepgramKey
-      ? deepgram(s.deepgramKey)
-      : web;
+
+  const ttsFor = (t: Exclude<Tier, "auto">): Tts | undefined => {
+    if (t === "bundled") return bundledTtsOn(s) ? bundledTts(s.bundledTtsModel!, s.bundledTtsVoice ?? 0) : undefined;
+    if (t === "local")
+      return localTtsOn(s)
+        ? openaiTts(s.localTtsUrl!, s.localTtsModel || "kokoro", s.localTtsVoice || "af_heart")
+        : undefined;
+    if (t === "cloud") return cloud && s.elevenLabsKey ? elevenLabs(s.elevenLabsKey) : undefined;
+    return web.canSpeak ? web : undefined;
+  };
+
+  const sttFor = (t: Exclude<Tier, "auto">): Stt | undefined => {
+    if (t === "bundled") return bundledSttOn(s) ? bundledStt(s.bundledSttModel!) : undefined;
+    if (t === "local")
+      return localSttOn(s) ? openaiStt(s.localSttUrl!, s.localSttModel || "Systran/faster-whisper-small") : undefined;
+    if (t === "cloud") return cloud && s.deepgramKey ? deepgram(s.deepgramKey) : undefined;
+    return web.canListen ? web : undefined;
+  };
+
+  const ranked = (pin?: Tier) => (!pin || pin === "auto" ? BY_RANK : [pin as Exclude<Tier, "auto">]);
+  const pick = <T,>(pin: Tier | undefined, build: (t: Exclude<Tier, "auto">) => T | undefined, fallback: T) => {
+    for (const t of ranked(pin)) {
+      const a = build(t);
+      if (a) return { tier: t, adapter: a };
+    }
+    return { tier: "native" as const, adapter: fallback };
+  };
+
+  const { tier: ttsTier, adapter: tts } = pick(s.ttsTier, ttsFor, web as Tts);
+  const { tier: sttTier, adapter: stt } = pick(s.sttTier, sttFor, web as Stt);
 
   // One warning per half for the life of this adapter (it is rebuilt when the
-  // speech settings change), so a server that stays down doesn't nag every turn.
+  // speech settings change), so a tier that stays down doesn't nag every turn.
   let warnedTts = false;
   let warnedStt = false;
+
+  // Only the bundled tier is retired after a failure. A local server that dies is
+  // usually a server being restarted, and v1 rightly retried it every turn — take
+  // that away and a learner who brings their box back up never gets it back. A
+  // bundled model that fails to load is a model whose files are gone: it will fail
+  // identically every turn, so asking again just stalls each one. This is what
+  // "mark the tier unavailable for the session" means with no process to mark.
+  let ttsDead = false;
+  let sttDead = false;
 
   return {
     canSpeak: tts.canSpeak,
     canListen: stt.canListen,
 
     async speak(text, opts) {
-      try {
-        await tts.speak(text, opts);
-      } catch (e) {
-        if (tts === web) throw e;
-        if (!warnedTts) {
-          warnedTts = true;
-          onFallback("Local voice unreachable — used your system voice instead.");
+      if (tts !== web && !ttsDead) {
+        try {
+          return await tts.speak(text, opts);
+        } catch {
+          if (ttsTier === "bundled") ttsDead = true;
+          if (!warnedTts) {
+            warnedTts = true;
+            onFallback(
+              ttsTier === "bundled"
+                ? "Bundled voice unavailable — using your system voice for the rest of this session."
+                : "Local voice unreachable — used your system voice instead.",
+            );
+          }
         }
-        await web.speak(text, opts);
       }
+      // Safe with no synth: webSpeech().speak resolves immediately rather than
+      // hanging the turn, which is the whole reason a failed tier can land here.
+      await web.speak(text, opts);
     },
 
     async listen(locale) {
-      try {
-        return await stt.listen(locale);
-      } catch (e) {
-        // No webview ships a recogniser, so there is nothing to fall back *to*:
-        // say what actually broke rather than "no speech recognition available".
-        if (stt === web || !web.canListen) throw e;
-        if (!warnedStt) {
-          warnedStt = true;
-          onFallback("Local transcription unreachable — used your system recogniser instead.");
+      if (stt !== web && !sttDead) {
+        try {
+          return await stt.listen(locale);
+        } catch (e) {
+          // No webview ships a recogniser, so there is often nothing to fall back
+          // *to*: say what actually broke rather than "no speech recognition".
+          if (!web.canListen) throw e;
+          if (sttTier === "bundled") sttDead = true;
+          if (!warnedStt) {
+            warnedStt = true;
+            onFallback(
+              sttTier === "bundled"
+                ? "Bundled dictation unavailable — using your system recogniser for the rest of this session."
+                : "Local transcription unreachable — used your system recogniser instead.",
+            );
+          }
         }
-        return await web.listen(locale);
       }
+      return await web.listen(locale);
     },
 
     cancel() {
