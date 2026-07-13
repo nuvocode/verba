@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { isLocalProvider, type CorrectionTiming, type ProviderId, type Settings } from "../lib/settings";
 import { listenBlocker } from "../lib/speech";
-import { importPack, listPacks, originLabel, packOrigin, registry, removeImportedPack } from "../lib/packs";
+import { importPack, listPacks, originLabel, packDocs, packOrigin, registry, removeImportedPack } from "../lib/packs";
 import { importScenario, listScenarios } from "../lib/scenarios";
 
 const PROVIDERS: {
@@ -76,9 +76,11 @@ export default function SettingsView({
   const [scenarioJson, setScenarioJson] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [openDoc, setOpenDoc] = useState(""); // slug of the language doc being read
   const [, bump] = useState(0); // packs/scenarios live in localStorage — force a re-read after import
 
   const packs = listPacks();
+  const docs = packDocs(settings.packId);
   const active = PROVIDERS.find((p) => p.id === settings.provider);
   const importedCount = registry().filter((r) => r.origin === "imported").length;
   const micBlocked = listenBlocker(settings);
@@ -181,6 +183,50 @@ export default function SettingsView({
           </button>
         );
       })}
+
+      {/* The selected language's markdown docs — the long-form guide a pack's three
+          bullet points have no room for. Docs marked for the tutor also ride along
+          on every model call, so the learner is told which ones those are. */}
+      {docs.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div className="desc" style={{ marginBottom: 8 }}>
+            Language guide — {docs.length} document{docs.length > 1 ? "s" : ""} shipped with this pack.
+          </div>
+          {docs.map((d) => (
+            <div key={d.slug}>
+              <button className="srow" onClick={() => setOpenDoc(openDoc === d.slug ? "" : d.slug)}>
+                <div style={{ flex: 1 }}>
+                  <div className="name">
+                    {d.title}
+                    {d.prompt && <span>Tutor reads this</span>}
+                  </div>
+                  <div className="desc">{d.slug}.md</div>
+                </div>
+                <span className="model">{openDoc === d.slug ? "close" : "read"}</span>
+              </button>
+              {/* ponytail: markdown rendered as its own source — it is written to be
+                  read plain, and this ships no parser and no XSS surface. Add a
+                  renderer when a doc needs tables or images to land. */}
+              {openDoc === d.slug && (
+                <pre
+                  className="desc"
+                  style={{
+                    whiteSpace: "pre-wrap",
+                    lineHeight: 1.6,
+                    maxHeight: 420,
+                    overflow: "auto",
+                    padding: "4px 4px 16px",
+                    margin: 0,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {d.body}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="field" style={{ marginTop: 10 }}>
         <label>I speak</label>

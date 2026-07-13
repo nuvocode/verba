@@ -2,10 +2,12 @@ import { type LanguagePack } from "./schema.ts";
 import { BUNDLED_PACKS } from "./bundled.ts";
 import { COMMUNITY_PACKS } from "./community.ts";
 import { checkCompatibility, type PackOrigin, type RegisteredPack } from "./registry.ts";
+import { promptDocs } from "./docs.ts";
 
 export type { LanguagePack } from "./schema.ts";
 export { validatePack, PACK_FORMAT_VERSION } from "./schema.ts";
 export { checkCompatibility, originLabel, type PackOrigin, type RegisteredPack } from "./registry.ts";
+export { packDocs, type LangDoc } from "./docs.ts";
 
 // ponytail: imported packs live in localStorage (paste-JSON in Settings), so
 // "loadable" works with zero new deps. Add @tauri-apps/plugin-fs + a file
@@ -45,8 +47,21 @@ export function listPacks(): LanguagePack[] {
   return registry().map((r) => r.pack);
 }
 
+/**
+ * The pack as the prompts see it: the literal, plus any of its markdown docs
+ * marked `prompt: true` appended to promptHint. Docs are the only place a
+ * language's guidance can grow past three bullet points, and this is the single
+ * seam where they reach the model — every prompt builder already goes through
+ * getPack() → packGuidance(pack) → promptHint.
+ */
 export function getPack(id: string): LanguagePack | undefined {
-  return registry().find((r) => r.pack.id === id)?.pack;
+  const entry = registry().find((r) => r.pack.id === id);
+  if (!entry) return undefined;
+  // An imported pack is the user's own: it shadows the in-tree pack, so it must
+  // shadow the in-tree docs too rather than silently inherit their instructions.
+  const docs = entry.origin === "imported" ? [] : promptDocs(id);
+  if (!docs.length) return entry.pack;
+  return { ...entry.pack, promptHint: [entry.pack.promptHint, ...docs.map((d) => d.body)].join("\n\n") };
 }
 
 export function packOrigin(id: string): PackOrigin | undefined {

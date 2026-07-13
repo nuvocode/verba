@@ -3,6 +3,7 @@
 import assert from "node:assert";
 import { validatePack, PACK_FORMAT_VERSION } from "./packs/schema.ts";
 import { BUNDLED_PACKS } from "./packs/bundled.ts";
+import { parseDoc } from "./packs/doc.ts";
 import { validateScenario, BUNDLED_SCENARIOS, SCENARIO_FORMAT_VERSION } from "./scenarios.ts";
 import { parseReading } from "./reading.ts";
 import { parseLevel } from "./level.ts";
@@ -17,6 +18,18 @@ assert(
   badPack.errors.some((e) => e.includes("direction")),
   "should report the bad direction",
 );
+
+// --- language docs: frontmatter is optional, prompt docs opt in explicitly ---
+const full = parseDoc("./langs/es/register.md", "---\ntitle: Register\nprompt: true\n---\n\n# Ignored\n\nUse tú.");
+assert(full.lang === "es" && full.slug === "register", "lang and slug come from the path");
+assert(full.title === "Register" && full.prompt, "frontmatter title and prompt flag are read");
+assert(full.body === "# Ignored\n\nUse tú.", "frontmatter is stripped from the body");
+
+const bare = parseDoc("./langs/fr/grammar.md", "# Grammaire\n\nDeux genres.");
+assert(bare.title === "Grammaire", "no frontmatter → title falls back to the first heading");
+assert(!bare.prompt, "a doc never reaches the tutor prompt unless it says prompt: true");
+assert(parseDoc("./langs/de/notes.md", "just text").title === "notes", "no heading either → the slug");
+assert(!parseDoc("./langs/de/x.md", "---\nprompt: yes\n---\nhi").prompt, "only prompt: true opts in");
 
 // --- scenario validation (bundled literals omit formatVersion; imports require it) ---
 for (const s of BUNDLED_SCENARIOS) {

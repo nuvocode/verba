@@ -51,6 +51,11 @@ and drive it all by voice.
   you). A compatibility gate checks format version + schema before any pack
   loads. The first merged community pack — **Italian** — ships in
   `src/lib/packs/community.ts` (plus Portuguese).
+- **One folder per language** (`src/lib/packs/langs/<id>/`): a `pack.ts` literal
+  plus as many markdown documents as the language deserves — pronunciation,
+  grammar, register — shown to the learner in Settings, and, when a doc says
+  `prompt: true`, read by the tutor on every turn. Adding a language is a folder
+  and one import line; see [CONTRIBUTING.md](./CONTRIBUTING.md).
 - **Governance** ([CONTRIBUTING.md](./CONTRIBUTING.md)): pack quality criteria and
   the official-vs-community review flow.
 - **More providers**: **Gemini**, **OpenRouter**, and **LM Studio** (local) for
