@@ -25,6 +25,17 @@ const turn = parseTurn(
 assert(turn.corrections[0].severity === "minor", "missing severity defaults to minor");
 assert(shouldShowInline("adaptive", turn.corrections[0].severity) === false, "…so adaptive stays quiet");
 
+// A model that nests the whole fenced answer inside "reply" must still be unwrapped.
+const nested = parseTurn(
+  JSON.stringify({
+    reply:
+      '```json\n{ "reply": "That sounds fun!", "corrections": [{ "original": "I played Uncharted video game", "fixed": "I played the Uncharted video game", "note": "artikel", "severity": "minor" }], "suggestions": ["It was Uncharted 4."] }\n```',
+  }),
+);
+assert(nested.reply === "That sounds fun!", "nested reply is unwrapped, not printed raw");
+assert(nested.corrections[0].fixed === "I played the Uncharted video game", "nested corrections survive");
+assert(nested.suggestions[0] === "It was Uncharted 4.", "nested suggestions survive");
+
 // --- cloze: recall in context, and a safe fallback when the term is inflected ---
 assert(
   cloze("marchando", "¡Marchando! ¿Algo de comer?") === "¡‗‗‗‗‗! ¿Algo de comer?",

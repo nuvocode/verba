@@ -61,7 +61,10 @@ export interface TurnResult {
 
 /** Defensive parse: models sometimes wrap JSON in prose or code fences. */
 export function parseTurn(raw: string): TurnResult {
-  const obj = extractJson(raw);
+  let obj = extractJson(raw);
+  // A small model under a JSON grammar (Ollama format:"json") can satisfy it by
+  // nesting the real answer — fences and all — inside "reply". Unwrap one level.
+  if (typeof obj?.reply === "string" && obj.reply.includes('"reply"')) obj = extractJson(obj.reply) ?? obj;
   return {
     reply: typeof obj?.reply === "string" ? obj.reply : raw.trim(),
     corrections: Array.isArray(obj?.corrections)
