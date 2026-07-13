@@ -2,7 +2,9 @@
 // coaching parsers, and the pack registry's compatibility gate.
 // Run: node --experimental-strip-types src/lib/phase3.check.ts
 import assert from "node:assert";
+import { readdirSync } from "node:fs";
 import { defaultSettings } from "./settings.ts";
+import { BUNDLED_PACKS } from "./packs/bundled.ts";
 import { buildDailyPlan, themeForDate, parseRecap } from "./learn.ts";
 import { computeMetrics, estimateLevelV2 } from "./metrics.ts";
 import { parseWeeklyReport, parseDrills } from "./coach.ts";
@@ -47,6 +49,19 @@ const drills = parseDrills('{"drills":[{"prompt":"Di algo","hint":"h","example":
 assert(drills.length === 1 && drills[0].prompt === "Di algo", "drills without a prompt are dropped");
 const recap = parseRecap("garbage, no json");
 assert(recap.recap === "garbage, no json" && recap.nextFocus.length === 0, "recap degrades gracefully");
+
+// --- registry drift: a langs/ folder that nothing imports is an invisible language ---
+// This is the price of explicit imports over import.meta.glob (which the checks
+// can't run under node). Paid here instead: the folder listing IS the source of
+// truth, and a contributor who forgets the bundled/community.ts line fails CI
+// rather than watching their language silently not exist.
+const registered = new Set([...BUNDLED_PACKS, ...COMMUNITY_PACKS].map((p) => p.id));
+const folders = readdirSync(new URL("./packs/langs/", import.meta.url), { withFileTypes: true })
+  .filter((e) => e.isDirectory())
+  .map((e) => e.name);
+for (const id of folders)
+  assert(registered.has(id), `langs/${id}/ ships no pack: add it to bundled.ts or community.ts`);
+for (const id of registered) assert(folders.includes(id), `pack "${id}" has no langs/${id}/ folder`);
 
 // --- pack registry: compatibility gate ---
 for (const p of COMMUNITY_PACKS) assert(checkCompatibility(p).compatible, `community pack ${p.id} is compatible`);

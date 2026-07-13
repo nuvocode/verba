@@ -21,14 +21,22 @@ src/lib/packs/
   langs/
     es/
       pack.ts          REQUIRED — the pack literal, exported as `pack`
-      README.md        optional — the language's index page
+      README.md        REQUIRED — which variety, and who verified it
       pronunciation.md optional — long-form docs, as many as you like
       grammar.md
       register.md      optional — with `prompt: true`, the tutor reads it too
 ```
 
-Only `pack.ts` is required. [`langs/es/`](./src/lib/packs/langs/es/) is the
-reference example — copy it.
+[`langs/es/`](./src/lib/packs/langs/es/) is the reference example — copy it.
+Official packs are held to the same bar: every language, including the core
+team's, ships a README saying what it targets and who stands behind it.
+
+Two things the checks enforce so they can't drift:
+
+- A `langs/<id>/` folder with no line in `bundled.ts`/`community.ts` **fails**
+  `phase3.check.ts` — a language you forgot to register would otherwise just
+  silently not exist.
+- A folder with no `README.md` **fails** `phase2.check.ts`.
 
 ### pack.ts — what the app runs on
 
@@ -54,14 +62,26 @@ prompt: true                   # default false
 ---
 ```
 
+Any other key is ignored and warned about, the same way an unknown pack field is.
+Frontmatter never reaches the learner — only the body below it is displayed.
+
 `prompt: true` means **the tutor reads this document on every turn**, appended to
 the pack's `promptHint`. It is how a language teaches the model something a
 `promptHint` has no room for — but it costs tokens on every call, so:
 
-- Keep a prompt-marked doc under ~40 lines, and write it as instructions to the
-  tutor, not as prose for the learner.
+- Write it as instructions to the tutor, not as prose for the learner.
 - Everything else stays `prompt: false` (i.e. omit the key). Learner-facing docs
   can be as long as they deserve to be.
+
+`phase2.check.ts` prints each language's doc count and its **total** prompt-marked
+size, and warns past `PROMPT_DOC_BUDGET` (3000 chars, ~40 lines). Nothing is
+truncated — silently cutting reviewed content would be worse — but a reviewer can
+see the bill, which matters most when a language accumulates a *second* and *third*
+prompt-marked doc and no single one looks expensive:
+
+```
+  es: 4 doc(s), 1 in the tutor prompt (~762 chars: register)
+```
 
 A pack you paste into Settings at runtime carries no docs — markdown is a
 build-time asset of the repo, so an imported pack never inherits (or overrides)
@@ -71,14 +91,14 @@ the in-tree documents of the language whose id it shadows.
 
 1. **Draft** — `mkdir src/lib/packs/langs/<id>/`, copy `es/pack.ts`, fill it in.
    Or prototype live: **Settings → Import language pack** takes the same JSON.
-2. **Document** — add the markdown your language needs. At minimum a `README.md`
-   saying what variety the pack targets and who verified it.
+2. **Document** — add the markdown your language needs. A `README.md` is required:
+   what variety the pack targets, and who verified it.
 3. **Register** — add one import line to `community.ts` (or `bundled.ts`, for
-   core-team languages).
+   core-team languages). Forget this and step 4 fails; nothing ships half-wired.
 4. **Self-check** —
    ```
-   node --experimental-strip-types src/lib/phase2.check.ts   # pack + doc validation
-   node --experimental-strip-types src/lib/phase3.check.ts   # registry compatibility gate
+   node --experimental-strip-types src/lib/phase2.check.ts   # pack + doc validation, prompt budget
+   node --experimental-strip-types src/lib/phase3.check.ts   # registry gate + folder/import parity
    node --experimental-strip-types src/lib/onboarding.check.ts
    npx tsc --noEmit
    ```

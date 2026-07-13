@@ -80,7 +80,10 @@ export default function SettingsView({
   const [, bump] = useState(0); // packs/scenarios live in localStorage — force a re-read after import
 
   const packs = listPacks();
-  const docs = packDocs(settings.packId);
+  // An imported pack shadows the in-tree pack of the same id, docs included — so
+  // say so, or "I pasted my es pack and the Spanish guide vanished" reads as a bug.
+  const packShadowed = packOrigin(settings.packId) === "imported";
+  const docs = packShadowed ? [] : packDocs(settings.packId);
   const active = PROVIDERS.find((p) => p.id === settings.provider);
   const importedCount = registry().filter((r) => r.origin === "imported").length;
   const micBlocked = listenBlocker(settings);
@@ -187,6 +190,14 @@ export default function SettingsView({
       {/* The selected language's markdown docs — the long-form guide a pack's three
           bullet points have no room for. Docs marked for the tutor also ride along
           on every model call, so the learner is told which ones those are. */}
+      {packShadowed && packDocs(settings.packId).length > 0 && (
+        <div className="desc" style={{ marginTop: 16 }}>
+          You imported your own <strong>{settings.targetLang}</strong> pack, so it replaces the built-in one — the
+          bundled language guide is hidden and the tutor follows your pack's instructions only. Remove the imported
+          pack to get the built-in guide back.
+        </div>
+      )}
+
       {docs.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <div className="desc" style={{ marginBottom: 8 }}>
