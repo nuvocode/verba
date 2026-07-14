@@ -10,6 +10,8 @@ import {
   parseSummary,
   titlePrompt,
   parseTitle,
+  memoryPrompt,
+  parseMemory,
   shouldShowInline,
   type Correction,
   type SessionSummary,
@@ -19,7 +21,18 @@ import { getPack } from "./packs";
 import { levelPrompt, parseLevel } from "./level";
 import { computeMetrics, estimateLevelV2 } from "./metrics";
 import { getSpeech, listenBlocker } from "./speech";
-import { addMessage, addVocab, createSession, setSummary, setTitle, saveLevelSignal, saveMetrics, vocabCounts } from "./db";
+import {
+  addMessage,
+  addVocab,
+  createSession,
+  setSummary,
+  setTitle,
+  saveLevelSignal,
+  saveMemories,
+  saveMetrics,
+  recentMemories,
+  vocabCounts,
+} from "./db";
 
 export interface TalkMsg {
   role: "user" | "ai";
@@ -136,9 +149,14 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       setError("");
       setNotice("");
       titleStage.current = 0;
-      const system = buildSystem(settings, sc, pack) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
-      history.current = [{ role: "system", content: system }];
       setBusy(true);
+      // What earlier conversations left behind. It rides in the system prompt, so
+      // every call made off this history — the turns, the wrap-up, the vocabulary
+      // capture — is talking to a coach that has read it.
+      const memories = await recentMemories(settings.targetLang).catch(() => []);
+      const system =
+        buildSystem(settings, sc, pack, memories) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
+      history.current = [{ role: "system", content: system }];
       try {
         try {
           sessionId.current = await createSession(sc.id);
@@ -273,6 +291,20 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       );
       summary = parseSummary(sumRaw);
       if (sessionId.current) await setSummary(sessionId.current, summary.summary).catch(() => {});
+
+      // What the learner told us about themselves. Best-effort like the rest of the
+      // wrap-up: a coach that fails to take a note is a coach that took no note, not
+      // a conversation that failed.
+      try {
+        const known = await recentMemories(settings.targetLang);
+        const memRaw = await provider.chat(
+          [...history.current, { role: "user", content: memoryPrompt(settings, known) }],
+          { json: true },
+        );
+        await saveMemories(settings.targetLang, parseMemory(memRaw), sessionId.current);
+      } catch {
+        /* memory is best-effort */
+      }
 
       // Measured level signal (v2) — from the learner's own messages only, cut
       // into words and sentences by the target language's own rules.

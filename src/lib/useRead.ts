@@ -11,7 +11,7 @@ import {
   type ReadingText,
 } from "./reading";
 import { getPack } from "./packs";
-import { addVocab, saveReading } from "./db";
+import { addVocab, recentMemories, saveReading } from "./db";
 
 export interface WordPopover {
   term: string;
@@ -43,8 +43,11 @@ export function useRead(settings: Settings) {
       setPopover(null);
       setSaved([]);
       try {
+        // The passage is set in the learner's own world where it can be — the same
+        // facts the coach talks to them about, doing a second job here.
+        const memories = await recentMemories(settings.targetLang).catch(() => []);
         const raw = await getProvider(settings).chat(
-          [{ role: "user", content: storyPrompt(settings, { ...opts, sentences: 8 }, pack) }],
+          [{ role: "user", content: storyPrompt(settings, { ...opts, sentences: 8, memories }, pack) }],
           { json: true },
         );
         const t = parseReading(raw);

@@ -89,6 +89,7 @@ jobs:
           node --experimental-strip-types src/lib/lang.check.ts
           node --experimental-strip-types src/lib/speech.check.ts
           node --experimental-strip-types src/lib/onboarding.check.ts
+          node --experimental-strip-types src/lib/memory.check.ts
         shell: bash
 
       # Build only. tauri-action can cut the release itself, but it also owns the

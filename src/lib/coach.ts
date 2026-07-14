@@ -1,5 +1,6 @@
 import { level, type Settings } from "./settings.ts";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
+import { memoryBrief, type Memory } from "./prompts.ts";
 
 // Advanced coaching — the two AI features the phase asks for on top of the
 // learning engine: a weekly progress report and targeted weak-area drills.
@@ -16,11 +17,15 @@ export interface WeekStats {
   focusAreas: string[]; // recurring "focus next" points from summaries
 }
 
-export function weeklyReportPrompt(s: Settings, w: WeekStats, pack?: LanguagePack): string {
+export function weeklyReportPrompt(s: Settings, w: WeekStats, pack?: LanguagePack, memories: Memory[] = []): string {
   return [
     `You are a ${s.targetLang} learning coach writing a short weekly progress report for a ${level(s)} learner.`,
     `Write in ${s.nativeLang}. Be specific and encouraging, not generic.`,
     packGuidance(pack),
+    memoryBrief(memories),
+    memories.length
+      ? `Tie the report to why they are actually learning — a week's numbers mean something against that, and nothing on their own.`
+      : "",
     `This week's data:`,
     `- practice sessions: ${w.sessions}`,
     `- messages written: ${w.messages}`,

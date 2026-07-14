@@ -1,5 +1,6 @@
 import Database from "@tauri-apps/plugin-sql";
 import { newCard, schedule, type Grade } from "./srs";
+import { planMemory, type Memory, type MemoryWrite } from "./prompts";
 
 let dbPromise: Promise<Database> | null = null;
 
@@ -77,6 +78,17 @@ async function init(): Promise<Database> {
     CREATE TABLE IF NOT EXISTS review_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       created_at INTEGER NOT NULL
+    );
+    -- What the coach knows about the learner: durable facts, dated, one per row.
+    -- Scoped to a language like every other table here — the record belongs to the
+    -- learner as a Spanish learner, and switching language starts a fresh one.
+    CREATE TABLE IF NOT EXISTS memories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lang TEXT NOT NULL,
+      fact TEXT NOT NULL,
+      source_session_id INTEGER,   -- the conversation it was learned in; NULL if the DB row was gone
+      created_at INTEGER NOT NULL,
+      UNIQUE(lang, fact)           -- the same sentence twice is still one fact
     );
   `);
   // Added after the first release: the Coach breaks the composite back out into
@@ -420,6 +432,79 @@ export async function latestRecap(lang: string, before: string): Promise<{ recap
   } catch {
     return null;
   }
+}
+
+// ---- long-term memory (Settings → User Memory) ----
+
+export interface MemoryRow extends Memory {
+  lang: string;
+  source_session_id: number | null;
+}
+
+/**
+ * How many facts ride along in a prompt.
+ *
+ * The list grows without bound and a local 3B model has very little context to
+ * spare, so the rule is: **the 20 most recently learned facts, newest first**.
+ * Recency, not relevance — there is no embedding index to rank against offline,
+ * and recency is not arbitrary here: a fact that superseded another is always the
+ * newer of the two, so the cut can only ever drop the oldest and most settled
+ * facts, which are the ones the coach is least likely to need to bring up.
+ *
+ * Deduplication does *not* use this budget — it runs against the whole table (a
+ * local SELECT is free), so a fact that fell past the cut can never come back as
+ * a second bullet.
+ */
+export const MEMORY_BUDGET = 20;
+
+/** The facts the prompts get: newest first, capped at the budget. */
+export async function recentMemories(lang: string, limit = MEMORY_BUDGET): Promise<MemoryRow[]> {
+  const db = await getDb();
+  return db.select<MemoryRow[]>(
+    "SELECT id, lang, fact, source_session_id, created_at FROM memories WHERE lang = $1 ORDER BY created_at DESC, id DESC LIMIT $2",
+    [lang, limit],
+  );
+}
+
+/** Every fact on file — the Settings list, and what deduplication is checked against. */
+export async function allMemories(lang: string): Promise<MemoryRow[]> {
+  const db = await getDb();
+  return db.select<MemoryRow[]>(
+    "SELECT id, lang, fact, source_session_id, created_at FROM memories WHERE lang = $1 ORDER BY created_at DESC, id DESC",
+    [lang],
+  );
+}
+
+/**
+ * Commit what a conversation taught us about the learner.
+ *
+ * Superseding deletes the old row rather than hiding it behind a flag: Settings →
+ * User Memory is the learner's account of what the machine believes about them,
+ * and a fact the coach no longer believes has no business sitting in the table
+ * invisibly. What is left is exactly what steers the prompts — which is the whole
+ * point of showing it.
+ */
+export async function saveMemories(lang: string, writes: MemoryWrite[], sessionId: number | null): Promise<void> {
+  if (!writes.length) return;
+  const db = await getDb();
+  const plan = planMemory(await allMemories(lang), writes);
+
+  for (const w of plan) {
+    if (w.replaces != null)
+      await db.execute("DELETE FROM memories WHERE id = $1 AND lang = $2", [w.replaces, lang]);
+    // OR IGNORE, because UNIQUE(lang, fact) is the last word on "told twice": the
+    // normalised check in planMemory catches the re-wordings, this catches the rest.
+    await db.execute(
+      "INSERT OR IGNORE INTO memories (lang, fact, source_session_id, created_at) VALUES ($1, $2, $3, $4)",
+      [lang, w.fact, sessionId, Date.now()],
+    );
+  }
+}
+
+/** The learner striking a line out. Nothing else in the app deletes a memory. */
+export async function deleteMemory(id: number): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM memories WHERE id = $1", [id]);
 }
 
 // ---- Phase 3: weekly coaching stats ----

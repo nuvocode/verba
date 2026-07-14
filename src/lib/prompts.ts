@@ -6,13 +6,17 @@ export type { Scenario } from "./scenarios";
 export { packGuidance } from "./packs/schema.ts";
 
 /** System prompt for a normal conversational turn. Model must return the turn JSON. */
-export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack): string {
+export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack, memories: Memory[] = []): string {
   return [
     `You are Verba, a warm and encouraging ${s.targetLang} conversation tutor.`,
     `The learner's native language is ${s.nativeLang}. Their self-reported level is ${level(s)}.`,
     `Scenario: ${scenario.setup}`,
     scenario.goals?.length ? `Help the learner practise these goals: ${scenario.goals.join("; ")}.` : "",
     packGuidance(pack),
+    memoryBrief(memories),
+    memories.length
+      ? `Bring one of those up only where it fits — ask after it, or build on it. Never read the list back, and never tell the learner you keep notes on them.`
+      : "",
     ``,
     `Hold a natural conversation in ${s.targetLang}. Match your vocabulary and sentence length to a ${level(s)} learner. Always keep the conversation going by ending your reply with a question or prompt.`,
     ``,
@@ -171,6 +175,130 @@ export function parseSummary(raw: string): SessionSummary {
     strengths: Array.isArray(obj.strengths) ? obj.strengths.map(String) : [],
     focus: Array.isArray(obj.focus) ? obj.focus.map(String) : [],
   };
+}
+
+// ---- long-term memory: what the coach knows about the learner ----
+//
+// Not the vocabulary deck — that is the "Memory" space in the nav, and it keeps
+// the name. This is the learner themselves: who they are, what they do, what they
+// are learning the language for. Written at the end of a session, read back at the
+// start of the next one, and on show in Settings → User Memory, where the learner
+// can strike out anything that is wrong or none of the machine's business.
+
+/**
+ * One durable fact, in the learner's own language, with the day it was learned.
+ * The date is part of the record: it is what lets the coach say "you mentioned a
+ * few weeks ago…", and what lets a fact that has gone stale be spotted.
+ */
+export interface Memory {
+  id: number;
+  fact: string;
+  created_at: number;
+}
+
+/** The date as the record carries it, and as Settings shows it: "14 Jul 2026". */
+export const memoryDate = (ts: number): string =>
+  new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+
+/**
+ * At most this many facts out of any one conversation. A session that yields ten
+ * durable facts has stopped telling durable facts from small talk, and the cap is
+ * cheaper than trusting the model not to.
+ */
+const MEMORY_PER_SESSION = 6;
+
+/**
+ * The memory as every prompt sees it — the knowledge only. What to *do* with it
+ * differs by caller (the coach converses, the reader picks topics, the report
+ * refers back), so each one adds its own instruction after this block.
+ *
+ * An empty list gives an empty string: a first-time learner's prompt should not
+ * carry a "you know nothing about them" preamble.
+ */
+export function memoryBrief(memories: Memory[]): string {
+  if (!memories.length) return "";
+  return [
+    `What you know about the learner, from earlier sessions:`,
+    ...memories.map((m) => `- ${m.fact} · ${memoryDate(m.created_at)}`),
+  ].join("\n");
+}
+
+/** Prompt to pull durable facts about the learner out of a finished conversation. */
+export function memoryPrompt(s: Settings, known: Memory[]): string {
+  return [
+    `You keep the long-term memory of this learner — the handful of things a good tutor would still know about them in a month.`,
+    known.length
+      ? [`Already recorded:`, ...known.map((m) => `${m.id}. ${m.fact}`)].join("\n")
+      : `Nothing is recorded yet.`,
+    ``,
+    `From this conversation, record only what is durable: who they are, what they do, why they are learning ${s.targetLang}, the people and places that recur in their life, what they have said they like and dislike.`,
+    `Not what happened today, not what they practised, not how well they did — that is measured elsewhere.`,
+    ``,
+    `Answer with ONLY a JSON object: { "facts": [ { "fact": "one short fact, written in ${s.nativeLang}", "replaces": null } ] }.`,
+    `Rules:`,
+    `- Never say the same thing twice. If a fact is already recorded above, leave it out entirely.`,
+    `- If this conversation changed a recorded fact — they moved city, changed job, took up something new — write the fact as it now stands and set "replaces" to that fact's number. The old one is dropped, not kept beside it.`,
+    `- "replaces" is null for anything genuinely new.`,
+    `- A fact is a short third-person phrase, under 12 words: "Works as a backend developer", "Cooks most evenings, eats out at weekends".`,
+    `- Record nothing you are not sure of. { "facts": [] } is the right answer for a conversation that revealed nothing durable.`,
+  ].join("\n");
+}
+
+/** A fact on its way into the record, and the fact it supersedes — if it supersedes one. */
+export interface MemoryWrite {
+  fact: string;
+  /** The id of the recorded fact this one replaces, or null when it is new. */
+  replaces: number | null;
+}
+
+export function parseMemory(raw: string): MemoryWrite[] {
+  const obj = extractJson(raw);
+  if (!Array.isArray(obj?.facts)) return [];
+  return obj.facts
+    .filter((f: any) => f && typeof f.fact === "string" && f.fact.trim())
+    .map((f: any) => {
+      // Models hand back "3" as often as 3, and null / undefined / "" as often as
+      // neither. Anything that is not a positive whole number means "this is new".
+      const r = Number(f.replaces);
+      return {
+        fact: String(f.fact).replace(/\s+/g, " ").trim().slice(0, 120),
+        replaces: Number.isInteger(r) && r > 0 ? r : null,
+      };
+    });
+}
+
+/** Two facts are one fact when only case, punctuation or spacing separates them. */
+const factKey = (fact: string) =>
+  fact
+    .toLowerCase()
+    .replace(/\p{P}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/**
+ * What actually gets written, given what is already on file. The model is asked to
+ * dedupe and supersede itself and mostly does; this is the half that does not
+ * depend on it having behaved.
+ *
+ * - a fact already on file is dropped — told twice is not two bullets
+ * - "replaces" is honoured only when it names a fact that exists: a hallucinated
+ *   number would otherwise delete a row the learner never contradicted
+ * - a "new" fact whose wording is already recorded is dropped whatever it claims
+ *   to replace, because the safe read of that confusion is that nothing changed
+ */
+export function planMemory(known: Memory[], incoming: MemoryWrite[]): MemoryWrite[] {
+  const ids = new Set(known.map((m) => m.id));
+  const seen = new Set(known.map((m) => factKey(m.fact)));
+  const out: MemoryWrite[] = [];
+
+  for (const w of incoming) {
+    if (out.length >= MEMORY_PER_SESSION) break;
+    const key = factKey(w.fact);
+    if (!key || seen.has(key)) continue; // …and `seen` grows as we go, so not twice within one batch either
+    out.push({ fact: w.fact, replaces: w.replaces != null && ids.has(w.replaces) ? w.replaces : null });
+    seen.add(key);
+  }
+  return out;
 }
 
 /** Find the first {...} JSON object in a string and parse it. Returns null on failure. */

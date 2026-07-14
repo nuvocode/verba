@@ -6,7 +6,7 @@ import { weeklyReportPrompt, parseWeeklyReport, type WeeklyReport } from "../lib
 import { getPack } from "../lib/packs";
 import { CEFR_LEVELS } from "../lib/level";
 import { estimateLevelV2, metricsFromRow } from "../lib/metrics";
-import { activeDays, latestLevelSignal, recentMetricScores, recentMetrics, weekStats } from "../lib/db";
+import { activeDays, latestLevelSignal, recentMemories, recentMetricScores, recentMetrics, weekStats } from "../lib/db";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -41,12 +41,13 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
       setError("");
       try {
         const since = Date.now() - WEEK_MS;
-        const [stats, rows, scores, active, signal] = await Promise.all([
+        const [stats, rows, scores, active, signal, memories] = await Promise.all([
           weekStats(settings.targetLang, since),
           recentMetrics(settings.targetLang, 2),
           recentMetricScores(settings.targetLang, 12),
           activeDays(),
           latestLevelSignal(settings.targetLang).catch(() => null),
+          recentMemories(settings.targetLang).catch(() => []),
         ]);
         if (!live) return;
 
@@ -77,6 +78,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
                 settings,
                 { ...stats, focusAreas: day.plan?.focus ?? [] },
                 getPack(settings.packId),
+                memories,
               ),
             },
           ],

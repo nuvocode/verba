@@ -23,6 +23,8 @@ import {
 import { reachable } from "../lib/models";
 import { importPack, listPacks, originLabel, packDocs, packOrigin, registry, removeImportedPack } from "../lib/packs";
 import { importScenario, listScenarios } from "../lib/scenarios";
+import { allMemories, deleteMemory, MEMORY_BUDGET, type MemoryRow } from "../lib/db";
+import { memoryDate } from "../lib/prompts";
 
 /**
  * Is the speech server the learner typed actually there? Same shape as the model
@@ -409,6 +411,7 @@ const NAV = [
   ["provider", "AI Provider"],
   ["speech", "Speech"],
   ["coaching", "Coaching"],
+  ["memory", "User Memory"],
   ["extensions", "Extensions"],
 ] as const;
 
@@ -451,6 +454,27 @@ export default function SettingsView({
   const [err, setErr] = useState("");
   const [openDoc, setOpenDoc] = useState(""); // slug of the language doc being read
   const [, bump] = useState(0); // packs/scenarios live in localStorage — force a re-read after import
+
+  // What the coach has written down about the learner. Read when the panel is
+  // opened — nothing else in Settings needs it, and it changes behind our back
+  // every time a conversation ends.
+  const [memories, setMemories] = useState<MemoryRow[] | null>(null);
+  useEffect(() => {
+    if (tab !== "memory") return;
+    let live = true;
+    void allMemories(settings.targetLang)
+      .then((rows) => live && setMemories(rows))
+      .catch(() => live && setMemories([])); // no DB (browser dev server) reads as nothing recorded
+    return () => {
+      live = false;
+    };
+  }, [tab, settings.targetLang]);
+
+  /** Strike a line out. The row goes, and with it whatever it was steering. */
+  const forget = async (m: MemoryRow) => {
+    await deleteMemory(m.id).catch(() => {});
+    setMemories((ms) => (ms ?? []).filter((x) => x.id !== m.id));
+  };
 
   // Bundled models on disk. Lives here, not in BundledModels, because the Deepgram
   // field needs to know whether dictation already works offline.
@@ -1029,6 +1053,55 @@ export default function SettingsView({
             "The small shortcut lines under each screen.",
             settings.showHints,
             () => onChange({ showHints: !settings.showHints }),
+          )}
+        </>
+      )}
+
+      {/* The learner's record of what the machine believes about them. Everything here
+          is on show, because a wrong line quietly steering every future prompt is the
+          failure this panel exists to prevent — and the only way to see it is to look. */}
+      {tab === "memory" && (
+        <>
+          <div className="sec">User Memory</div>
+          <div className="desc" style={{ maxWidth: 480, lineHeight: 1.5, margin: "0 4px 8px" }}>
+            What the coach has picked up about you while you talked, and reads back before every session — so it can
+            ask after the trip you mentioned last week, and set your reading in your own city. Written at the end of a
+            conversation, never anywhere else. Delete anything wrong, stale, or none of its business: a line struck out
+            here stops steering the prompts at once.
+          </div>
+          <div className="desc" style={{ maxWidth: 480, lineHeight: 1.5, margin: "0 4px 18px" }}>
+            This is your record, kept for <strong>{settings.targetLang}</strong>. The words you're studying live in
+            Memory, up in the nav — that's the other one.
+          </div>
+
+          {memories === null ? (
+            <div className="desc" style={{ padding: "4px" }}>Reading…</div>
+          ) : memories.length === 0 ? (
+            <div className="desc" style={{ padding: "4px", maxWidth: 480, lineHeight: 1.5 }}>
+              Nothing recorded yet. Have a conversation and tell the coach something about yourself — what you do, why
+              you're learning {settings.targetLang}, who's in your life. It writes down what's worth keeping when the
+              session ends.
+            </div>
+          ) : (
+            <>
+              {memories.map((m) => (
+                <div key={m.id} className="srow">
+                  <div style={{ flex: 1 }}>
+                    <div className="name">{m.fact}</div>
+                    <div className="desc">{memoryDate(m.created_at)}</div>
+                  </div>
+                  <button className="model" style={linkish} onClick={() => void forget(m)}>
+                    forget
+                  </button>
+                </div>
+              ))}
+              <div className="desc" style={{ padding: "14px 4px", maxWidth: 480, lineHeight: 1.5 }}>
+                {memories.length} fact{memories.length === 1 ? "" : "s"} on file.{" "}
+                {memories.length > MEMORY_BUDGET
+                  ? `The ${MEMORY_BUDGET} most recent go into each prompt — the local models have no room for more, and the oldest facts are the ones you're least likely to be asked about.`
+                  : "All of them go into every prompt the coach writes."}
+              </div>
+            </>
           )}
         </>
       )}

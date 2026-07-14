@@ -1,6 +1,6 @@
 import { level, type Settings } from "./settings.ts";
 import type { LanguagePack } from "./packs/schema";
-import { packGuidance } from "./prompts.ts";
+import { memoryBrief, packGuidance, type Memory } from "./prompts.ts";
 
 // Reading immersion: story mode + flow reading share one shape — a title plus
 // sentence-aligned target/native pairs, which the reader renders dual-page and
@@ -32,6 +32,7 @@ export interface StoryOptions {
   interests?: string; // free text, e.g. "space travel, cooking"
   goal?: string; // e.g. "practise past tense"
   sentences?: number; // rough target length (default 8)
+  memories?: Memory[]; // what the coach knows about the learner — the story can be set in their own world
 }
 
 const jsonShape =
@@ -53,10 +54,14 @@ function base(s: Settings, pack?: LanguagePack): string {
 /** Story mode: a fresh, self-contained adaptive story. */
 export function storyPrompt(s: Settings, opts: StoryOptions = {}, pack?: LanguagePack): string {
   const n = opts.sentences ?? 8;
+  const memories = opts.memories ?? [];
   return [
     base(s, pack),
     opts.interests ? `Tailor the topic to the learner's interests: ${opts.interests}.` : `Pick an engaging everyday topic.`,
     opts.goal ? `Where natural, give practice with: ${opts.goal}.` : "",
+    memories.length
+      ? `${memoryBrief(memories)}\nWhere it fits, set the story in the learner's own world — their work, their city, the people they have mentioned. Do not make the story *about* these facts; use them as its furniture.`
+      : "",
     `Write a coherent, complete short story of about ${n} sentences.`,
     jsonShape.replace(/TARGET/g, s.targetLang).replace(/NATIVE/g, s.nativeLang),
   ]
