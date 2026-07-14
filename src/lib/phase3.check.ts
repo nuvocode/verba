@@ -5,7 +5,7 @@ import assert from "node:assert";
 import { readdirSync } from "node:fs";
 import { defaultSettings } from "./settings.ts";
 import { BUNDLED_PACKS } from "./packs/bundled.ts";
-import { buildDailyPlan, themeForDate, parseRecap } from "./learn.ts";
+import { buildDailyPlan, nextBlock, themeForDate, parseRecap } from "./learn.ts";
 import { computeMetrics, estimateLevelV2 } from "./metrics.ts";
 import { parseWeeklyReport, parseDrills } from "./coach.ts";
 import { checkCompatibility } from "./packs/registry.ts";
@@ -26,6 +26,16 @@ assert(!noVocab.blocks.some((b) => b.kind === "vocab"), "no review block when no
 // weak-area drill folds into the conversation block
 const focused = buildDailyPlan(defaultSettings, { date: "2026-07-11", dueVocab: 0, focus: ["past tense"] });
 assert(focused.blocks[0].goal === "past tense", "first focus area drives the conversation goal");
+
+// --- the running order: what a finished block hands the learner to ---
+assert(nextBlock(plan, []) === "conversation", "an untouched day starts at the conversation");
+// reading hands off to the role-play — never straight to vocab, and never back to Talk's picker
+assert(nextBlock(plan, ["conversation", "reading"]) === "scenario", "reading is followed by the role-play");
+assert(nextBlock(plan, ["conversation", "reading", "scenario"]) === "vocab", "then the words that are due");
+// a day with nothing due skips vocab entirely — and ends, rather than dead-ending on Memory
+assert(nextBlock(noVocab, ["conversation", "reading", "scenario"]) === "summary", "no vocab due → wrap-up is next");
+assert(nextBlock(noVocab, ["conversation", "reading", "scenario", "summary"]) === null, "a finished day has no next");
+assert(nextBlock(null, []) === null, "no plan, nowhere to send them");
 
 // --- level estimation v2: metrics + CEFR heuristic ---
 const beginner = estimateLevelV2(computeMetrics(["hola.", "yo como pan."], { corrections: 2, deckSize: 0 }));

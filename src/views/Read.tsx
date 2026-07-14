@@ -22,14 +22,15 @@ export default function Read({
   settings,
   read,
   day,
-  onBegin,
+  onAdvance,
   onCaptureKeys,
   onChange,
 }: {
   settings: Settings;
   read: ReadState;
   day: Day;
-  onBegin: (kind: BlockKind) => void;
+  /** Close out the reading block and go wherever the day goes next — the plan decides. */
+  onAdvance: (kind: BlockKind) => void;
   /** The sheet takes the keyboard while it is open — Esc closes it, not the screen. */
   onCaptureKeys: (captured: boolean) => void;
   /** The chosen view and pace are settings: they are meant to outlive the passage. */
@@ -50,10 +51,7 @@ export default function Read({
     void read.generate({ ...ask, interests: day.plan?.theme, goal: block?.goal });
   };
 
-  const finish = () => {
-    void day.complete("reading");
-    onBegin(day.next === "reading" ? "vocab" : (day.next ?? "vocab"));
-  };
+  const finish = () => onAdvance("reading");
 
   const setView = (view: ReadView) => onChange({ readView: view });
 

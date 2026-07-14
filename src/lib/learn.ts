@@ -123,6 +123,16 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
   };
 }
 
+/**
+ * The first block of the plan the learner still owes — the day's running order, honoured.
+ * Pure and given both inputs explicitly, so a screen that has just finished a block can
+ * ask "what now?" with the `done` list it just wrote, instead of the one React has caught
+ * up to. `null` means the day is finished: there is nothing left to hand them.
+ */
+export function nextBlock(plan: DailyPlan | null, done: BlockKind[]): BlockKind | null {
+  return plan?.blocks.map((b) => b.kind).find((k) => !done.includes(k)) ?? null;
+}
+
 // Nudge the role-play toward a scenario that fits the theme; default to a café.
 function pickScenario(theme: string): string {
   if (/food|cook|shop|money/.test(theme)) return "restaurant";

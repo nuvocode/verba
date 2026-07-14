@@ -5,16 +5,27 @@ import type { Day } from "../lib/useDay";
 import type { Talk as TalkState } from "../lib/useTalk";
 import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
 
+// Where the reflection sends them, named by what the plan has next. The wording is the
+// day's, not this screen's — Talk never decides that reading (or anything) comes after.
+const CONTINUE: Record<BlockKind, string> = {
+  conversation: "Continue to the conversation →",
+  reading: "Continue to reading →",
+  scenario: "Continue to the role-play →",
+  vocab: "Continue to your words →",
+  summary: "Wrap up the day →",
+};
+
 export default function Talk({
   settings,
   talk,
   day,
-  onBegin,
+  onAdvance,
 }: {
   settings: Settings;
   talk: TalkState;
   day: Day;
-  onBegin: (kind: BlockKind) => void;
+  /** Close out a talking block and go wherever the day goes next — the plan decides. */
+  onAdvance: (kind: BlockKind) => void;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
   const [past, setPast] = useState<SessionRow[]>([]);
@@ -34,12 +45,26 @@ export default function Talk({
     scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" });
   }, [talk.msgs.length, talk.busy]);
 
-  // A finished conversation closes out whichever talking block the day still owes.
+  // Which of the day's talking blocks this conversation closes out. Matched on the scenario
+  // actually being practised — the plan's role-play names one, the conversation block is
+  // "free" — so finishing the role-play can't tick the conversation off in its place. A
+  // scenario the plan never asked for still closes whatever talking block is outstanding.
+  const talking = (day.plan?.blocks ?? []).filter((b) => b.kind === "conversation" || b.kind === "scenario");
+  const closes =
+    talking.find((b) => b.scenarioId === talk.scenario?.id)?.kind ??
+    talking.find((b) => !day.isDone(b.kind))?.kind ??
+    null;
+
+  // A finished conversation closes out that block even if the learner walks away from the
+  // reflection without pressing anything.
   useEffect(() => {
-    if (!talk.reflection) return;
-    const block = day.plan?.blocks.find((b) => (b.kind === "conversation" || b.kind === "scenario") && !day.isDone(b.kind));
-    if (block) void day.complete(block.kind);
+    if (talk.reflection && closes && !day.isDone(closes)) void day.complete(closes);
   }, [talk.reflection]);
+
+  // What the plan hands them next. Computed by skipping `closes` rather than reading
+  // `day.next`, so the button is right on the reflection's first paint — before the effect
+  // above has landed in state — and after it.
+  const upNext = (day.plan?.blocks ?? []).find((b) => b.kind !== closes && !day.isDone(b.kind))?.kind ?? null;
 
   // ---- replaying an old conversation ----
   if (!talk.started && open)
@@ -224,9 +249,11 @@ export default function Talk({
         )}
 
         <div style={{ display: "flex", gap: 12 }}>
-          <button className="btn sm" onClick={() => onBegin("reading")}>
-            Continue to reading →
-          </button>
+          {closes && (
+            <button className="btn sm" onClick={() => onAdvance(closes)}>
+              {upNext ? CONTINUE[upNext] : "Back to today →"}
+            </button>
+          )}
           <button className="btn sm ghost" onClick={talk.exitReflection}>
             Back to the conversation
           </button>

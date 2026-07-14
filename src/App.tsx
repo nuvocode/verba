@@ -138,6 +138,21 @@ export default function App() {
     [day, talk, read, go],
   );
 
+  /**
+   * Finish a block and hand the learner to whatever the plan actually has next — on a
+   * normal day, reading hands off to the role-play. Only the plan decides; no screen gets
+   * to guess. Nothing left to do means the day is over, and the honest place to land is
+   * Today, where they can see that.
+   */
+  const advance = useCallback(
+    async (kind: BlockKind) => {
+      const next = await day.complete(kind);
+      if (next) begin(next);
+      else go("today");
+    },
+    [day, begin, go],
+  );
+
   const paletteItems = useCallback((): PaletteItem[] => {
     const items: PaletteItem[] = [
       { section: "Go to", label: "Today — your session plan", kbd: "1", run: () => go("today") },
@@ -390,13 +405,13 @@ export default function App() {
 
       <div className="body">
         {space === "today" && <Today settings={settings} day={day} onBegin={begin} />}
-        {space === "talk" && <Talk settings={settings} talk={talk} day={day} onBegin={begin} />}
+        {space === "talk" && <Talk settings={settings} talk={talk} day={day} onAdvance={advance} />}
         {space === "read" && (
           <Read
             settings={settings}
             read={read}
             day={day}
-            onBegin={begin}
+            onAdvance={advance}
             onCaptureKeys={setCaptured}
             onChange={update}
           />

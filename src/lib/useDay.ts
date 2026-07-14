@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Settings } from "./settings";
 import { getProvider } from "./providers";
-import { buildDailyPlan, recapPrompt, parseRecap, type BlockKind, type DailyPlan, type DayRecap } from "./learn";
+import {
+  buildDailyPlan,
+  nextBlock,
+  recapPrompt,
+  parseRecap,
+  type BlockKind,
+  type DailyPlan,
+  type DayRecap,
+} from "./learn";
 import { getPack } from "./packs";
 import { getDailySession, saveDailySession, latestRecap, vocabCounts } from "./db";
 
@@ -19,7 +27,12 @@ export interface Day {
   isDone(kind: BlockKind): boolean;
   /** The first block not yet finished — what ↵ on Today starts. */
   next: BlockKind | null;
-  complete(kind: BlockKind): Promise<void>;
+  /**
+   * Mark a block done and answer with what the plan has next — `next` is state, so it is
+   * still the block you just finished for anyone reading it at the same tick. Await this
+   * instead. `null` means the day is done and there is nowhere further to send them.
+   */
+  complete(kind: BlockKind): Promise<BlockKind | null>;
   /** Ask the coach to close out the day. Marks the summary block done. */
   wrapUp(): Promise<void>;
 }
@@ -86,14 +99,14 @@ export function useDay(settings: Settings): Day {
 
   const complete = useCallback(
     async (kind: BlockKind) => {
-      setDone((d) => {
-        if (d.includes(kind)) return d;
-        const next = [...d, kind];
-        void persist(next, recap);
-        return next;
-      });
+      const nextDone = done.includes(kind) ? done : [...done, kind];
+      setDone(nextDone);
+      await persist(nextDone, recap);
+      // Read off the list we just wrote, not the one on screen: the caller is standing at
+      // the end of this block asking where to go, and `done` won't have re-rendered yet.
+      return nextBlock(plan, nextDone);
     },
-    [persist, recap],
+    [done, plan, persist, recap],
   );
 
   const wrapUp = useCallback(async () => {
@@ -119,7 +132,6 @@ export function useDay(settings: Settings): Day {
     });
   }, [plan, done, settings, persist]);
 
-  const kinds = plan?.blocks.map((b) => b.kind) ?? [];
   return {
     date,
     plan,
@@ -127,7 +139,7 @@ export function useDay(settings: Settings): Day {
     recap,
     loading,
     isDone: (k) => done.includes(k),
-    next: kinds.find((k) => !done.includes(k)) ?? null,
+    next: nextBlock(plan, done),
     complete,
     wrapUp,
   };
