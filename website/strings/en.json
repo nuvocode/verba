@@ -1,0 +1,136 @@
+{
+  "lang": "en",
+  "dir": "ltr",
+  "version": "v0.1.0",
+
+  "meta": {
+    "title": "Verba — learn a language by talking to an AI that runs on your machine",
+    "description": "Full conversations with inline corrections, AI-generated graded reading, automatic vocabulary capture, and a voice on both ends. Offline-capable, no account, MIT-licensed. macOS, Windows, Linux.",
+    "ogTitle": "Verba — a language tutor that runs on your machine",
+    "ogDescription": "Conversation with inline corrections, graded reading, spaced repetition, and a voice on both ends. Point it at Ollama and it works on a plane.",
+    "ogImage": "https://verba.nuvo.page/assets/og.png",
+    "ogSiteName": "Verba",
+    "themeColorLight": "#F5F1E8",
+    "themeColorDark": "#171410"
+  },
+
+  "nav": {
+    "session": "The session",
+    "why": "Why",
+    "speech": "Speech",
+    "download": "Download",
+    "status": "runs on your machine",
+    "themeLabel": "Toggle theme"
+  },
+
+  "hero": {
+    "eyebrow": "v0.1.0 &nbsp;·&nbsp; macOS · Windows · Linux &nbsp;·&nbsp; MIT",
+    "heading": "Learn a language by talking to an AI that never gets bored, never judges, and <em>&mdash; if you want &mdash;</em> never touches the internet.",
+    "lede": "Full conversations with inline corrections, AI-generated graded reading, automatic vocabulary capture, and a voice on both ends. Everything lives in a SQLite file on your disk. There is no server to sign up to, because there is no server.",
+    "ctaDownload": "Download for macOS",
+    "ctaSource": "View the source",
+    "hint1": "Windows, Linux and Intel Mac builds below",
+    "hint2": "No account, ever",
+    "hint3": "Point it at Ollama and it works on a plane",
+    "shotAlt": "Verba's Today screen: a dated session plan with conversation, reading, role-play and wrap-up.",
+    "shotCap": "<b>A session is a plan, not a menu.</b> One theme threads today's conversation, reading, role-play and the words that are due. You are never asked what to study &mdash; you press <span class=\"kbd\">↵</span> and begin."
+  },
+
+  "session": {
+    "eyebrow": "The session",
+    "story1Heading": "The coach speaks first and keeps the turn moving.",
+    "story1Text": "Corrections arrive inline, in the flow of the conversation, and the word you stumbled on is quietly noted. Suggestions are there for the moment you stall &mdash; not to answer for you.",
+    "story1Alt": "A conversation with the coach, with an inline correction and captured vocabulary.",
+    "story2Heading": "Voice and dictation, with no setup.",
+    "story2Text": "A 21&nbsp;MB voice runs inside the app: no key, no server, nothing on the network. Speak, get transcribed, get answered out loud &mdash; and Verba always tells you which tier is actually speaking.",
+    "story2Alt": "Settings → Speech, showing the bundled voice and dictation models."
+  },
+
+  "why": {
+    "eyebrow": "Why Verba",
+    "heading": "Six decisions, and what they cost.",
+    "card1Title": "Offline, genuinely.",
+    "card1Text": "Point it at <a href=\"https://ollama.com\">Ollama</a> and the whole app &mdash; chat, reading, speech, dictation &mdash; works on a plane. No account, ever.",
+    "card2Title": "Your provider, your key.",
+    "card2Text": "Ollama, LM Studio, OpenAI, Anthropic, Gemini, OpenRouter. Swap in Settings; nothing is locked in.",
+    "card3Title": "It talks back.",
+    "card3Text": "Speak, get transcribed, get answered out loud. The bundled models download on demand and run in-process.",
+    "card4Title": "It remembers.",
+    "card4Text": "Words you stumble on become a spaced-repetition deck, and the deck feeds tomorrow's session.",
+    "card5Title": "Your data stays put.",
+    "card5Text": "Everything lives in a local SQLite file. Nothing is uploaded, nothing is synced, nothing is sold.",
+    "card6Title": "Eight languages &mdash; adding one is a folder.",
+    "card6Text": "English, Spanish, French, German, Japanese, Turkish, Italian, Portuguese. <a href=\"https://github.com/nuvocode/verba/blob/master/CONTRIBUTING.md\">Add yours</a>."
+  },
+
+  "speech": {
+    "eyebrow": "Speech",
+    "heading": "A ladder, walked in order, out loud.",
+    "sub": "Verba walks <b>bundled → local server → cloud key → OS voice</b> and always tells you which tier is actually speaking. The bundled tier is the default, and it is the one that needs nothing from you.",
+    "tableModel": "Model",
+    "tableRole": "Role",
+    "tableSize": "Size",
+    "tableSpeed": "Speed",
+    "piperName": "Piper",
+    "piperBadge": "default",
+    "piperRole": "Voice — one per language",
+    "piperSize": "~21 MB",
+    "piperSpeed": "~7× real time",
+    "kokoroName": "Kokoro",
+    "kokoroRole": "Voice — 53 voices, six languages",
+    "kokoroSize": "349 MB",
+    "kokoroSpeed": "~2× real time",
+    "whisperName": "Whisper",
+    "whisperRole": "Dictation — base / small",
+    "whisperSize": "208 / 639 MB",
+    "whisperSpeed": "faster than real time",
+    "note": "Piper is a fiftieth of Kokoro's download and several times quicker &mdash; which, for a conversation turn, matters more than the last few percent of naturalness. Already run your own speech server? Any OpenAI-compatible one works (Kokoro-FastAPI, speaches, LocalAI, vLLM), as do ElevenLabs and Deepgram keys."
+  },
+
+  "download": {
+    "eyebrow": "Download &nbsp;·&nbsp; v0.1.0",
+    "heading": "Take the build for your machine.",
+    "macArmLabel": "macOS",
+    "macArmSub": "Apple Silicon — M1 to M4",
+    "macIntelLabel": "macOS",
+    "macIntelSub": "Intel",
+    "windowsLabel": "Windows",
+    "windowsSub": "x64",
+    "linuxLabel": "Linux",
+    "linuxSub": "x86_64",
+    "note": "On a Mac, take aarch64 for Apple Silicon and x64 only for an Intel Mac &mdash; the wrong one either refuses to start or crawls under Rosetta.",
+    "discloseSummary": "The build is unsigned — here's how to open it anyway",
+    "discloseP1": "Verba has no Apple Developer certificate and no Windows code-signing certificate, and we would rather ship the build than gate it behind either. So both operating systems will refuse to open it on the first try.",
+    "discloseP2mac1": "On macOS you will see: <b>\"Apple could not verify 'Verba' is free of malware\"</b> — click <b>Move to Trash</b>, then drag the app into <code>/Applications</code> and run <code>xattr -d com.apple.quarantine /Applications/Verba.app</code>.",
+    "discloseP3mac2": "Without a terminal: try to open it once, then <b>System Settings → Privacy & Security → scroll down → Open Anyway</b>.",
+    "discloseP4win": "On Windows you will see: <b>\"Windows protected your PC\"</b> — click <b>More info</b> then <b>Run anyway</b>.",
+    "discloseP5": "Building it yourself sidesteps both, and is the honest option if the above makes you uncomfortable. None of this is unique to Verba &mdash; it's the toll every unsigned open-source desktop app pays.",
+    "honesty": "<b>Platform honesty.</b> All four targets are packaged from the same source by CI, but the bundled speech engine has only ever run on macOS arm64. If you are the first to run it on Windows or Linux and no voice comes out, that's a bug worth reporting &mdash; not you doing it wrong.",
+    "sourceHeading": "Or build it from source",
+    "sourceNote": "Needs Node and Rust; for offline, Ollama running."
+  },
+
+  "footer": {
+    "tagline": "A language tutor that runs on your machine.",
+    "github": "GitHub",
+    "inside": "What's inside",
+    "contributing": "Contributing",
+    "license": "MIT licence",
+    "fineprint": "Built by Nuvo Code. No trackers on this page."
+  },
+
+  "langSwitcher": {
+    "label": "Language"
+  },
+
+  "langNames": {
+    "en": "English",
+    "tr": "Türkçe",
+    "es": "Español",
+    "fr": "Français",
+    "de": "Deutsch",
+    "ja": "日本語",
+    "it": "Italiano",
+    "pt": "Português"
+  }
+}

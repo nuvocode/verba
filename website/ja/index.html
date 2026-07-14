@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Verba — 自分のマシンで動く AI と話しながら言語を学ぶ</title>
+    <meta name="description" content="流れを止めないその場の添削つきの会話、AI が生成するレベル別リーディング、語彙の自動記録、そして話す側にも聞く側にも声。オフラインで動き、アカウントは不要、MIT ライセンス。macOS、Windows、Linux。" />
+    <link rel="canonical" href="https://verba.nuvo.page/ja/" />
+    <meta name="theme-color" content="#F5F1E8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#171410" media="(prefers-color-scheme: dark)" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://verba.nuvo.page/ja/" />
+    <meta property="og:site_name" content="Verba" />
+    <meta property="og:title" content="Verba — 自分のマシンで動く言語チューター" />
+    <meta property="og:description" content="その場で直る会話、レベル別リーディング、間隔反復、そして両方向の声。Ollama をつなげば、飛行機の中でも動きます。" />
+    <meta property="og:image" content="https://verba.nuvo.page/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Verba — 自分のマシンで動く言語チューター" />
+    <meta name="twitter:description" content="その場で直る会話、レベル別リーディング、間隔反復、そして両方向の声。Ollama をつなげば、飛行機の中でも動きます。" />
+    <meta name="twitter:image" content="https://verba.nuvo.page/assets/og.png" />
+
+    <!-- hreflang -->
+        <link rel="alternate" hreflang="de" href="https://verba.nuvo.page/de/" />
+    <link rel="alternate" hreflang="en" href="https://verba.nuvo.page/en/" />
+    <link rel="alternate" hreflang="es" href="https://verba.nuvo.page/es/" />
+    <link rel="alternate" hreflang="fr" href="https://verba.nuvo.page/fr/" />
+    <link rel="alternate" hreflang="it" href="https://verba.nuvo.page/it/" />
+    <link rel="alternate" hreflang="ja" href="https://verba.nuvo.page/ja/" />
+    <link rel="alternate" hreflang="pt" href="https://verba.nuvo.page/pt/" />
+    <link rel="alternate" hreflang="tr" href="https://verba.nuvo.page/tr/" />
+    <link rel="alternate" hreflang="x-default" href="https://verba.nuvo.page/en/" />
+
+    <link rel="icon" type="image/svg+xml" href="/assets/logo.svg" />
+    <link rel="apple-touch-icon" href="/assets/logo.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+
+    <!-- Theme is resolved before first paint so the page never flashes the wrong one. -->
+    <script>
+      (function () {
+        var saved = null;
+        try {
+          saved = localStorage.getItem("vtheme");
+        } catch (e) {}
+        var dark = saved
+          ? saved === "dark"
+          : window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.vtheme = dark ? "dark" : "light";
+      })();
+    </script>
+  </head>
+
+  <body>
+    <header class="topbar">
+      <a class="logo" href="/ja/">Verba<b>.</b></a>
+      <nav class="nav">
+        <a class="nav-item" href="#session">セッション</a>
+        <a class="nav-item" href="#why">理由</a>
+        <a class="nav-item" href="#speech">音声</a>
+        <a class="nav-item" href="#download">ダウンロード</a>
+      </nav>
+      <span class="spacer"></span>
+      <span class="status">
+        <i class="led"></i>
+        <span>あなたのマシンで動作</span>
+      </span>
+      <details class="lang-switcher">
+        <summary><span aria-hidden="true">🌐</span> <span class="lang-label">言語</span></summary>
+        <div class="lang-list">
+                      <a href="/de/"><span>Deutsch</span><span class="lang-code">de</span></a>
+            <a href="/en/"><span>English</span><span class="lang-code">en</span></a>
+            <a href="/es/"><span>Español</span><span class="lang-code">es</span></a>
+            <a href="/fr/"><span>Français</span><span class="lang-code">fr</span></a>
+            <a href="/it/"><span>Italiano</span><span class="lang-code">it</span></a>
+            <a href="/ja/" class="active"><span>日本語</span><span class="lang-code">ja</span></a>
+            <a href="/pt/"><span>Português</span><span class="lang-code">pt</span></a>
+            <a href="/tr/"><span>Türkçe</span><span class="lang-code">tr</span></a>
+        </div>
+      </details>
+      <button class="icon-btn" id="theme" type="button" aria-label="テーマを切り替え">
+        <span aria-hidden="true">☀</span>
+      </button>
+      <a class="btn sm" href="https://github.com/nuvocode/verba/releases/latest">ダウンロード</a>
+    </header>
+
+    <main>
+      <!-- ---------- hero ---------- -->
+      <section class="hero">
+        <p class="eyebrow">v0.1.0 &nbsp;·&nbsp; macOS · Windows · Linux &nbsp;·&nbsp; MIT</p>
+        <h1 class="display">
+          退屈もしなければ、あなたを値踏みもしない AI と話して、言語を学ぶ。<em>&mdash; 望むなら &mdash;</em> インターネットには一度もつながずに。
+        </h1>
+        <div class="lede">
+          <span class="bullet live"></span>
+          <p>
+            流れを止めないその場の添削つきの会話、AI が生成するレベル別リーディング、語彙の自動記録、そして話す側にも聞く側にも声。すべてはあなたのディスク上の SQLite ファイルの中にあります。登録すべきサーバーはありません。そもそもサーバーが存在しないからです。
+          </p>
+        </div>
+
+        <div class="cta">
+          <a class="btn" href="#download">
+            macOS 版をダウンロード
+            <span class="kbd">.dmg</span>
+          </a>
+          <a class="btn ghost" href="https://github.com/nuvocode/verba">ソースコードを見る</a>
+        </div>
+        <p class="hints">
+          <span>Windows・Linux・Intel Mac 版は下に</span>
+          <span>アカウントは不要、ずっと</span>
+          <span>Ollama をつなげば飛行機の中でも動く</span>
+        </p>
+
+        <figure class="shot wide">
+          <img
+            src="/assets/today.png"
+            width="1600"
+            height="1200"
+            alt="Verba の「今日」画面。日付のついたセッションプランに、会話・リーディング・ロールプレイ・振り返りが並ぶ。"
+          />
+        </figure>
+        <p class="shot-cap">
+          <b>セッションはメニューではなく、計画です。</b> ひとつのテーマが、今日の会話・リーディング・ロールプレイ・復習期日の来た単語を貫きます。何を勉強しますかとは訊かれません。<span class="kbd">↵</span> を押せば、始まります。
+        </p>
+      </section>
+
+      <!-- ---------- the session ---------- -->
+      <section class="band" id="session">
+        <p class="eyebrow">セッション</p>
+
+        <div class="story flip">
+          <div class="story-text">
+            <h2 class="display">コーチが先に口を開き、会話のテンポを保ちます。</h2>
+            <p>
+              添削は会話の流れの中にそのまま現れ、つまずいた単語は静かに書き留められます。ヒントは詰まったときのためにあります。あなたの代わりに答えるためではありません。
+            </p>
+          </div>
+          <figure class="shot">
+            <img
+              src="/assets/talk.png"
+              width="1600"
+              height="1200"
+              loading="lazy"
+              alt="コーチとの会話。その場の添削と、記録された語彙が見えている。"
+            />
+          </figure>
+        </div>
+
+        <div class="story">
+          <div class="story-text">
+            <h2 class="display">音声も口述入力も、設定なしで。</h2>
+            <p>
+              21&nbsp;MB の音声がアプリの中で動きます。キーもサーバーも要らず、ネットワークには何も出ていきません。話す、文字になる、声で返ってくる。そして Verba は、いまどの段階が実際に話しているのかを必ず教えてくれます。
+            </p>
+          </div>
+          <figure class="shot">
+            <img
+              src="/assets/speech.png"
+              width="1600"
+              height="1200"
+              loading="lazy"
+              alt="設定 → 音声。同梱の音声モデルと口述入力モデルが表示されている。"
+            />
+          </figure>
+        </div>
+      </section>
+
+      <!-- ---------- why ---------- -->
+      <section class="band" id="why">
+        <p class="eyebrow">Verba を選ぶ理由</p>
+        <h2 class="display band-h">6 つの決断と、その代償。</h2>
+
+        <div class="cards">
+          <article class="card">
+            <h3>オフライン、本当の意味で。</h3>
+            <p>
+              <a href="https://ollama.com">Ollama</a> をつなげば、チャットもリーディングも音声も口述入力も、アプリ全体が飛行機の中で動きます。アカウントは不要、ずっと。
+            </p>
+          </article>
+          <article class="card">
+            <h3>プロバイダーもキーも、あなたのもの。</h3>
+            <p>
+              Ollama、LM Studio、OpenAI、Anthropic、Gemini、OpenRouter。設定画面で差し替えられます。囲い込みは一切ありません。
+            </p>
+          </article>
+          <article class="card">
+            <h3>声が返ってきます。</h3>
+            <p>
+              話せば文字になり、答えは声で返ってきます。同梱モデルは必要になったときにダウンロードされ、アプリ内でそのまま動きます。
+            </p>
+          </article>
+          <article class="card">
+            <h3>覚えています。</h3>
+            <p>
+              つまずいた単語は間隔反復のデッキになり、そのデッキが明日のセッションを組み立てます。
+            </p>
+          </article>
+          <article class="card">
+            <h3>データは、そこから動きません。</h3>
+            <p>
+              すべてはローカルの SQLite ファイルの中にあります。アップロードもしません、同期もしません、売りもしません。
+            </p>
+          </article>
+          <article class="card">
+            <h3>8 言語、追加はフォルダひとつ。</h3>
+            <p>
+              英語、スペイン語、フランス語、ドイツ語、日本語、トルコ語、イタリア語、ポルトガル語。<a href="https://github.com/nuvocode/verba/blob/master/CONTRIBUTING.md">あなたの言語を追加</a>。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ---------- speech ---------- -->
+      <section class="band" id="speech">
+        <p class="eyebrow">音声</p>
+        <h2 class="display band-h">はしごを上から順に。最初に応えた段が、声になります。</h2>
+        <p class="band-sub">
+          Verba は <b>同梱 → ローカルサーバー → クラウドのキー → OS の音声</b> の順に試し、いまどの段階が実際に話しているのかを必ず教えてくれます。既定は同梱の段階で、これはあなたに何も要求しません。
+        </p>
+
+        <div class="table">
+          <div class="trow thead">
+            <span>モデル</span><span>役割</span><span>サイズ</span><span>速度</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">Piper<i>デフォルト</i></span>
+            <span>音声 — 言語ごとに 1 つ</span>
+            <span class="mono">~21 MB</span>
+            <span class="mono">~7× 実時間</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">Kokoro</span>
+            <span>音声 — 53 の声、6 言語</span>
+            <span class="mono">349 MB</span>
+            <span class="mono">~2× 実時間</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">Whisper</span>
+            <span>口述入力 — base / small</span>
+            <span class="mono">208 / 639 MB</span>
+            <span class="mono">実時間より速い</span>
+          </div>
+        </div>
+        <p class="note">
+          Piper のダウンロードサイズは Kokoro の 50 分の 1、速度は数倍です。会話の一往復にとっては、自然さの最後の数パーセントよりもそちらのほうがずっと効きます。すでに自前の音声サーバーをお使いですか。OpenAI 互換のものならどれでも動きます（Kokoro-FastAPI、speaches、LocalAI、vLLM）。ElevenLabs や Deepgram のキーも使えます。
+        </p>
+      </section>
+
+      <!-- ---------- download ---------- -->
+      <section class="band" id="download">
+        <p class="eyebrow">ダウンロード &nbsp;·&nbsp; v0.1.0</p>
+        <h2 class="display band-h">あなたのマシンに合うビルドをどうぞ。</h2>
+
+        <div class="dl">
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>macOS</b>
+              <span>Apple Silicon — M1 から M4</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_aarch64.dmg"
+                >.dmg</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>macOS</b>
+              <span>Intel</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_x64.dmg"
+                >.dmg</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>Windows</b>
+              <span>x64</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_x64-setup.exe"
+                >.exe</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_x64_en-US.msi"
+                >.msi</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>Linux</b>
+              <span>x86_64</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_amd64.AppImage"
+                >.AppImage</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_amd64.deb"
+                >.deb</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba-0.1.0-1.x86_64.rpm"
+                >.rpm</a
+              >
+            </div>
+          </div>
+        </div>
+
+        <p class="note">
+          Mac では、Apple Silicon なら aarch64 を、Intel Mac のときにかぎり x64 を選んでください。取り違えると、起動を拒まれるか、Rosetta の上を這うことになります。
+        </p>
+
+        <details class="disclose">
+          <summary>このビルドは署名されていません。それでも開く方法はこちらです</summary>
+          <div class="disclose-body">
+            <p>
+              Verba には Apple Developer 証明書も、Windows のコード署名証明書もありません。どちらかの後ろにビルドを閉じ込めておくくらいなら、そのまま出すほうを選びました。そのため、どちらの OS も最初の一度は起動を拒みます。
+            </p>
+            <p>
+              macOS ではこう出ます。<b>"「Verba」にマルウェアが含まれていないことを Apple は検証できませんでした"</b> — <b>ゴミ箱に入れる</b> をクリックし、アプリを <code>/Applications</code> にドラッグしてから <code>xattr -d com.apple.quarantine /Applications/Verba.app</code> を実行してください。
+            </p>
+            <pre><code>xattr -dr com.apple.quarantine /Applications/Verba.app</code></pre>
+            <p>
+              ターミナルを使わないなら、一度開こうとしたあとで <b>システム設定 → プライバシーとセキュリティ → 下までスクロール → このまま開く</b> と進みます。
+            </p>
+            <p>
+              Windows ではこう出ます。<b>"PC が保護されました"</b> — <b>詳細情報</b> をクリックしてから <b>実行</b> を選んでください。
+            </p>
+            <p>
+              自分でビルドすればどちらも回避できますし、ここまでの手順に抵抗があるなら、それが誠実な選択肢です。これは Verba にかぎった話ではありません。署名のないオープンソースのデスクトップアプリが、みな等しく払っている通行料です。
+            </p>
+          </div>
+        </details>
+
+        <div class="honesty">
+          <span class="bullet"></span>
+          <p>
+            <b>プラットフォームについて、正直に。</b> 4 つのターゲットはすべて同じソースから CI がパッケージしていますが、同梱の音声エンジンが実際に動いた実績があるのは macOS arm64 だけです。Windows や Linux で最初に動かしたのがあなたで、声が出てこなかったなら、それは報告する価値のあるバグです。あなたのやり方が間違っているわけではありません。
+          </p>
+        </div>
+
+        <div class="source">
+          <p class="sec">あるいは、ソースからビルドする</p>
+          <pre><code>git clone https://github.com/nuvocode/verba.git
+cd verba
+npm install
+npm run tauri build</code></pre>
+          <p class="note">Node と Rust が必要です。オフラインで使うなら、Ollama を起動しておいてください。</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="foot-in">
+        <div>
+          <a class="logo" href="/ja/">Verba<b>.</b></a>
+          <p>あなたのマシンで動く言語チューター。</p>
+        </div>
+        <nav>
+          <a href="https://github.com/nuvocode/verba">GitHub</a>
+          <a href="https://github.com/nuvocode/verba/blob/master/docs/architecture.md"
+            >中身のこと</a
+          >
+          <a href="https://github.com/nuvocode/verba/blob/master/CONTRIBUTING.md">コントリビュート</a>
+          <a href="https://github.com/nuvocode/verba/blob/master/LICENSE">MIT ライセンス</a>
+        </nav>
+      </div>
+      <p class="foot-fine">
+        Nuvo Code が作りました。このページにトラッカーはありません。
+      </p>
+    </footer>
+
+    <script>
+      var root = document.documentElement;
+      document.getElementById("theme").addEventListener("click", function () {
+        var next = root.dataset.vtheme === "dark" ? "light" : "dark";
+        root.dataset.vtheme = next;
+        try {
+          localStorage.setItem("vtheme", next);
+        } catch (e) {}
+      });
+    </script>
+  </body>
+</html>

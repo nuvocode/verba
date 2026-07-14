@@ -1,0 +1,136 @@
+{
+  "lang": "tr",
+  "dir": "ltr",
+  "version": "v0.1.0",
+
+  "meta": {
+    "title": "Verba — makinenizde çalışan bir yapay zekayla konuşarak dil öğrenin",
+    "description": "Anında düzeltmeli tam konuşmalar, yapay zeka tarafından oluşturulmuş seviyeli okuma, otomatik kelime yakalama ve her iki tarafta ses. Çevrimdışı çalışabilir, hesap gerektirmez, MIT lisanslı. macOS, Windows, Linux.",
+    "ogTitle": "Verba — makinenizde çalışan bir dil eğitmeni",
+    "ogDescription": "Anında düzeltmeli konuşma, seviyeli okuma, aralıklı tekrar ve her iki tarafta ses. Ollama'ya bağlayın, uçakta bile çalışır.",
+    "ogImage": "https://verba.nuvo.page/assets/og.png",
+    "ogSiteName": "Verba",
+    "themeColorLight": "#F5F1E8",
+    "themeColorDark": "#171410"
+  },
+
+  "nav": {
+    "session": "Oturum",
+    "why": "Neden",
+    "speech": "Konuşma",
+    "download": "İndir",
+    "status": "makinenizde çalışır",
+    "themeLabel": "Temayı değiştir"
+  },
+
+  "hero": {
+    "eyebrow": "v0.1.0 &nbsp;·&nbsp; macOS · Windows · Linux &nbsp;·&nbsp; MIT",
+    "heading": "Asla sıkılmayan, asla yargılamayan ve <em>&mdash; isterseniz &mdash;</em> internete hiç dokunmayan bir yapay zekayla konuşarak dil öğrenin.",
+    "lede": "Anında düzeltmeli tam konuşmalar, yapay zeka tarafından oluşturulmuş seviyeli okuma, otomatik kelime yakalama ve her iki tarafta ses. Her şey diskinizdeki bir SQLite dosyasında yaşar. Kaydolacak bir sunucu yok, çünkü sunucu yok.",
+    "ctaDownload": "macOS için indir",
+    "ctaSource": "Kaynak kodu gör",
+    "hint1": "Windows, Linux ve Intel Mac sürümleri aşağıda",
+    "hint2": "Asla hesap yok",
+    "hint3": "Ollama'ya bağlayın, uçakta bile çalışır",
+    "shotAlt": "Verba'nın Bugün ekranı: konuşma, okuma, rol yapma ve özet içeren tarihli bir oturum planı.",
+    "shotCap": "<b>Bir oturum bir plandır, menü değil.</b> Tek bir tema bugünün konuşmasını, okumasını, rol yapmasını ve tekrar edilmesi gereken kelimeleri birbirine bağlar. Ne çalışacağınız asla sorulmaz &mdash; <span class=\"kbd\">↵</span> tuşuna basar ve başlarsınız."
+  },
+
+  "session": {
+    "eyebrow": "Oturum",
+    "story1Heading": "Koç önce konuşur ve sırayı hareketli tutar.",
+    "story1Text": "Düzeltmeler konuşmanın akışı içinde anında gelir ve takıldığınız kelime sessizce not edilir. Öneriler duraksadığınız an için oradadır &mdash; sizin yerinize cevap vermek için değil.",
+    "story1Alt": "Anında düzeltme ve yakalanan kelimelerle koçla bir konuşma.",
+    "story2Heading": "Kurulum gerektirmeyen ses ve dikte.",
+    "story2Text": "21&nbsp;MB'lık bir ses uygulamanın içinde çalışır: anahtar yok, sunucu yok, ağda hiçbir şey yok. Konuşun, yazıya dökülsün, sesli cevap alın &mdash; ve Verba size her zaman hangi katmanın konuştuğunu söyler.",
+    "story2Alt": "Ayarlar → Konuşma, dahili ses ve dikte modellerini gösteriyor."
+  },
+
+  "why": {
+    "eyebrow": "Neden Verba",
+    "heading": "Altı karar ve maliyetleri.",
+    "card1Title": "Gerçekten çevrimdışı.",
+    "card1Text": "<a href=\"https://ollama.com\">Ollama</a>'ya bağlayın ve tüm uygulama &mdash; sohbet, okuma, konuşma, dikte &mdash; uçakta çalışır. Asla hesap yok.",
+    "card2Title": "Sağlayıcınız, anahtarınız.",
+    "card2Text": "Ollama, LM Studio, OpenAI, Anthropic, Gemini, OpenRouter. Ayarlar'dan değiştirin; hiçbir şeye kilitli değilsiniz.",
+    "card3Title": "Karşılık verir.",
+    "card3Text": "Konuşun, yazıya dökülsün, sesli cevap alın. Dahili modeller istek üzerine indirilir ve uygulama içinde çalışır.",
+    "card4Title": "Hatırlar.",
+    "card4Text": "Takıldığınız kelimeler aralıklı tekrar destesine dönüşür ve deste yarının oturumunu besler.",
+    "card5Title": "Verileriniz yerinde kalır.",
+    "card5Text": "Her şey yerel bir SQLite dosyasında yaşar. Hiçbir şey yüklenmez, hiçbir şey senkronize edilmez, hiçbir şey satılmaz.",
+    "card6Title": "Sekiz dil &mdash; bir tane eklemek bir klasör.",
+    "card6Text": "İngilizce, İspanyolca, Fransızca, Almanca, Japonca, Türkçe, İtalyanca, Portekizce. <a href=\"https://github.com/nuvocode/verba/blob/master/CONTRIBUTING.md\">Sizinkini ekleyin</a>."
+  },
+
+  "speech": {
+    "eyebrow": "Konuşma",
+    "heading": "Sırayla yürünen, sesli bir merdiven.",
+    "sub": "Verba <b>dahili → yerel sunucu → bulut anahtarı → işletim sistemi sesi</b> sırasını yürür ve size her zaman hangi katmanın konuştuğunu söyler. Dahili katman varsayılandır ve sizden hiçbir şey istemeyendir.",
+    "tableModel": "Model",
+    "tableRole": "Rol",
+    "tableSize": "Boyut",
+    "tableSpeed": "Hız",
+    "piperName": "Piper",
+    "piperBadge": "varsayılan",
+    "piperRole": "Ses — dil başına bir tane",
+    "piperSize": "~21 MB",
+    "piperSpeed": "~7× gerçek zaman",
+    "kokoroName": "Kokoro",
+    "kokoroRole": "Ses — 53 ses, altı dil",
+    "kokoroSize": "349 MB",
+    "kokoroSpeed": "~2× gerçek zaman",
+    "whisperName": "Whisper",
+    "whisperRole": "Dikte — base / small",
+    "whisperSize": "208 / 639 MB",
+    "whisperSpeed": "gerçek zamandan hızlı",
+    "note": "Piper, Kokoro'nun ellide biri indirme boyutunda ve birkaç kat daha hızlıdır &mdash; ki bu, bir konuşma sırası için doğallığın son birkaç yüzdesinden daha önemlidir. Zaten kendi konuşma sunucunuzu mu çalıştırıyorsunuz? OpenAI uyumlu herhangi biri çalışır (Kokoro-FastAPI, speaches, LocalAI, vLLM), ElevenLabs ve Deepgram anahtarları da."
+  },
+
+  "download": {
+    "eyebrow": "İndir &nbsp;·&nbsp; v0.1.0",
+    "heading": "Makineniz için olan sürümü alın.",
+    "macArmLabel": "macOS",
+    "macArmSub": "Apple Silicon — M1'den M4'e",
+    "macIntelLabel": "macOS",
+    "macIntelSub": "Intel",
+    "windowsLabel": "Windows",
+    "windowsSub": "x64",
+    "linuxLabel": "Linux",
+    "linuxSub": "x86_64",
+    "note": "Mac'te, Apple Silicon için aarch64 ve yalnızca Intel Mac için x64 alın &mdash; yanlış olan ya başlamayı reddeder ya da Rosetta altında sürünür.",
+    "discloseSummary": "Sürüm imzasız — yine de nasıl açacağınız burada",
+    "discloseP1": "Verba'nın Apple Developer sertifikası veya Windows kod imzalama sertifikası yok ve sürümü bunlardan birinin arkasına kilitlemektense yayınlamayı tercih ederiz. Bu yüzden her iki işletim sistemi ilk denemede açmayı reddedecektir.",
+    "discloseP2mac1": "macOS'ta şunu göreceksiniz: <b>\"Apple could not verify 'Verba' is free of malware\"</b> — <b>Move to Trash</b>'e tıklayın, ardından uygulamayı <code>/Applications</code> içine sürükleyin ve <code>xattr -d com.apple.quarantine /Applications/Verba.app</code> komutunu çalıştırın.",
+    "discloseP3mac2": "Terminal olmadan: bir kez açmayı deneyin, ardından <b>Sistem Ayarları → Gizlilik ve Güvenlik → aşağı kaydırın → Yine de Aç</b>.",
+    "discloseP4win": "Windows'ta şunu göreceksiniz: <b>\"Windows protected your PC\"</b> — <b>More info</b>'ye ardından <b>Run anyway</b>'e tıklayın.",
+    "discloseP5": "Kendiniz derlemek her ikisini de atlar ve yukarıdakiler sizi rahatsız ediyorsa dürüst seçenek budur. Bunların hiçbiri Verba'ya özgü değil &mdash; imzasız her açık kaynak masaüstü uygulamasının ödediği bedeldir.",
+    "honesty": "<b>Platform dürüstlüğü.</b> Dört hedef de CI tarafından aynı kaynaktan paketlenir, ancak dahili konuşma motoru yalnızca macOS arm64'te çalıştırılmıştır. Windows veya Linux'ta ilk çalıştıran sizseniz ve ses gelmezse, bu bildirilmeye değer bir hatadır &mdash; sizin yanlış yaptığınız değil.",
+    "sourceHeading": "Veya kaynaktan derleyin",
+    "sourceNote": "Node ve Rust gerektirir; çevrimdışı için Ollama çalışıyor olmalı."
+  },
+
+  "footer": {
+    "tagline": "Makinenizde çalışan bir dil eğitmeni.",
+    "github": "GitHub",
+    "inside": "İçindekiler",
+    "contributing": "Katkı",
+    "license": "MIT lisansı",
+    "fineprint": "Nuvo Code tarafından geliştirildi. Bu sayfada izleyici yok."
+  },
+
+  "langSwitcher": {
+    "label": "Dil"
+  },
+
+  "langNames": {
+    "en": "English",
+    "tr": "Türkçe",
+    "es": "Español",
+    "fr": "Français",
+    "de": "Deutsch",
+    "ja": "日本語",
+    "it": "Italiano",
+    "pt": "Português"
+  }
+}

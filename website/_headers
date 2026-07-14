@@ -13,3 +13,20 @@
 
 /
   Cache-Control: public, max-age=600
+
+/en/*
+  Cache-Control: public, max-age=600
+/tr/*
+  Cache-Control: public, max-age=600
+/es/*
+  Cache-Control: public, max-age=600
+/fr/*
+  Cache-Control: public, max-age=600
+/de/*
+  Cache-Control: public, max-age=600
+/ja/*
+  Cache-Control: public, max-age=600
+/it/*
+  Cache-Control: public, max-age=600
+/pt/*
+  Cache-Control: public, max-age=600

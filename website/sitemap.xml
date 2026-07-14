@@ -1,9 +1,116 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
-    <loc>https://verba.nuvo.page/</loc>
+    <loc>https://verba.nuvo.page/de/</loc>
     <lastmod>2026-07-14</lastmod>
     <changefreq>monthly</changefreq>
     <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://verba.nuvo.page/en/" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://verba.nuvo.page/es/" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://verba.nuvo.page/fr/" />
+    <xhtml:link rel="alternate" hreflang="it" href="https://verba.nuvo.page/it/" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://verba.nuvo.page/ja/" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://verba.nuvo.page/pt/" />
+    <xhtml:link rel="alternate" hreflang="tr" href="https://verba.nuvo.page/tr/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://verba.nuvo.page/en/" />
+  </url>
+  <url>
+    <loc>https://verba.nuvo.page/en/</loc>
+    <lastmod>2026-07-14</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="de" href="https://verba.nuvo.page/de/" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://verba.nuvo.page/es/" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://verba.nuvo.page/fr/" />
+    <xhtml:link rel="alternate" hreflang="it" href="https://verba.nuvo.page/it/" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://verba.nuvo.page/ja/" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://verba.nuvo.page/pt/" />
+    <xhtml:link rel="alternate" hreflang="tr" href="https://verba.nuvo.page/tr/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://verba.nuvo.page/en/" />
+  </url>
+  <url>
+    <loc>https://verba.nuvo.page/es/</loc>
+    <lastmod>2026-07-14</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="de" href="https://verba.nuvo.page/de/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://verba.nuvo.page/en/" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://verba.nuvo.page/fr/" />
+    <xhtml:link rel="alternate" hreflang="it" href="https://verba.nuvo.page/it/" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://verba.nuvo.page/ja/" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://verba.nuvo.page/pt/" />
+    <xhtml:link rel="alternate" hreflang="tr" href="https://verba.nuvo.page/tr/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://verba.nuvo.page/en/" />
+  </url>
+  <url>
+    <loc>https://verba.nuvo.page/fr/</loc>
+    <lastmod>2026-07-14</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="de" href="https://verba.nuvo.page/de/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://verba.nuvo.page/en/" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://verba.nuvo.page/es/" />
+    <xhtml:link rel="alternate" hreflang="it" href="https://verba.nuvo.page/it/" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://verba.nuvo.page/ja/" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://verba.nuvo.page/pt/" />
+    <xhtml:link rel="alternate" hreflang="tr" href="https://verba.nuvo.page/tr/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://verba.nuvo.page/en/" />
+  </url>
+  <url>
+    <loc>https://verba.nuvo.page/it/</loc>
+    <lastmod>2026-07-14</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="de" href="https://verba.nuvo.page/de/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://verba.nuvo.page/en/" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://verba.nuvo.page/es/" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://verba.nuvo.page/fr/" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://verba.nuvo.page/ja/" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://verba.nuvo.page/pt/" />
+    <xhtml:link rel="alternate" hreflang="tr" href="https://verba.nuvo.page/tr/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://verba.nuvo.page/en/" />
+  </url>
+  <url>
+    <loc>https://verba.nuvo.page/ja/</loc>
+    <lastmod>2026-07-14</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="de" href="https://verba.nuvo.page/de/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://verba.nuvo.page/en/" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://verba.nuvo.page/es/" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://verba.nuvo.page/fr/" />
+    <xhtml:link rel="alternate" hreflang="it" href="https://verba.nuvo.page/it/" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://verba.nuvo.page/pt/" />
+    <xhtml:link rel="alternate" hreflang="tr" href="https://verba.nuvo.page/tr/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://verba.nuvo.page/en/" />
+  </url>
+  <url>
+    <loc>https://verba.nuvo.page/pt/</loc>
+    <lastmod>2026-07-14</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="de" href="https://verba.nuvo.page/de/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://verba.nuvo.page/en/" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://verba.nuvo.page/es/" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://verba.nuvo.page/fr/" />
+    <xhtml:link rel="alternate" hreflang="it" href="https://verba.nuvo.page/it/" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://verba.nuvo.page/ja/" />
+    <xhtml:link rel="alternate" hreflang="tr" href="https://verba.nuvo.page/tr/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://verba.nuvo.page/en/" />
+  </url>
+  <url>
+    <loc>https://verba.nuvo.page/tr/</loc>
+    <lastmod>2026-07-14</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="de" href="https://verba.nuvo.page/de/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://verba.nuvo.page/en/" />
+    <xhtml:link rel="alternate" hreflang="es" href="https://verba.nuvo.page/es/" />
+    <xhtml:link rel="alternate" hreflang="fr" href="https://verba.nuvo.page/fr/" />
+    <xhtml:link rel="alternate" hreflang="it" href="https://verba.nuvo.page/it/" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://verba.nuvo.page/ja/" />
+    <xhtml:link rel="alternate" hreflang="pt" href="https://verba.nuvo.page/pt/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://verba.nuvo.page/en/" />
   </url>
 </urlset>

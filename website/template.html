@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>{{meta.title}}</title>
+    <meta name="description" content="{{meta.description}}" />
+    <link rel="canonical" href="https://verba.nuvo.page/{{lang}}/" />
+    <meta name="theme-color" content="{{meta.themeColorLight}}" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="{{meta.themeColorDark}}" media="(prefers-color-scheme: dark)" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://verba.nuvo.page/{{lang}}/" />
+    <meta property="og:site_name" content="{{meta.ogSiteName}}" />
+    <meta property="og:title" content="{{meta.ogTitle}}" />
+    <meta property="og:description" content="{{meta.ogDescription}}" />
+    <meta property="og:image" content="{{meta.ogImage}}" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{{meta.ogTitle}}" />
+    <meta name="twitter:description" content="{{meta.ogDescription}}" />
+    <meta name="twitter:image" content="{{meta.ogImage}}" />
+
+    <!-- hreflang -->
+    {{hreflang}}
+
+    <link rel="icon" type="image/svg+xml" href="/assets/logo.svg" />
+    <link rel="apple-touch-icon" href="/assets/logo.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+
+    <!-- Theme is resolved before first paint so the page never flashes the wrong one. -->
+    <script>
+      (function () {
+        var saved = null;
+        try {
+          saved = localStorage.getItem("vtheme");
+        } catch (e) {}
+        var dark = saved
+          ? saved === "dark"
+          : window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.vtheme = dark ? "dark" : "light";
+      })();
+    </script>
+  </head>
+
+  <body>
+    <header class="topbar">
+      <a class="logo" href="/{{lang}}/">Verba<b>.</b></a>
+      <nav class="nav">
+        <a class="nav-item" href="#session">{{nav.session}}</a>
+        <a class="nav-item" href="#why">{{nav.why}}</a>
+        <a class="nav-item" href="#speech">{{nav.speech}}</a>
+        <a class="nav-item" href="#download">{{nav.download}}</a>
+      </nav>
+      <span class="spacer"></span>
+      <span class="status">
+        <i class="led"></i>
+        <span>{{nav.status}}</span>
+      </span>
+      <details class="lang-switcher">
+        <summary><span aria-hidden="true">🌐</span> <span class="lang-label">{{langSwitcher.label}}</span></summary>
+        <div class="lang-list">
+          {{langLinks}}
+        </div>
+      </details>
+      <button class="icon-btn" id="theme" type="button" aria-label="{{nav.themeLabel}}">
+        <span aria-hidden="true">☀</span>
+      </button>
+      <a class="btn sm" href="https://github.com/nuvocode/verba/releases/latest">{{nav.download}}</a>
+    </header>
+
+    <main>
+      <!-- ---------- hero ---------- -->
+      <section class="hero">
+        <p class="eyebrow">{{hero.eyebrow}}</p>
+        <h1 class="display">
+          {{hero.heading}}
+        </h1>
+        <div class="lede">
+          <span class="bullet live"></span>
+          <p>
+            {{hero.lede}}
+          </p>
+        </div>
+
+        <div class="cta">
+          <a class="btn" href="#download">
+            {{hero.ctaDownload}}
+            <span class="kbd">.dmg</span>
+          </a>
+          <a class="btn ghost" href="https://github.com/nuvocode/verba">{{hero.ctaSource}}</a>
+        </div>
+        <p class="hints">
+          <span>{{hero.hint1}}</span>
+          <span>{{hero.hint2}}</span>
+          <span>{{hero.hint3}}</span>
+        </p>
+
+        <figure class="shot wide">
+          <img
+            src="/assets/today.png"
+            width="1600"
+            height="1200"
+            alt="{{hero.shotAlt}}"
+          />
+        </figure>
+        <p class="shot-cap">
+          {{hero.shotCap}}
+        </p>
+      </section>
+
+      <!-- ---------- the session ---------- -->
+      <section class="band" id="session">
+        <p class="eyebrow">{{session.eyebrow}}</p>
+
+        <div class="story flip">
+          <div class="story-text">
+            <h2 class="display">{{session.story1Heading}}</h2>
+            <p>
+              {{session.story1Text}}
+            </p>
+          </div>
+          <figure class="shot">
+            <img
+              src="/assets/talk.png"
+              width="1600"
+              height="1200"
+              loading="lazy"
+              alt="{{session.story1Alt}}"
+            />
+          </figure>
+        </div>
+
+        <div class="story">
+          <div class="story-text">
+            <h2 class="display">{{session.story2Heading}}</h2>
+            <p>
+              {{session.story2Text}}
+            </p>
+          </div>
+          <figure class="shot">
+            <img
+              src="/assets/speech.png"
+              width="1600"
+              height="1200"
+              loading="lazy"
+              alt="{{session.story2Alt}}"
+            />
+          </figure>
+        </div>
+      </section>
+
+      <!-- ---------- why ---------- -->
+      <section class="band" id="why">
+        <p class="eyebrow">{{why.eyebrow}}</p>
+        <h2 class="display band-h">{{why.heading}}</h2>
+
+        <div class="cards">
+          <article class="card">
+            <h3>{{why.card1Title}}</h3>
+            <p>
+              {{why.card1Text}}
+            </p>
+          </article>
+          <article class="card">
+            <h3>{{why.card2Title}}</h3>
+            <p>
+              {{why.card2Text}}
+            </p>
+          </article>
+          <article class="card">
+            <h3>{{why.card3Title}}</h3>
+            <p>
+              {{why.card3Text}}
+            </p>
+          </article>
+          <article class="card">
+            <h3>{{why.card4Title}}</h3>
+            <p>
+              {{why.card4Text}}
+            </p>
+          </article>
+          <article class="card">
+            <h3>{{why.card5Title}}</h3>
+            <p>
+              {{why.card5Text}}
+            </p>
+          </article>
+          <article class="card">
+            <h3>{{why.card6Title}}</h3>
+            <p>
+              {{why.card6Text}}
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ---------- speech ---------- -->
+      <section class="band" id="speech">
+        <p class="eyebrow">{{speech.eyebrow}}</p>
+        <h2 class="display band-h">{{speech.heading}}</h2>
+        <p class="band-sub">
+          {{speech.sub}}
+        </p>
+
+        <div class="table">
+          <div class="trow thead">
+            <span>{{speech.tableModel}}</span><span>{{speech.tableRole}}</span><span>{{speech.tableSize}}</span><span>{{speech.tableSpeed}}</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">{{speech.piperName}}<i>{{speech.piperBadge}}</i></span>
+            <span>{{speech.piperRole}}</span>
+            <span class="mono">{{speech.piperSize}}</span>
+            <span class="mono">{{speech.piperSpeed}}</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">{{speech.kokoroName}}</span>
+            <span>{{speech.kokoroRole}}</span>
+            <span class="mono">{{speech.kokoroSize}}</span>
+            <span class="mono">{{speech.kokoroSpeed}}</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">{{speech.whisperName}}</span>
+            <span>{{speech.whisperRole}}</span>
+            <span class="mono">{{speech.whisperSize}}</span>
+            <span class="mono">{{speech.whisperSpeed}}</span>
+          </div>
+        </div>
+        <p class="note">
+          {{speech.note}}
+        </p>
+      </section>
+
+      <!-- ---------- download ---------- -->
+      <section class="band" id="download">
+        <p class="eyebrow">{{download.eyebrow}}</p>
+        <h2 class="display band-h">{{download.heading}}</h2>
+
+        <div class="dl">
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>{{download.macArmLabel}}</b>
+              <span>{{download.macArmSub}}</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm"
+                href="https://github.com/nuvocode/verba/releases/download/{{version}}/Verba_{{versionUnderscore}}_aarch64.dmg"
+                >.dmg</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>{{download.macIntelLabel}}</b>
+              <span>{{download.macIntelSub}}</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/{{version}}/Verba_{{versionUnderscore}}_x64.dmg"
+                >.dmg</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>{{download.windowsLabel}}</b>
+              <span>{{download.windowsSub}}</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/{{version}}/Verba_{{versionUnderscore}}_x64-setup.exe"
+                >.exe</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/{{version}}/Verba_{{versionUnderscore}}_x64_en-US.msi"
+                >.msi</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>{{download.linuxLabel}}</b>
+              <span>{{download.linuxSub}}</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/{{version}}/Verba_{{versionUnderscore}}_amd64.AppImage"
+                >.AppImage</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/{{version}}/Verba_{{versionUnderscore}}_amd64.deb"
+                >.deb</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/{{version}}/Verba-{{versionUnderscore}}-1.x86_64.rpm"
+                >.rpm</a
+              >
+            </div>
+          </div>
+        </div>
+
+        <p class="note">
+          {{download.note}}
+        </p>
+
+        <details class="disclose">
+          <summary>{{download.discloseSummary}}</summary>
+          <div class="disclose-body">
+            <p>
+              {{download.discloseP1}}
+            </p>
+            <p>
+              {{download.discloseP2mac1}}
+            </p>
+            <pre><code>xattr -dr com.apple.quarantine /Applications/Verba.app</code></pre>
+            <p>
+              {{download.discloseP3mac2}}
+            </p>
+            <p>
+              {{download.discloseP4win}}
+            </p>
+            <p>
+              {{download.discloseP5}}
+            </p>
+          </div>
+        </details>
+
+        <div class="honesty">
+          <span class="bullet"></span>
+          <p>
+            {{download.honesty}}
+          </p>
+        </div>
+
+        <div class="source">
+          <p class="sec">{{download.sourceHeading}}</p>
+          <pre><code>git clone https://github.com/nuvocode/verba.git
+cd verba
+npm install
+npm run tauri build</code></pre>
+          <p class="note">{{download.sourceNote}}</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="foot-in">
+        <div>
+          <a class="logo" href="/{{lang}}/">Verba<b>.</b></a>
+          <p>{{footer.tagline}}</p>
+        </div>
+        <nav>
+          <a href="https://github.com/nuvocode/verba">{{footer.github}}</a>
+          <a href="https://github.com/nuvocode/verba/blob/master/docs/architecture.md"
+            >{{footer.inside}}</a
+          >
+          <a href="https://github.com/nuvocode/verba/blob/master/CONTRIBUTING.md">{{footer.contributing}}</a>
+          <a href="https://github.com/nuvocode/verba/blob/master/LICENSE">{{footer.license}}</a>
+        </nav>
+      </div>
+      <p class="foot-fine">
+        {{footer.fineprint}}
+      </p>
+    </footer>
+
+    <script>
+      var root = document.documentElement;
+      document.getElementById("theme").addEventListener("click", function () {
+        var next = root.dataset.vtheme === "dark" ? "light" : "dark";
+        root.dataset.vtheme = next;
+        try {
+          localStorage.setItem("vtheme", next);
+        } catch (e) {}
+      });
+    </script>
+  </body>
+</html>

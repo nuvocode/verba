@@ -165,6 +165,19 @@ code { font-family: var(--mono); font-size: 12.5px; color: var(--ink2); }
 .foot-in nav a { font-size: 13px; color: var(--ink2); }
 .foot-fine { max-width: var(--max); margin: 0 auto; padding: 0 var(--pad) 44px; font-size: 12px; color: var(--ink3); }
 
+/* ---------- lang-switcher ---------- */
+.lang-switcher { position: relative; }
+.lang-switcher summary { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; font-size: 13px; color: var(--ink2); cursor: pointer; list-style: none; }
+.lang-switcher summary::-webkit-details-marker { display: none; }
+.lang-switcher summary:hover { background: var(--surface); color: var(--ink); }
+.lang-switcher summary span[aria-hidden] { font-size: 12px; }
+.lang-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; }
+.lang-list { position: absolute; top: calc(100% + 6px); right: 0; min-width: 160px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); padding: 6px; z-index: 30; animation: vfade .15s ease both; }
+.lang-list a { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-radius: 6px; font-size: 13px; color: var(--ink2); text-decoration: none; }
+.lang-list a:hover { background: var(--bg2); color: var(--ink); text-decoration: none; }
+.lang-list a.active { color: var(--ink); font-weight: 500; background: var(--accent-soft); }
+.lang-list a .lang-code { font-family: var(--mono); font-size: 10px; color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; }
+
 /* ---------- responsive ---------- */
 @media (max-width: 900px) {
   .story, .story.flip { grid-template-columns: 1fr; gap: 28px; }

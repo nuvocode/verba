@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Verba — makinenizde çalışan bir yapay zekayla konuşarak dil öğrenin</title>
+    <meta name="description" content="Anında düzeltmeli tam konuşmalar, yapay zeka tarafından oluşturulmuş seviyeli okuma, otomatik kelime yakalama ve her iki tarafta ses. Çevrimdışı çalışabilir, hesap gerektirmez, MIT lisanslı. macOS, Windows, Linux." />
+    <link rel="canonical" href="https://verba.nuvo.page/tr/" />
+    <meta name="theme-color" content="#F5F1E8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#171410" media="(prefers-color-scheme: dark)" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://verba.nuvo.page/tr/" />
+    <meta property="og:site_name" content="Verba" />
+    <meta property="og:title" content="Verba — makinenizde çalışan bir dil eğitmeni" />
+    <meta property="og:description" content="Anında düzeltmeli konuşma, seviyeli okuma, aralıklı tekrar ve her iki tarafta ses. Ollama'ya bağlayın, uçakta bile çalışır." />
+    <meta property="og:image" content="https://verba.nuvo.page/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Verba — makinenizde çalışan bir dil eğitmeni" />
+    <meta name="twitter:description" content="Anında düzeltmeli konuşma, seviyeli okuma, aralıklı tekrar ve her iki tarafta ses. Ollama'ya bağlayın, uçakta bile çalışır." />
+    <meta name="twitter:image" content="https://verba.nuvo.page/assets/og.png" />
+
+    <!-- hreflang -->
+        <link rel="alternate" hreflang="de" href="https://verba.nuvo.page/de/" />
+    <link rel="alternate" hreflang="en" href="https://verba.nuvo.page/en/" />
+    <link rel="alternate" hreflang="es" href="https://verba.nuvo.page/es/" />
+    <link rel="alternate" hreflang="fr" href="https://verba.nuvo.page/fr/" />
+    <link rel="alternate" hreflang="it" href="https://verba.nuvo.page/it/" />
+    <link rel="alternate" hreflang="ja" href="https://verba.nuvo.page/ja/" />
+    <link rel="alternate" hreflang="pt" href="https://verba.nuvo.page/pt/" />
+    <link rel="alternate" hreflang="tr" href="https://verba.nuvo.page/tr/" />
+    <link rel="alternate" hreflang="x-default" href="https://verba.nuvo.page/en/" />
+
+    <link rel="icon" type="image/svg+xml" href="/assets/logo.svg" />
+    <link rel="apple-touch-icon" href="/assets/logo.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+
+    <!-- Theme is resolved before first paint so the page never flashes the wrong one. -->
+    <script>
+      (function () {
+        var saved = null;
+        try {
+          saved = localStorage.getItem("vtheme");
+        } catch (e) {}
+        var dark = saved
+          ? saved === "dark"
+          : window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.vtheme = dark ? "dark" : "light";
+      })();
+    </script>
+  </head>
+
+  <body>
+    <header class="topbar">
+      <a class="logo" href="/tr/">Verba<b>.</b></a>
+      <nav class="nav">
+        <a class="nav-item" href="#session">Oturum</a>
+        <a class="nav-item" href="#why">Neden</a>
+        <a class="nav-item" href="#speech">Konuşma</a>
+        <a class="nav-item" href="#download">İndir</a>
+      </nav>
+      <span class="spacer"></span>
+      <span class="status">
+        <i class="led"></i>
+        <span>makinenizde çalışır</span>
+      </span>
+      <details class="lang-switcher">
+        <summary><span aria-hidden="true">🌐</span> <span class="lang-label">Dil</span></summary>
+        <div class="lang-list">
+                      <a href="/de/"><span>Deutsch</span><span class="lang-code">de</span></a>
+            <a href="/en/"><span>English</span><span class="lang-code">en</span></a>
+            <a href="/es/"><span>Español</span><span class="lang-code">es</span></a>
+            <a href="/fr/"><span>Français</span><span class="lang-code">fr</span></a>
+            <a href="/it/"><span>Italiano</span><span class="lang-code">it</span></a>
+            <a href="/ja/"><span>日本語</span><span class="lang-code">ja</span></a>
+            <a href="/pt/"><span>Português</span><span class="lang-code">pt</span></a>
+            <a href="/tr/" class="active"><span>Türkçe</span><span class="lang-code">tr</span></a>
+        </div>
+      </details>
+      <button class="icon-btn" id="theme" type="button" aria-label="Temayı değiştir">
+        <span aria-hidden="true">☀</span>
+      </button>
+      <a class="btn sm" href="https://github.com/nuvocode/verba/releases/latest">İndir</a>
+    </header>
+
+    <main>
+      <!-- ---------- hero ---------- -->
+      <section class="hero">
+        <p class="eyebrow">v0.1.0 &nbsp;·&nbsp; macOS · Windows · Linux &nbsp;·&nbsp; MIT</p>
+        <h1 class="display">
+          Asla sıkılmayan, asla yargılamayan ve <em>&mdash; isterseniz &mdash;</em> internete hiç dokunmayan bir yapay zekayla konuşarak dil öğrenin.
+        </h1>
+        <div class="lede">
+          <span class="bullet live"></span>
+          <p>
+            Anında düzeltmeli tam konuşmalar, yapay zeka tarafından oluşturulmuş seviyeli okuma, otomatik kelime yakalama ve her iki tarafta ses. Her şey diskinizdeki bir SQLite dosyasında yaşar. Kaydolacak bir sunucu yok, çünkü sunucu yok.
+          </p>
+        </div>
+
+        <div class="cta">
+          <a class="btn" href="#download">
+            macOS için indir
+            <span class="kbd">.dmg</span>
+          </a>
+          <a class="btn ghost" href="https://github.com/nuvocode/verba">Kaynak kodu gör</a>
+        </div>
+        <p class="hints">
+          <span>Windows, Linux ve Intel Mac sürümleri aşağıda</span>
+          <span>Asla hesap yok</span>
+          <span>Ollama'ya bağlayın, uçakta bile çalışır</span>
+        </p>
+
+        <figure class="shot wide">
+          <img
+            src="/assets/today.png"
+            width="1600"
+            height="1200"
+            alt="Verba'nın Bugün ekranı: konuşma, okuma, rol yapma ve özet içeren tarihli bir oturum planı."
+          />
+        </figure>
+        <p class="shot-cap">
+          <b>Bir oturum bir plandır, menü değil.</b> Tek bir tema bugünün konuşmasını, okumasını, rol yapmasını ve tekrar edilmesi gereken kelimeleri birbirine bağlar. Ne çalışacağınız asla sorulmaz &mdash; <span class="kbd">↵</span> tuşuna basar ve başlarsınız.
+        </p>
+      </section>
+
+      <!-- ---------- the session ---------- -->
+      <section class="band" id="session">
+        <p class="eyebrow">Oturum</p>
+
+        <div class="story flip">
+          <div class="story-text">
+            <h2 class="display">Koç önce konuşur ve sırayı hareketli tutar.</h2>
+            <p>
+              Düzeltmeler konuşmanın akışı içinde anında gelir ve takıldığınız kelime sessizce not edilir. Öneriler duraksadığınız an için oradadır &mdash; sizin yerinize cevap vermek için değil.
+            </p>
+          </div>
+          <figure class="shot">
+            <img
+              src="/assets/talk.png"
+              width="1600"
+              height="1200"
+              loading="lazy"
+              alt="Anında düzeltme ve yakalanan kelimelerle koçla bir konuşma."
+            />
+          </figure>
+        </div>
+
+        <div class="story">
+          <div class="story-text">
+            <h2 class="display">Kurulum gerektirmeyen ses ve dikte.</h2>
+            <p>
+              21&nbsp;MB'lık bir ses uygulamanın içinde çalışır: anahtar yok, sunucu yok, ağda hiçbir şey yok. Konuşun, yazıya dökülsün, sesli cevap alın &mdash; ve Verba size her zaman hangi katmanın konuştuğunu söyler.
+            </p>
+          </div>
+          <figure class="shot">
+            <img
+              src="/assets/speech.png"
+              width="1600"
+              height="1200"
+              loading="lazy"
+              alt="Ayarlar → Konuşma, dahili ses ve dikte modellerini gösteriyor."
+            />
+          </figure>
+        </div>
+      </section>
+
+      <!-- ---------- why ---------- -->
+      <section class="band" id="why">
+        <p class="eyebrow">Neden Verba</p>
+        <h2 class="display band-h">Altı karar ve maliyetleri.</h2>
+
+        <div class="cards">
+          <article class="card">
+            <h3>Gerçekten çevrimdışı.</h3>
+            <p>
+              <a href="https://ollama.com">Ollama</a>'ya bağlayın ve tüm uygulama &mdash; sohbet, okuma, konuşma, dikte &mdash; uçakta çalışır. Asla hesap yok.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Sağlayıcınız, anahtarınız.</h3>
+            <p>
+              Ollama, LM Studio, OpenAI, Anthropic, Gemini, OpenRouter. Ayarlar'dan değiştirin; hiçbir şeye kilitli değilsiniz.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Karşılık verir.</h3>
+            <p>
+              Konuşun, yazıya dökülsün, sesli cevap alın. Dahili modeller istek üzerine indirilir ve uygulama içinde çalışır.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Hatırlar.</h3>
+            <p>
+              Takıldığınız kelimeler aralıklı tekrar destesine dönüşür ve deste yarının oturumunu besler.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Verileriniz yerinde kalır.</h3>
+            <p>
+              Her şey yerel bir SQLite dosyasında yaşar. Hiçbir şey yüklenmez, hiçbir şey senkronize edilmez, hiçbir şey satılmaz.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Sekiz dil &mdash; bir tane eklemek bir klasör.</h3>
+            <p>
+              İngilizce, İspanyolca, Fransızca, Almanca, Japonca, Türkçe, İtalyanca, Portekizce. <a href="https://github.com/nuvocode/verba/blob/master/CONTRIBUTING.md">Sizinkini ekleyin</a>.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ---------- speech ---------- -->
+      <section class="band" id="speech">
+        <p class="eyebrow">Konuşma</p>
+        <h2 class="display band-h">Sırayla yürünen, sesli bir merdiven.</h2>
+        <p class="band-sub">
+          Verba <b>dahili → yerel sunucu → bulut anahtarı → işletim sistemi sesi</b> sırasını yürür ve size her zaman hangi katmanın konuştuğunu söyler. Dahili katman varsayılandır ve sizden hiçbir şey istemeyendir.
+        </p>
+
+        <div class="table">
+          <div class="trow thead">
+            <span>Model</span><span>Rol</span><span>Boyut</span><span>Hız</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">Piper<i>varsayılan</i></span>
+            <span>Ses — dil başına bir tane</span>
+            <span class="mono">~21 MB</span>
+            <span class="mono">~7× gerçek zaman</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">Kokoro</span>
+            <span>Ses — 53 ses, altı dil</span>
+            <span class="mono">349 MB</span>
+            <span class="mono">~2× gerçek zaman</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">Whisper</span>
+            <span>Dikte — base / small</span>
+            <span class="mono">208 / 639 MB</span>
+            <span class="mono">gerçek zamandan hızlı</span>
+          </div>
+        </div>
+        <p class="note">
+          Piper, Kokoro'nun ellide biri indirme boyutunda ve birkaç kat daha hızlıdır &mdash; ki bu, bir konuşma sırası için doğallığın son birkaç yüzdesinden daha önemlidir. Zaten kendi konuşma sunucunuzu mu çalıştırıyorsunuz? OpenAI uyumlu herhangi biri çalışır (Kokoro-FastAPI, speaches, LocalAI, vLLM), ElevenLabs ve Deepgram anahtarları da.
+        </p>
+      </section>
+
+      <!-- ---------- download ---------- -->
+      <section class="band" id="download">
+        <p class="eyebrow">İndir &nbsp;·&nbsp; v0.1.0</p>
+        <h2 class="display band-h">Makineniz için olan sürümü alın.</h2>
+
+        <div class="dl">
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>macOS</b>
+              <span>Apple Silicon — M1'den M4'e</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_aarch64.dmg"
+                >.dmg</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>macOS</b>
+              <span>Intel</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_x64.dmg"
+                >.dmg</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>Windows</b>
+              <span>x64</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_x64-setup.exe"
+                >.exe</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_x64_en-US.msi"
+                >.msi</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>Linux</b>
+              <span>x86_64</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_amd64.AppImage"
+                >.AppImage</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_amd64.deb"
+                >.deb</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba-0.1.0-1.x86_64.rpm"
+                >.rpm</a
+              >
+            </div>
+          </div>
+        </div>
+
+        <p class="note">
+          Mac'te, Apple Silicon için aarch64 ve yalnızca Intel Mac için x64 alın &mdash; yanlış olan ya başlamayı reddeder ya da Rosetta altında sürünür.
+        </p>
+
+        <details class="disclose">
+          <summary>Sürüm imzasız — yine de nasıl açacağınız burada</summary>
+          <div class="disclose-body">
+            <p>
+              Verba'nın Apple Developer sertifikası veya Windows kod imzalama sertifikası yok ve sürümü bunlardan birinin arkasına kilitlemektense yayınlamayı tercih ederiz. Bu yüzden her iki işletim sistemi ilk denemede açmayı reddedecektir.
+            </p>
+            <p>
+              macOS'ta şunu göreceksiniz: <b>"Apple could not verify 'Verba' is free of malware"</b> — <b>Move to Trash</b>'e tıklayın, ardından uygulamayı <code>/Applications</code> içine sürükleyin ve <code>xattr -d com.apple.quarantine /Applications/Verba.app</code> komutunu çalıştırın.
+            </p>
+            <pre><code>xattr -dr com.apple.quarantine /Applications/Verba.app</code></pre>
+            <p>
+              Terminal olmadan: bir kez açmayı deneyin, ardından <b>Sistem Ayarları → Gizlilik ve Güvenlik → aşağı kaydırın → Yine de Aç</b>.
+            </p>
+            <p>
+              Windows'ta şunu göreceksiniz: <b>"Windows protected your PC"</b> — <b>More info</b>'ye ardından <b>Run anyway</b>'e tıklayın.
+            </p>
+            <p>
+              Kendiniz derlemek her ikisini de atlar ve yukarıdakiler sizi rahatsız ediyorsa dürüst seçenek budur. Bunların hiçbiri Verba'ya özgü değil &mdash; imzasız her açık kaynak masaüstü uygulamasının ödediği bedeldir.
+            </p>
+          </div>
+        </details>
+
+        <div class="honesty">
+          <span class="bullet"></span>
+          <p>
+            <b>Platform dürüstlüğü.</b> Dört hedef de CI tarafından aynı kaynaktan paketlenir, ancak dahili konuşma motoru yalnızca macOS arm64'te çalıştırılmıştır. Windows veya Linux'ta ilk çalıştıran sizseniz ve ses gelmezse, bu bildirilmeye değer bir hatadır &mdash; sizin yanlış yaptığınız değil.
+          </p>
+        </div>
+
+        <div class="source">
+          <p class="sec">Veya kaynaktan derleyin</p>
+          <pre><code>git clone https://github.com/nuvocode/verba.git
+cd verba
+npm install
+npm run tauri build</code></pre>
+          <p class="note">Node ve Rust gerektirir; çevrimdışı için Ollama çalışıyor olmalı.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="foot-in">
+        <div>
+          <a class="logo" href="/tr/">Verba<b>.</b></a>
+          <p>Makinenizde çalışan bir dil eğitmeni.</p>
+        </div>
+        <nav>
+          <a href="https://github.com/nuvocode/verba">GitHub</a>
+          <a href="https://github.com/nuvocode/verba/blob/master/docs/architecture.md"
+            >İçindekiler</a
+          >
+          <a href="https://github.com/nuvocode/verba/blob/master/CONTRIBUTING.md">Katkı</a>
+          <a href="https://github.com/nuvocode/verba/blob/master/LICENSE">MIT lisansı</a>
+        </nav>
+      </div>
+      <p class="foot-fine">
+        Nuvo Code tarafından geliştirildi. Bu sayfada izleyici yok.
+      </p>
+    </footer>
+
+    <script>
+      var root = document.documentElement;
+      document.getElementById("theme").addEventListener("click", function () {
+        var next = root.dataset.vtheme === "dark" ? "light" : "dark";
+        root.dataset.vtheme = next;
+        try {
+          localStorage.setItem("vtheme", next);
+        } catch (e) {}
+      });
+    </script>
+  </body>
+</html>
