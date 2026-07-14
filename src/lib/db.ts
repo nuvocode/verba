@@ -44,7 +44,9 @@ async function init(): Promise<Database> {
       lang TEXT NOT NULL,
       title TEXT NOT NULL,
       text TEXT NOT NULL,        -- JSON ReadingText
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      length TEXT,               -- what was asked for: short | medium | long
+      topic TEXT                 -- what the reader asked it to be about; NULL when they left it to the day's plan
     );
     CREATE TABLE IF NOT EXISTS level_signals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,6 +99,10 @@ async function init(): Promise<Database> {
   // Conversations name themselves now. Older sessions keep a NULL title and fall
   // back to their scenario's name in the history list.
   await db.execute("ALTER TABLE sessions ADD COLUMN title TEXT").catch(() => {});
+  // The reader can now ask for a length and a topic before a passage is written.
+  // Passages generated before that keep NULLs — "we didn't ask", not "they wanted nothing".
+  await db.execute("ALTER TABLE reading_sessions ADD COLUMN length TEXT").catch(() => {});
+  await db.execute("ALTER TABLE reading_sessions ADD COLUMN topic TEXT").catch(() => {});
   await migrateVocabToPerLanguage(db);
   return db;
 }
@@ -262,11 +268,17 @@ export async function reviewVocab(card: VocabRow, grade: Grade): Promise<void> {
 
 // ---- reading sessions ----
 
-export async function saveReading(lang: string, title: string, text: unknown): Promise<void> {
+/** `asked` is what the reader requested, not what came back — a reading history wants both. */
+export async function saveReading(
+  lang: string,
+  title: string,
+  text: unknown,
+  asked: { length?: string; topic?: string } = {},
+): Promise<void> {
   const db = await getDb();
   await db.execute(
-    "INSERT INTO reading_sessions (lang, title, text, created_at) VALUES ($1, $2, $3, $4)",
-    [lang, title, JSON.stringify(text), Date.now()],
+    "INSERT INTO reading_sessions (lang, title, text, created_at, length, topic) VALUES ($1, $2, $3, $4, $5, $6)",
+    [lang, title, JSON.stringify(text), Date.now(), asked.length ?? null, asked.topic?.trim() || null],
   );
 }
 

@@ -28,8 +28,25 @@ export function bareWord(w: string): string {
   return w.toLowerCase().replace(/\p{P}/gu, "");
 }
 
+/**
+ * What the reader can ask for before a passage is written. Length is a choice of
+ * three, not a number: the point is "a longer read", and the sentence count is an
+ * implementation detail the reader has no reason to hold an opinion about.
+ */
+export type PassageLength = "short" | "medium" | "long";
+
+/**
+ * Sentence counts behind the three lengths. `long` is where a 3B model starts to
+ * lose the thread, so the prompt asks for structure at that size rather than only
+ * a bigger number — see storyPrompt().
+ */
+export const LENGTHS: Record<PassageLength, number> = { short: 5, medium: 10, long: 20 };
+
+export const DEFAULT_LENGTH: PassageLength = "medium";
+
 export interface StoryOptions {
   interests?: string; // free text, e.g. "space travel, cooking"
+  topic?: string; // what the reader asked this passage to be about — outranks interests
   goal?: string; // e.g. "practise past tense"
   sentences?: number; // rough target length (default 8)
   memories?: Memory[]; // what the coach knows about the learner — the story can be set in their own world
@@ -55,18 +72,41 @@ function base(s: Settings, pack?: LanguagePack): string {
 export function storyPrompt(s: Settings, opts: StoryOptions = {}, pack?: LanguagePack): string {
   const n = opts.sentences ?? 8;
   const memories = opts.memories ?? [];
+  const topic = opts.topic?.trim();
   return [
     base(s, pack),
-    opts.interests ? `Tailor the topic to the learner's interests: ${opts.interests}.` : `Pick an engaging everyday topic.`,
+    // The reader asking for something outranks both the day's theme and the coach's
+    // file on them: they said what they want the passage to be about.
+    topic
+      ? `The learner asked for a passage about: ${topic}. Write about exactly that.`
+      : opts.interests
+        ? `Tailor the topic to the learner's interests: ${opts.interests}.`
+        : `Pick an engaging everyday topic.`,
     opts.goal ? `Where natural, give practice with: ${opts.goal}.` : "",
     memories.length
       ? `${memoryBrief(memories)}\nWhere it fits, set the story in the learner's own world — their work, their city, the people they have mentioned. Do not make the story *about* these facts; use them as its furniture.`
       : "",
-    `Write a coherent, complete short story of about ${n} sentences.`,
+    lengthLine(n),
     jsonShape.replace(/TARGET/g, s.targetLang).replace(/NATIVE/g, s.nativeLang),
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * Asking a small local model for 20 sentences instead of 5 is not the same request
+ * with a bigger number in it: left alone it pads, repeats the same beat, or drifts
+ * off the thread. Past ~12 sentences the prompt has to ask for the shape of a story,
+ * not just its size.
+ */
+function lengthLine(n: number): string {
+  if (n <= LENGTHS.short) return `Write a coherent, complete short story of about ${n} sentences.`;
+  if (n < LENGTHS.long) return `Write a coherent, complete short story of about ${n} sentences with a beginning, a middle and an ending.`;
+  return (
+    `Write a coherent, complete story of about ${n} sentences. Give it a clear arc — a situation, a complication, a resolution — ` +
+    `and keep one thread and the same characters running through all of it. ` +
+    `Do not pad it out: no repeated beats, no restating what a sentence already said, no unrelated sentences to reach the count.`
+  );
 }
 
 /** Flow reading: continue an existing text with more level-appropriate sentences. */

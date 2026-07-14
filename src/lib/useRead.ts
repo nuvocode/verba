@@ -8,6 +8,9 @@ import {
   parseReading,
   parseWordExplanation,
   bareWord,
+  LENGTHS,
+  DEFAULT_LENGTH,
+  type PassageLength,
   type ReadingText,
 } from "./reading";
 import { getPack } from "./packs";
@@ -21,7 +24,16 @@ export interface WordPopover {
   flip: boolean;
 }
 
+/** Kept in step with `.popover` in theme.css — the clamp below needs to know how wide it is. */
+const POPOVER_WIDTH = 260;
+
 export { bareWord as bare } from "./reading";
+
+/** What the reader asked for. `topic` empty means "whatever today's plan is about". */
+export interface Ask {
+  length: PassageLength;
+  topic: string;
+}
 
 export function useRead(settings: Settings) {
   const [text, setText] = useState<ReadingText | null>(null);
@@ -31,12 +43,24 @@ export function useRead(settings: Settings) {
   const [saved, setSaved] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // What they asked for last, so the sheet opens where they left it. Session-only:
+  // a topic is a mood, not a setting, and it has no business surviving a restart.
+  const [ask, setAsk] = useState<Ask>({ length: DEFAULT_LENGTH, topic: "" });
 
   const pack = getPack(settings.packId);
 
-  /** Generate a fresh passage. `goal` folds the day's weak area into the text. */
+  /**
+   * Generate a fresh passage. `goal` folds the day's weak area into the text.
+   *
+   * `length` and `topic` are what the reader asked for in the sheet. Callers that
+   * pass neither — Today's plan, the palette — get the remembered length and the
+   * day's theme, which is what keeps the daily flow a single keystroke.
+   */
   const generate = useCallback(
-    async (opts: { interests?: string; goal?: string } = {}) => {
+    async (opts: { interests?: string; goal?: string; length?: PassageLength; topic?: string } = {}) => {
+      const length = opts.length ?? ask.length;
+      const topic = (opts.topic ?? "").trim();
+      setAsk({ length, topic });
       setBusy(true);
       setError("");
       setFocusIdx(-1);
@@ -47,20 +71,29 @@ export function useRead(settings: Settings) {
         // facts the coach talks to them about, doing a second job here.
         const memories = await recentMemories(settings.targetLang).catch(() => []);
         const raw = await getProvider(settings).chat(
-          [{ role: "user", content: storyPrompt(settings, { ...opts, sentences: 8, memories }, pack) }],
+          [
+            {
+              role: "user",
+              content: storyPrompt(
+                settings,
+                { interests: opts.interests, goal: opts.goal, topic, sentences: LENGTHS[length], memories },
+                pack,
+              ),
+            },
+          ],
           { json: true },
         );
         const t = parseReading(raw);
         if (!t.sentences.length) throw new Error("The model returned no readable sentences. Try again.");
         setText(t);
-        await saveReading(settings.targetLang, t.title, t).catch(() => {});
+        await saveReading(settings.targetLang, t.title, t, { length, topic }).catch(() => {});
       } catch (e: any) {
         setError(String(e?.message ?? e));
       } finally {
         setBusy(false);
       }
     },
-    [settings, pack],
+    [settings, pack, ask.length],
   );
 
   /** Flow reading — append more sentences to the passage in progress. */
@@ -88,7 +121,11 @@ export function useRead(settings: Settings) {
       const term = bareWord(word);
       if (!term) return;
       const flip = rect.bottom + 140 > window.innerHeight;
-      setPopover({ term, gloss: "…", x: rect.left + rect.width / 2, y: flip ? rect.top : rect.bottom, flip });
+      // The popover is 260px wide and centred on the word. A word at either margin would
+      // hang it off the window, so the anchor is kept half a popover away from both edges.
+      const half = POPOVER_WIDTH / 2 + 8;
+      const x = Math.min(Math.max(rect.left + rect.width / 2, half), window.innerWidth - half);
+      setPopover({ term, gloss: "…", x, y: flip ? rect.top : rect.bottom, flip });
       try {
         const raw = await getProvider(settings).chat(
           [{ role: "user", content: explainWordPrompt(settings, term, sentence) }],
@@ -122,6 +159,8 @@ export function useRead(settings: Settings) {
     saved,
     busy,
     error,
+    /** The last thing they asked for — the sheet opens on it. */
+    ask,
     generate,
     extend,
     explain,

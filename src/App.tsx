@@ -360,7 +360,9 @@ export default function App() {
       <div className="body">
         {space === "today" && <Today settings={settings} day={day} onBegin={begin} />}
         {space === "talk" && <Talk settings={settings} talk={talk} day={day} onBegin={begin} />}
-        {space === "read" && <Read settings={settings} read={read} day={day} onBegin={begin} />}
+        {space === "read" && (
+          <Read settings={settings} read={read} day={day} onBegin={begin} onCaptureKeys={setCaptured} />
+        )}
         {space === "memory" && (
           <Memory
             settings={settings}

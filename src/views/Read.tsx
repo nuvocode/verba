@@ -1,38 +1,74 @@
+import { useEffect, useRef, useState } from "react";
 import type { Settings } from "../lib/settings";
 import type { BlockKind } from "../lib/learn";
 import type { Day } from "../lib/useDay";
 import { tokens } from "../lib/text";
-import { bare, type Read as ReadState } from "../lib/useRead";
+import { LENGTHS, type PassageLength } from "../lib/reading";
+import { bare, type Ask, type Read as ReadState } from "../lib/useRead";
+
+const ORDER: PassageLength[] = ["short", "medium", "long"];
+const BLURB: Record<PassageLength, string> = {
+  short: "a few minutes",
+  medium: "a sitting",
+  long: "a proper read",
+};
 
 export default function Read({
   settings,
   read,
   day,
   onBegin,
+  onCaptureKeys,
 }: {
   settings: Settings;
   read: ReadState;
   day: Day;
   onBegin: (kind: BlockKind) => void;
+  /** The sheet takes the keyboard while it is open — Esc closes it, not the screen. */
+  onCaptureKeys: (captured: boolean) => void;
 }) {
   const block = day.plan?.blocks.find((b) => b.kind === "reading");
+  const [asking, setAsking] = useState(false);
 
+  useEffect(() => {
+    onCaptureKeys(asking);
+    return () => onCaptureKeys(false);
+  }, [asking, onCaptureKeys]);
+
+  // Whatever the sheet is asked for, the day's plan is still underneath it: an empty
+  // topic falls back to the theme, and the day's weak area is folded in either way.
+  const generate = (ask: Ask) => {
+    setAsking(false);
+    void read.generate({ ...ask, interests: day.plan?.theme, goal: block?.goal });
+  };
+
+  const sheet = asking && (
+    <AskSheet settings={settings} ask={read.ask} theme={day.plan?.theme} onCancel={() => setAsking(false)} onGenerate={generate} />
+  );
+
+  // The sheet is a *sibling* of the empty state, never a child of it: `.fade` animates
+  // a transform, and a transformed ancestor is the containing block for everything
+  // `position: fixed` under it — the scrim would be laid out against the empty state
+  // instead of the window, and left behind as a half-painted ghost when it unmounts.
   if (!read.text)
     return (
-      <div className="empty fade">
-        <h2>{read.busy ? "Writing you a passage…" : "Nothing to read yet."}</h2>
-        <p>
-          {read.busy
-            ? `A ${settings.cefr} story about ${day.plan?.theme ?? "everyday life"}, in ${settings.targetLang}.`
-            : "The coach writes a story at your level that reuses the words from your conversations."}
-        </p>
-        {!read.busy && (
-          <button className="btn" onClick={() => void read.generate({ interests: day.plan?.theme, goal: block?.goal })}>
-            Generate a passage →
-          </button>
-        )}
-        {read.error && <div className="err" style={{ maxWidth: 520, margin: "20px auto 0" }}>{read.error}</div>}
-      </div>
+      <>
+        <div className="empty fade">
+          <h2>{read.busy ? "Writing you a passage…" : "Nothing to read yet."}</h2>
+          <p>
+            {read.busy
+              ? `A ${settings.cefr} story about ${read.ask.topic || day.plan?.theme || "everyday life"}, in ${settings.targetLang}.`
+              : "The coach writes a story at your level that reuses the words from your conversations."}
+          </p>
+          {!read.busy && (
+            <button className="btn" onClick={() => setAsking(true)}>
+              Generate a passage →
+            </button>
+          )}
+          {read.error && <div className="err" style={{ maxWidth: 520, margin: "20px auto 0" }}>{read.error}</div>}
+        </div>
+        {sheet}
+      </>
     );
 
   const { text, focusIdx, popover } = read;
@@ -100,11 +136,7 @@ export default function Read({
           <button className="btn sm ghost" onClick={() => void read.extend()} disabled={read.busy}>
             {read.busy ? "Writing…" : "Keep reading"}
           </button>
-          <button
-            className="btn sm ghost"
-            onClick={() => void read.generate({ interests: day.plan?.theme, goal: block?.goal })}
-            disabled={read.busy}
-          >
+          <button className="btn sm ghost" onClick={() => setAsking(true)} disabled={read.busy}>
             New passage
           </button>
         </div>
@@ -160,8 +192,7 @@ export default function Read({
           className="popover"
           onClick={(e) => e.stopPropagation()}
           style={{
-            left: popover.x,
-            transform: "translateX(-50%)",
+            left: popover.x, // the -50% that centres it on the word lives in CSS, with the animation
             ...(popover.flip
               ? { bottom: window.innerHeight - popover.y + 10 }
               : { top: popover.y + 10 }),
@@ -174,6 +205,95 @@ export default function Read({
           {popover.gloss !== "…" && <div className="s">✓ Saved to Memory</div>}
         </div>
       )}
+
+      {sheet}
+    </div>
+  );
+}
+
+/**
+ * What the passage should be, asked before it is written: how long, and what about.
+ * A prompt sheet, not a settings dialog — it opens on the last answer, the topic line
+ * has the caret, and Enter takes the defaults. Level is not here on purpose: that is
+ * `settings.cefr`, and it is not a per-passage decision.
+ */
+function AskSheet({
+  settings,
+  ask,
+  theme,
+  onCancel,
+  onGenerate,
+}: {
+  settings: Settings;
+  ask: Ask;
+  theme?: string;
+  onCancel: () => void;
+  onGenerate: (ask: Ask) => void;
+}) {
+  const [length, setLength] = useState<PassageLength>(ask.length);
+  const [topic, setTopic] = useState(ask.topic);
+  const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => input.current?.focus(), []);
+
+  // The sheet owns every key it handles: stopping propagation is what keeps Esc from
+  // reaching App and walking off the screen behind us.
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      e.preventDefault();
+      return onCancel();
+    }
+    if (e.key === "Enter") {
+      e.stopPropagation();
+      e.preventDefault(); // …and a focused length button never turns Enter into a click
+      return onGenerate({ length, topic });
+    }
+    // Arrows rove the lengths. The topic line starts empty and holds the caret, so
+    // there is nothing there for an arrow to move through — but the moment they type,
+    // the arrows go back to meaning what they have always meant, and Tab reaches the
+    // lengths instead.
+    const caretInText = e.target === input.current && topic.length > 0;
+    if (!caretInText && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      e.stopPropagation();
+      e.preventDefault();
+      const i = ORDER.indexOf(length) + (e.key === "ArrowRight" ? 1 : -1);
+      setLength(ORDER[Math.min(Math.max(i, 0), ORDER.length - 1)]);
+    }
+  };
+
+  return (
+    <div className="scrim" onClick={onCancel}>
+      <div className="palette ask" onClick={(e) => e.stopPropagation()} onKeyDown={onKey}>
+        <div className="head">
+          <div className="eyebrow">New passage</div>
+          <h2>What should it be about?</h2>
+        </div>
+        <input
+          ref={input}
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+          placeholder={theme ? `Leave it empty for today's theme — ${theme}` : "Leave it empty and the coach picks"}
+        />
+        <div className="lengths">
+          {ORDER.map((l) => (
+            <button key={l} className={`len ${length === l ? "on" : ""}`} onClick={() => setLength(l)}>
+              <div className="t">{l[0].toUpperCase() + l.slice(1)}</div>
+              <div className="n">
+                ~{LENGTHS[l]} sentences · {BLURB[l]}
+              </div>
+            </button>
+          ))}
+        </div>
+        <div className="foot">
+          <span>↵ generate</span>
+          <span>← → length</span>
+          <span>esc cancel</span>
+          <span style={{ marginLeft: "auto" }}>
+            {settings.cefr} · {settings.targetLang}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
