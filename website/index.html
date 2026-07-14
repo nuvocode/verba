@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Verba — learn a language by talking to an AI that runs on your machine</title>
+    <meta
+      name="description"
+      content="Full conversations with inline corrections, AI-generated graded reading, automatic vocabulary capture, and a voice on both ends. Offline-capable, no account, MIT-licensed. macOS, Windows, Linux."
+    />
+    <link rel="canonical" href="https://verba.nuvo.page/" />
+    <meta name="theme-color" content="#F5F1E8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#171410" media="(prefers-color-scheme: dark)" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://verba.nuvo.page/" />
+    <meta property="og:site_name" content="Verba" />
+    <meta property="og:title" content="Verba — a language tutor that runs on your machine" />
+    <meta
+      property="og:description"
+      content="Conversation with inline corrections, graded reading, spaced repetition, and a voice on both ends. Point it at Ollama and it works on a plane."
+    />
+    <meta property="og:image" content="https://verba.nuvo.page/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Verba — a language tutor that runs on your machine" />
+    <meta
+      name="twitter:description"
+      content="Conversation with inline corrections, graded reading, spaced repetition, and a voice on both ends. Point it at Ollama and it works on a plane."
+    />
+    <meta name="twitter:image" content="https://verba.nuvo.page/assets/og.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/assets/logo.svg" />
+    <link rel="apple-touch-icon" href="/assets/logo.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+
+    <!-- Theme is resolved before first paint so the page never flashes the wrong one. -->
+    <script>
+      (function () {
+        var saved = null;
+        try {
+          saved = localStorage.getItem("vtheme");
+        } catch (e) {}
+        var dark = saved
+          ? saved === "dark"
+          : window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.vtheme = dark ? "dark" : "light";
+      })();
+    </script>
+  </head>
+
+  <body>
+    <header class="topbar">
+      <a class="logo" href="/">Verba<b>.</b></a>
+      <nav class="nav">
+        <a class="nav-item" href="#session">The session</a>
+        <a class="nav-item" href="#why">Why</a>
+        <a class="nav-item" href="#speech">Speech</a>
+        <a class="nav-item" href="#download">Download</a>
+      </nav>
+      <span class="spacer"></span>
+      <span class="status">
+        <i class="led"></i>
+        <span>runs on your machine</span>
+      </span>
+      <button class="icon-btn" id="theme" type="button" aria-label="Toggle theme">
+        <span aria-hidden="true">☀</span>
+      </button>
+      <a class="btn sm" href="https://github.com/nuvocode/verba/releases/latest">Download</a>
+    </header>
+
+    <main>
+      <!-- ---------- hero ---------- -->
+      <section class="hero">
+        <p class="eyebrow">v0.1.0 &nbsp;·&nbsp; macOS · Windows · Linux &nbsp;·&nbsp; MIT</p>
+        <h1 class="display">
+          Learn a language by talking to an AI that never gets bored, never judges, and
+          <em>&mdash; if you want &mdash;</em> never touches the internet.
+        </h1>
+        <div class="lede">
+          <span class="bullet live"></span>
+          <p>
+            Full conversations with inline corrections, AI-generated graded reading, automatic
+            vocabulary capture, and a voice on both ends. Everything lives in a SQLite file on your
+            disk. There is no server to sign up to, because there is no server.
+          </p>
+        </div>
+
+        <div class="cta">
+          <a class="btn" href="#download">
+            Download for macOS
+            <span class="kbd">.dmg</span>
+          </a>
+          <a class="btn ghost" href="https://github.com/nuvocode/verba">View the source</a>
+        </div>
+        <p class="hints">
+          <span>Windows, Linux and Intel Mac builds below</span>
+          <span>No account, ever</span>
+          <span>Point it at Ollama and it works on a plane</span>
+        </p>
+
+        <figure class="shot wide">
+          <img
+            src="/assets/today.png"
+            width="1600"
+            height="1200"
+            alt="Verba's Today screen: a dated session plan with conversation, reading, role-play and wrap-up."
+          />
+        </figure>
+        <p class="shot-cap">
+          <b>A session is a plan, not a menu.</b> One theme threads today's conversation, reading,
+          role-play and the words that are due. You are never asked what to study &mdash; you press
+          <span class="kbd">↵</span> and begin.
+        </p>
+      </section>
+
+      <!-- ---------- the session ---------- -->
+      <section class="band" id="session">
+        <p class="eyebrow">The session</p>
+
+        <div class="story flip">
+          <div class="story-text">
+            <h2 class="display">The coach speaks first and keeps the turn moving.</h2>
+            <p>
+              Corrections arrive inline, in the flow of the conversation, and the word you stumbled
+              on is quietly noted. Suggestions are there for the moment you stall &mdash; not to
+              answer for you.
+            </p>
+          </div>
+          <figure class="shot">
+            <img
+              src="/assets/talk.png"
+              width="1600"
+              height="1200"
+              loading="lazy"
+              alt="A conversation with the coach, with an inline correction and captured vocabulary."
+            />
+          </figure>
+        </div>
+
+        <div class="story">
+          <div class="story-text">
+            <h2 class="display">Voice and dictation, with no setup.</h2>
+            <p>
+              A 21&nbsp;MB voice runs inside the app: no key, no server, nothing on the network.
+              Speak, get transcribed, get answered out loud &mdash; and Verba always tells you which
+              tier is actually speaking.
+            </p>
+          </div>
+          <figure class="shot">
+            <img
+              src="/assets/speech.png"
+              width="1600"
+              height="1200"
+              loading="lazy"
+              alt="Settings → Speech, showing the bundled voice and dictation models."
+            />
+          </figure>
+        </div>
+      </section>
+
+      <!-- ---------- why ---------- -->
+      <section class="band" id="why">
+        <p class="eyebrow">Why Verba</p>
+        <h2 class="display band-h">Six decisions, and what they cost.</h2>
+
+        <div class="cards">
+          <article class="card">
+            <h3>Offline, genuinely.</h3>
+            <p>
+              Point it at <a href="https://ollama.com">Ollama</a> and the whole app &mdash; chat,
+              reading, speech, dictation &mdash; works on a plane. No account, ever.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Your provider, your key.</h3>
+            <p>
+              Ollama, LM Studio, OpenAI, Anthropic, Gemini, OpenRouter. Swap in Settings; nothing is
+              locked in.
+            </p>
+          </article>
+          <article class="card">
+            <h3>It talks back.</h3>
+            <p>
+              Speak, get transcribed, get answered out loud. The bundled models download on demand
+              and run in-process.
+            </p>
+          </article>
+          <article class="card">
+            <h3>It remembers.</h3>
+            <p>
+              Words you stumble on become a spaced-repetition deck, and the deck feeds tomorrow's
+              session.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Your data stays put.</h3>
+            <p>
+              Everything lives in a local SQLite file. Nothing is uploaded, nothing is synced,
+              nothing is sold.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Eight languages &mdash; adding one is a folder.</h3>
+            <p>
+              English, Spanish, French, German, Japanese, Turkish, Italian, Portuguese.
+              <a href="https://github.com/nuvocode/verba/blob/master/CONTRIBUTING.md">Add yours</a>.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ---------- speech ---------- -->
+      <section class="band" id="speech">
+        <p class="eyebrow">Speech</p>
+        <h2 class="display band-h">A ladder, walked in order, out loud.</h2>
+        <p class="band-sub">
+          Verba walks <b>bundled → local server → cloud key → OS voice</b> and always tells you which
+          tier is actually speaking. The bundled tier is the default, and it is the one that needs
+          nothing from you.
+        </p>
+
+        <div class="table">
+          <div class="trow thead">
+            <span>Model</span><span>Role</span><span>Size</span><span>Speed</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">Piper<i>default</i></span>
+            <span>Voice — one per language</span>
+            <span class="mono">~21 MB</span>
+            <span class="mono">~7× real time</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">Kokoro</span>
+            <span>Voice — 53 voices, six languages</span>
+            <span class="mono">349 MB</span>
+            <span class="mono">~2× real time</span>
+          </div>
+          <div class="trow">
+            <span class="t-name">Whisper</span>
+            <span>Dictation — base / small</span>
+            <span class="mono">208 / 639 MB</span>
+            <span class="mono">faster than real time</span>
+          </div>
+        </div>
+        <p class="note">
+          Piper is a fiftieth of Kokoro's download and several times quicker &mdash; which, for a
+          conversation turn, matters more than the last few percent of naturalness. Already run your
+          own speech server? Any OpenAI-compatible one works (Kokoro-FastAPI, speaches, LocalAI,
+          vLLM), as do ElevenLabs and Deepgram keys.
+        </p>
+      </section>
+
+      <!-- ---------- download ---------- -->
+      <section class="band" id="download">
+        <p class="eyebrow">Download &nbsp;·&nbsp; v0.1.0</p>
+        <h2 class="display band-h">Take the build for your machine.</h2>
+
+        <div class="dl">
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>macOS</b>
+              <span>Apple Silicon — M1 to M4</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_aarch64.dmg"
+                >.dmg</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>macOS</b>
+              <span>Intel</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_x64.dmg"
+                >.dmg</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>Windows</b>
+              <span>x64</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_x64-setup.exe"
+                >.exe</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_x64_en-US.msi"
+                >.msi</a
+              >
+            </div>
+          </div>
+          <div class="dl-row">
+            <div class="dl-plat">
+              <b>Linux</b>
+              <span>x86_64</span>
+            </div>
+            <div class="dl-links">
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_amd64.AppImage"
+                >.AppImage</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba_0.1.0_amd64.deb"
+                >.deb</a
+              >
+              <a
+                class="btn sm ghost"
+                href="https://github.com/nuvocode/verba/releases/download/v0.1.0/Verba-0.1.0-1.x86_64.rpm"
+                >.rpm</a
+              >
+            </div>
+          </div>
+        </div>
+
+        <p class="note">
+          On a Mac, take <b>aarch64</b> for Apple Silicon and <b>x64</b> only for an Intel Mac
+          &mdash; the wrong one either refuses to start or crawls under Rosetta.
+        </p>
+
+        <details class="disclose">
+          <summary>The build is unsigned — here's how to open it anyway</summary>
+          <div class="disclose-body">
+            <p>
+              Verba has no Apple Developer certificate and no Windows code-signing certificate, and
+              we would rather ship the build than gate it behind either. So both operating systems
+              will refuse to open it on the first try.
+            </p>
+            <p>
+              <b>macOS</b> says <i>“Apple could not verify ‘Verba’ is free of malware”</i> and offers
+              you <b>Move to Trash</b>. That is not a detection — nothing was scanned and nothing was
+              found. It is what macOS says about <i>any</i> app that hasn't been through Apple's
+              notarisation service. Drag Verba to <code>/Applications</code>, then:
+            </p>
+            <pre><code>xattr -dr com.apple.quarantine /Applications/Verba.app</code></pre>
+            <p>
+              Without a terminal: try to open it once, then <b>System Settings → Privacy &amp;
+              Security</b> → scroll down → <b>Open Anyway</b>.
+            </p>
+            <p>
+              <b>Windows</b> SmartScreen shows <i>“Windows protected your PC”</i> → <b>More info</b>
+              → <b>Run anyway</b>.
+            </p>
+            <p>
+              Building it yourself sidesteps both, and is the honest option if the above makes you
+              uncomfortable. None of this is unique to Verba — it's the toll every unsigned
+              open-source desktop app pays.
+            </p>
+          </div>
+        </details>
+
+        <div class="honesty">
+          <span class="bullet"></span>
+          <p>
+            <b>Platform honesty.</b> All four targets are packaged from the same source by CI, but
+            the bundled speech engine has only ever <i>run</i> on macOS arm64. If you are the first
+            to run it on Windows or Linux and no voice comes out, that's a bug worth
+            <a href="https://github.com/nuvocode/verba/issues">reporting</a> — not you doing it
+            wrong.
+          </p>
+        </div>
+
+        <div class="source">
+          <p class="sec">Or build it from source</p>
+          <pre><code>git clone https://github.com/nuvocode/verba.git
+cd verba
+npm install
+npm run tauri build</code></pre>
+          <p class="note">Needs Node and Rust; for offline, Ollama running.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="foot-in">
+        <div>
+          <a class="logo" href="/">Verba<b>.</b></a>
+          <p>A language tutor that runs on your machine.</p>
+        </div>
+        <nav>
+          <a href="https://github.com/nuvocode/verba">GitHub</a>
+          <a href="https://github.com/nuvocode/verba/blob/master/docs/architecture.md"
+            >What's inside</a
+          >
+          <a href="https://github.com/nuvocode/verba/blob/master/CONTRIBUTING.md">Contributing</a>
+          <a href="https://github.com/nuvocode/verba/blob/master/LICENSE">MIT licence</a>
+        </nav>
+      </div>
+      <p class="foot-fine">
+        Built by <a href="https://nuvo.page">Nuvo Code</a>. No trackers on this page.
+      </p>
+    </footer>
+
+    <script>
+      var root = document.documentElement;
+      document.getElementById("theme").addEventListener("click", function () {
+        var next = root.dataset.vtheme === "dark" ? "light" : "dark";
+        root.dataset.vtheme = next;
+        try {
+          localStorage.setItem("vtheme", next);
+        } catch (e) {}
+      });
+    </script>
+  </body>
+</html>
