@@ -210,6 +210,11 @@ input { font: inherit; }
 
 /* ---------- read ---------- */
 .read { min-height: 100%; display: grid; grid-template-columns: 1fr 620px 280px 1fr; padding: 56px 0 120px; }
+.topline { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.vtoggle { display: flex; gap: 2px; flex: none; border: 1px solid var(--line); border-radius: 8px; padding: 2px; background: var(--surface); }
+.vtoggle button { padding: 5px 11px; border-radius: 6px; font-size: 11.5px; color: var(--ink3); white-space: nowrap; transition: background .15s, color .15s; }
+.vtoggle button:hover { color: var(--ink2); }
+.vtoggle button.on { background: var(--bg2); color: var(--ink); }
 .read h1 { font-family: var(--serif); font-size: 38px; font-weight: 500; letter-spacing: -.02em; margin: 8px 0; }
 .read .cap { font-size: 12.5px; color: var(--ink3); margin-bottom: 38px; }
 .passage { font-family: var(--serif); font-size: 21px; line-height: 1.85; color: var(--ink); }
@@ -237,6 +242,48 @@ input { font: inherit; }
 .popover .t { font-family: var(--serif); font-size: 20px; font-weight: 500; }
 .popover .g { font-size: 13px; color: var(--ink2); margin-top: 3px; }
 .popover .s { font-size: 11px; color: var(--good); margin-top: 9px; }
+
+/* ---------- read: the teleprompter ---------- */
+/* Exactly the body's height and no more: the column moves, the page never scrolls. */
+.prompter { position: relative; height: calc(100vh - 52px); display: flex; flex-direction: column; overflow: hidden; }
+.prompter .bar { flex: none; display: flex; align-items: center; gap: 16px; padding: 13px 28px; border-bottom: 1px solid var(--line2); }
+.prompter .ttl { font-family: var(--serif); font-size: 16px; font-weight: 500; max-width: 28%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prompter .st { font-family: var(--mono); font-size: 11px; letter-spacing: .04em; color: var(--ink3); white-space: nowrap; }
+.prompter .speed { margin-left: auto; }
+.speed { display: flex; align-items: center; gap: 3px; flex: none; border: 1px solid var(--line); border-radius: 8px; padding: 2px; background: var(--surface); }
+.speed button { width: 26px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--ink2); }
+.speed button:hover:not(:disabled) { background: var(--bg2); color: var(--ink); }
+.speed button:disabled { opacity: .3; cursor: default; }
+.speed .v { font-family: var(--mono); font-size: 11.5px; color: var(--ink); min-width: 64px; text-align: center; }
+.prompter .prog { flex: none; height: 2px; background: var(--line2); }
+.prompter .prog span { display: block; height: 100%; background: var(--accent); transform: scaleX(0); transform-origin: 0 50%; }
+/* Two scrims in the page's own colour, painted *over* the column: the passage arrives out
+   of nothing at the foot of the screen, is legible for as long as it takes to cross the
+   mark, and is gone off the top. One line at a time reads as "now", and not a single style
+   is written per frame.
+   Scrims and not `mask-image` on the stage, which is the obvious way to do this and is
+   wrong: the column underneath is a composited layer (it is transformed 60 times a second),
+   and WebKit sizes the mask against the layer rather than the stage — the view comes out
+   guillotined along the top of the current line. */
+.stage { position: relative; flex: 1; overflow: hidden; }
+.stage::before, .stage::after { content: ""; position: absolute; left: 0; right: 0; pointer-events: none; z-index: 2; }
+.stage::before { top: 0; height: 32%; background: linear-gradient(to bottom, var(--bg) 34%, transparent); }
+.stage::after { bottom: 0; height: 46%; background: linear-gradient(to bottom, transparent, var(--bg) 88%); }
+.stage .mark { position: absolute; left: 0; right: 0; top: 34%; border-top: 1px solid var(--line); opacity: .55; z-index: 3; }
+/* The column hangs off the stage itself, centred with auto margins, and nothing stands
+   between the two. It did have a flex wrapper to centre it, and that wrapper is what
+   guillotined the view: WebKit sized the wrapper's compositing layer to where the column
+   sits *before* its transform, so every line the transform lifted above that box — which
+   is to say every line already read — was clipped away at the wrapper's top edge. The
+   element that moves must be the stage's own child, and the stage's `overflow: hidden` is
+   then the only thing clipping it, which is exactly what it is for. */
+.column { position: absolute; top: 34%; left: 0; right: 0; margin: 0 auto; width: min(760px, 84vw); will-change: transform; }
+.pline { font-family: var(--serif); font-size: 30px; line-height: 1.5; color: var(--ink3); padding: 12px 0; transition: color .3s ease; }
+.pline.on { color: var(--ink); }
+.endcard { position: absolute; left: 0; right: 0; top: 28%; margin: 0 auto; width: 520px; max-width: 88vw; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 26px 24px; text-align: center; z-index: 5; }
+.endcard h2 { font-family: var(--serif); font-size: 26px; font-weight: 500; margin: 0 0 6px; }
+.endcard p { font-size: 13px; color: var(--ink2); margin: 0 0 20px; }
+
 .empty { text-align: center; padding: 80px 24px; }
 .empty h2 { font-family: var(--serif); font-size: 30px; font-weight: 500; margin: 0 0 10px; }
 .empty p { font-size: 14px; color: var(--ink2); margin: 0 0 26px; }

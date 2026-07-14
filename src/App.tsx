@@ -161,6 +161,14 @@ export default function App() {
         },
       },
       {
+        label: "Read the passage out loud — the teleprompter",
+        kbd: "P",
+        run: () => {
+          go("read");
+          update({ readView: "prompter" });
+        },
+      },
+      {
         label: `Switch to ${settings.theme === "dark" ? "light" : "dark"} theme`,
         run: () => update({ theme: settings.theme === "dark" ? "light" : "dark" }),
       },
@@ -198,7 +206,7 @@ export default function App() {
     ? null
     : read.popover
       ? { label: "close the word", run: () => read.closePopover() }
-      : space === "read" && read.focusIdx >= 0
+      : space === "read" && settings.readView === "passage" && read.focusIdx >= 0
         ? { label: "clear focus", run: () => read.setFocusIdx(-1) }
         : space === "talk" && talk.started && !talk.reflecting
           ? { label: "end the session", run: () => void talk.end() }
@@ -257,16 +265,24 @@ export default function App() {
         if (s) return void talk.send(s, true);
       }
       if (space === "read" && read.text) {
-        const last = read.text.sentences.length - 1;
-        if (e.key === "ArrowRight") {
-          e.preventDefault();
-          return read.setFocusIdx(Math.min(read.focusIdx + 1, last));
+        // P is the door between the two views, and it is open from both sides.
+        if (e.key.toLowerCase() === "p")
+          return update({ readView: settings.readView === "prompter" ? "passage" : "prompter" });
+        // Everything else on this screen belongs to close reading. The teleprompter is
+        // moving text with its own keys (space, +, −, arrows) — it takes them itself, and
+        // these stand down for as long as it is up.
+        if (settings.readView === "passage") {
+          const last = read.text.sentences.length - 1;
+          if (e.key === "ArrowRight") {
+            e.preventDefault();
+            return read.setFocusIdx(Math.min(read.focusIdx + 1, last));
+          }
+          if (e.key === "ArrowLeft") {
+            e.preventDefault();
+            return read.setFocusIdx(Math.max(read.focusIdx - 1, 0));
+          }
+          if (e.key.toLowerCase() === "t") return read.toggleBilingual();
         }
-        if (e.key === "ArrowLeft") {
-          e.preventDefault();
-          return read.setFocusIdx(Math.max(read.focusIdx - 1, 0));
-        }
-        if (e.key.toLowerCase() === "t") return read.toggleBilingual();
       }
       if (space === "today" && e.key === "Enter" && day.next) return begin(day.next);
 
@@ -282,7 +298,22 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [space, paletteOpen, pIdx, paletteItems, talk, read, day, begin, go, captured, escape, confirmReplay, update]);
+  }, [
+    space,
+    paletteOpen,
+    pIdx,
+    paletteItems,
+    talk,
+    read,
+    day,
+    begin,
+    go,
+    captured,
+    escape,
+    confirmReplay,
+    update,
+    settings.readView,
+  ]);
 
   useEffect(() => {
     if (paletteOpen) paletteInput.current?.focus();
@@ -361,7 +392,14 @@ export default function App() {
         {space === "today" && <Today settings={settings} day={day} onBegin={begin} />}
         {space === "talk" && <Talk settings={settings} talk={talk} day={day} onBegin={begin} />}
         {space === "read" && (
-          <Read settings={settings} read={read} day={day} onBegin={begin} onCaptureKeys={setCaptured} />
+          <Read
+            settings={settings}
+            read={read}
+            day={day}
+            onBegin={begin}
+            onCaptureKeys={setCaptured}
+            onChange={update}
+          />
         )}
         {space === "memory" && (
           <Memory

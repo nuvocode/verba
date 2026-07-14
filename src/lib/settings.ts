@@ -1,5 +1,6 @@
 import { detectNativeLang } from "./langs.ts";
 import { migrateSpeech, type Tier } from "./speech.ts";
+import { DEFAULT_WPM } from "./prompter.ts";
 
 /** What the documented Docker one-liners listen on — the placeholder, and the value
  *  "Local server" seeds itself with when it has nothing yet. */
@@ -9,6 +10,12 @@ export const LOCAL_STT_URL = "http://localhost:8000/v1";
 export type ProviderId = "ollama" | "openai" | "anthropic" | "gemini" | "openrouter" | "lmstudio";
 /** When a correction is shown inline: as it happens, only when severe, or only at reflection. */
 export type CorrectionTiming = "adaptive" | "live" | "delayed";
+/**
+ * The two ways to work a passage. `passage` is close reading — focus a sentence, tap a
+ * word, read the coach's note. `prompter` is the same text moving up the screen at a
+ * pace you set, to be read out loud. Same passage, two exercises.
+ */
+export type ReadView = "passage" | "prompter";
 
 /** Providers that run on the learner's own machine — the only ones allowed in offline mode. */
 export const LOCAL_PROVIDERS: ProviderId[] = ["ollama", "lmstudio"];
@@ -65,6 +72,10 @@ export interface Settings {
   correctionTiming: CorrectionTiming;
   offline: boolean; // hard-forces local providers; cloud options are disabled
   showHints: boolean; // keyboard hint lines under each screen
+  // Which way the reading screen was left. It lives here, not in useRead, because the
+  // whole point is that it outlives the passage — and the session.
+  readView: ReadView;
+  prompterWpm: number; // the pace they last read out loud at (lib/prompter clamps it)
 }
 
 /** The level to write prompts against. "" (skipped) reads as A2 until the first conversation places them. */
@@ -132,6 +143,10 @@ export const defaultSettings: Settings = {
   correctionTiming: "adaptive",
   offline: true,
   showHints: true,
+  // Close reading is the default and stays the default — the teleprompter is a second
+  // exercise you opt into, not a new front door.
+  readView: "passage",
+  prompterWpm: DEFAULT_WPM,
 };
 
 export function loadSettings(): Settings {
