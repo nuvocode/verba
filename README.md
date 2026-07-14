@@ -5,6 +5,22 @@ conversation — including **offline via Ollama** — with inline grammar
 corrections and automatic vocabulary capture, read AI-generated graded stories,
 and drive it all by voice.
 
+![Today — the daily session plan](./docs/screenshots/today.png)
+
+A session is a plan, not a menu: one theme threads conversation, reading,
+role-play and the words that are due today.
+
+![Talk — conversation with the coach](./docs/screenshots/talk.png)
+
+The coach speaks first and keeps the turn moving; suggestions are there for the
+moment you stall, not to answer for you.
+
+![Settings → Speech — the bundled tier](./docs/screenshots/speech.png)
+
+Voice and dictation are picked independently, and the panel always names the tier
+that is actually serving — here a 21 MB Piper voice running inside the app, with
+no key and nothing on the network.
+
 ## Phase 1 — Conversation MVP
 
 - Tauri v2 desktop shell, React + TypeScript frontend
@@ -92,6 +108,24 @@ npm run tauri build    # package the app
 
 Pick a **language pack** and provider in **Settings**. `Test connection`
 lists your installed Ollama models.
+
+## Install the macOS build
+
+The release `.dmg` is **not signed or notarised** — Verba has no Apple Developer
+account, and we would rather ship the build than gate it behind one. macOS
+quarantines anything downloaded from an unidentified developer, and reports it as
+*"Verba is damaged and can't be opened"* — which is a lie, but a load-bearing one:
+it means the same thing whether the app is merely unsigned or genuinely tampered
+with. Strip the quarantine flag yourself, having read the source you are about to
+run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Verba.app
+```
+
+Building it yourself (`npm run tauri build`) produces an app that never gets
+quarantined in the first place, and is the honest option if the above makes you
+uncomfortable.
 
 ## Bundled speech (no setup)
 
