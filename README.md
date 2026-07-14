@@ -109,23 +109,27 @@ npm run tauri build    # package the app
 Pick a **language pack** and provider in **Settings**. `Test connection`
 lists your installed Ollama models.
 
-## Install the macOS build
+## Install a build
 
-The release `.dmg` is **not signed or notarised** — Verba has no Apple Developer
-account, and we would rather ship the build than gate it behind one. macOS
-quarantines anything downloaded from an unidentified developer, and reports it as
-*"Verba is damaged and can't be opened"* — which is a lie, but a load-bearing one:
-it means the same thing whether the app is merely unsigned or genuinely tampered
-with. Strip the quarantine flag yourself, having read the source you are about to
-run:
+[**Latest release**](https://github.com/nuvocode/verba/releases/latest) — macOS
+(Apple Silicon and Intel `.dmg`), Windows (`.exe` / `.msi`), Linux (`.AppImage`,
+`.deb`, `.rpm`).
 
-```bash
-xattr -dr com.apple.quarantine /Applications/Verba.app
-```
+Nothing is **signed or notarised** — Verba has no Apple Developer certificate and
+no Windows code-signing certificate, and we would rather ship the build than gate
+it behind either. Both operating systems will therefore tell you it is dangerous:
 
-Building it yourself (`npm run tauri build`) produces an app that never gets
-quarantined in the first place, and is the honest option if the above makes you
-uncomfortable.
+- **macOS** reports *"Verba is damaged and can't be opened"*, which is a lie, but a
+  load-bearing one — it means the same thing whether the app is merely unsigned or
+  genuinely tampered with. Having read the source you are about to run:
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/Verba.app
+  ```
+- **Windows** SmartScreen shows *"Windows protected your PC"* → *More info* → *Run
+  anyway*.
+
+Building it yourself (`npm run tauri build`) sidesteps both, and is the honest
+option if the above makes you uncomfortable.
 
 ## Bundled speech (no setup)
 
@@ -164,9 +168,14 @@ separate process would have contained it.
 
 **Bundle size:** the statically-linked engine adds **25 MB** to the app binary
 (19 MB → 44 MB on macOS arm64). Models are *not* bundled — they are downloaded on
-request, and only the ones you ask for. Verified on macOS arm64; the Rust binding
-fetches prebuilt static libraries for Windows, Linux and Intel macOS too, but
-those targets have not been built here.
+request, and only the ones you ask for.
+
+**Platform honesty:** CI builds macOS (both architectures), Windows and Linux, so
+all four are packaged from the same source. But the bundled engine has only ever
+*run* on macOS arm64 — the Rust binding fetches a prebuilt static library per
+target and a green build proves it linked, not that it speaks. If you are the
+first to run it on Windows or Linux and the voice does not come out, that is a
+bug worth reporting, not you doing it wrong.
 
 ## Local speech (bring your own server)
 
