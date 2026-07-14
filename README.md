@@ -115,21 +115,31 @@ lists your installed Ollama models.
 (Apple Silicon and Intel `.dmg`), Windows (`.exe` / `.msi`), Linux (`.AppImage`,
 `.deb`, `.rpm`).
 
+On a Mac, take **aarch64** for Apple Silicon (M1–M4) and **x64** only for an Intel
+Mac. The wrong one either refuses to start or crawls along under Rosetta.
+
 Nothing is **signed or notarised** — Verba has no Apple Developer certificate and
 no Windows code-signing certificate, and we would rather ship the build than gate
-it behind either. Both operating systems will therefore tell you it is dangerous:
+it behind either. Both operating systems will therefore refuse to open it:
 
-- **macOS** reports *"Verba is damaged and can't be opened"*, which is a lie, but a
-  load-bearing one — it means the same thing whether the app is merely unsigned or
-  genuinely tampered with. Having read the source you are about to run:
+- **macOS** says *"Apple could not verify "Verba" is free of malware"* and offers
+  you **Move to Trash**. That is not a detection — nothing was scanned and nothing
+  was found. It is what macOS says about *any* app that has not been through
+  Apple's notarisation service, which costs a developer account we do not have. The
+  dialog cannot tell you apart from a real threat, so it treats you as one.
+  Having read the source you are about to run, drag the app to `/Applications` and:
   ```bash
   xattr -dr com.apple.quarantine /Applications/Verba.app
   ```
+  Or, without a terminal: try to open it once, then **System Settings → Privacy &
+  Security** → scroll down → **Open Anyway**. (On macOS 15 and later the old
+  right-click → *Open* trick no longer works.)
 - **Windows** SmartScreen shows *"Windows protected your PC"* → *More info* → *Run
   anyway*.
 
 Building it yourself (`npm run tauri build`) sidesteps both, and is the honest
-option if the above makes you uncomfortable.
+option if the above makes you uncomfortable. Nothing above is unique to Verba —
+it is the toll every unsigned open-source desktop app pays.
 
 ## Bundled speech (no setup)
 
