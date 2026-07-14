@@ -13,7 +13,6 @@ pub fn run() {
             speech::models_installed,
             speech::model_download,
             speech::model_delete,
-            speech::model_ready,
             speech::bundled_tts,
             speech::bundled_stt,
         ])

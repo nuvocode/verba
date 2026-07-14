@@ -428,8 +428,9 @@ export interface SpeechSettings {
   localSttUrl?: string; // "" → likewise
   localSttModel?: string;
   // The bundled tier. A model id is only ever written here once the download
-  // verified, so a non-empty id means "there are files on disk" — and if they go
-  // missing anyway, the first call throws and the half falls through.
+  // verified, and pruneBundled() clears it again at startup if the files went away,
+  // so a non-empty id means "there are files on disk". A model deleted *during* a
+  // session outlives that check: the first call throws and the half falls through.
   bundledTtsModel?: string; // "" → this half skips the bundled tier
   bundledTtsVoice?: number; // sherpa speaker id within that model
   bundledSttModel?: string; // "" → likewise
@@ -481,6 +482,26 @@ export function migrateSpeech<T extends Record<string, unknown>>(raw: T): T {
     ttsTier: rest.localTtsUrl ? "local" : (rest.ttsTier ?? "auto"),
     sttTier: rest.localSttUrl ? "local" : (rest.sttTier ?? "auto"),
   } as unknown as T;
+}
+
+/**
+ * The chosen models, against what is actually on disk. An id is only written once a
+ * download verified — but files outlive nothing: clear the app's data folder and the
+ * id stays behind, pointing at a model that is gone. The bundled tier would then keep
+ * winning the precedence race with nothing to serve, the panel promising "Kokoro
+ * (bundled) — offline, no key" while every turn quietly fell through to the OS voice.
+ * Forgetting the id is what makes the panel and the adapter agree again.
+ *
+ * `onDisk` must come from the model index and nowhere else. A caller who *cannot* ask
+ * it — no Tauri, no data dir — must not call this at all: "I could not look" would
+ * arrive here as "nothing is installed" and wipe a working setup. Hence bundled.ts's
+ * installed() returns null rather than [] when it could not look.
+ */
+export function pruneBundled(s: SpeechSettings, onDisk: Set<string>): Partial<SpeechSettings> {
+  const patch: Partial<SpeechSettings> = {};
+  if (s.bundledTtsModel && !onDisk.has(s.bundledTtsModel)) patch.bundledTtsModel = "";
+  if (s.bundledSttModel && !onDisk.has(s.bundledSttModel)) patch.bundledSttModel = "";
+  return patch;
 }
 
 /** Why the mic is dead, in words a learner can act on. "" when it works. */

@@ -156,26 +156,23 @@ export interface Installed {
   downloadedAt: number;
 }
 
-/** Models on disk, as the Rust index records them (and whose folders still exist). */
-export async function installed(): Promise<Installed[]> {
+/**
+ * Models on disk, as the Rust index records them (and whose folders still exist), or
+ * null when there is no store to ask: not under Tauri (the .check scripts, a browser
+ * dev server), or the data dir is unreadable.
+ *
+ * null is not an empty list. One says "nothing is installed", the other says "I could
+ * not look" — and only the first is grounds for forgetting a model the learner chose
+ * (speech.ts's pruneBundled). Callers that only render a catalog can read null as [].
+ */
+export async function installed(): Promise<Installed[] | null> {
   try {
     const list = await invoke<{ id: string; bytes: number; sha256: string; downloaded_at: number }[]>(
       "models_installed",
     );
     return list.map((m) => ({ id: m.id, bytes: m.bytes, sha256: m.sha256, downloadedAt: m.downloaded_at }));
   } catch {
-    // Not under Tauri (the .check scripts, a browser dev server): no bundled tier.
-    return [];
-  }
-}
-
-/** Is this model loadable right now? Cheap enough to ask before every session. */
-export async function ready(id: string): Promise<boolean> {
-  if (!id) return false;
-  try {
-    return await invoke<boolean>("model_ready", { id });
-  } catch {
-    return false;
+    return null;
   }
 }
 

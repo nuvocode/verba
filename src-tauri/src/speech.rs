@@ -477,14 +477,6 @@ pub fn bundled_stt(
     Ok(stream.get_result().map(|r| r.text).unwrap_or_default().trim().to_string())
 }
 
-/// Is this model loadable right now? The TS side asks before it lets the bundled
-/// tier win the precedence race, so a model whose files vanished falls through
-/// instead of throwing on the learner's next sentence.
-#[tauri::command]
-pub fn model_ready(app: AppHandle, id: String) -> bool {
-    model_dir(&app, &id).is_ok()
-}
-
 // The bundled tier's whole promise is "speak, hear, no network, no setup". These
 // tests hold it to that: a real archive off the real release, verified, unpacked,
 // spoken, and heard back. They hit the network once (~230MB) and are slow; that is

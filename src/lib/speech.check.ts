@@ -4,7 +4,7 @@
 // which is exactly the macOS-webview situation this code exists to survive.
 // Run: node --experimental-strip-types src/lib/speech.check.ts
 import assert from "node:assert";
-import { deepgramHelp, getSpeech, listenBlocker, migrateSpeech, resolveTier } from "./speech.ts";
+import { deepgramHelp, getSpeech, listenBlocker, migrateSpeech, pruneBundled, resolveTier } from "./speech.ts";
 
 // --- the original bug: an ElevenLabs key must not decide dictation ---
 // The old single-radio design made these mutually exclusive, so picking
@@ -110,6 +110,33 @@ await orphan.speak("otra vez");
 assert.equal(gone.length, 1, "a missing model must warn once, not once per turn");
 assert.match(gone[0], /Bundled voice unavailable/, "the banner names the tier that went away");
 assert.match(gone[0], /system voice/, "…and says what spoke instead");
+
+// --- the model is deleted between sessions ---
+// The mid-session case above costs one turn; this one must cost none. App checks the
+// model index on the way in, and an id whose files are gone is forgotten there — so
+// the tier is already out of the race by the time the learner says anything.
+const onDisk = new Set(["whisper-base"]); // the voice is gone; the recogniser is not
+assert.deepEqual(
+  pruneBundled(bundled, onDisk),
+  { bundledTtsModel: "" },
+  "a chosen model that is no longer on disk is forgotten, and only that one",
+);
+const pruned = { ...bundled, ...pruneBundled(bundled, onDisk) };
+assert.equal(resolveTier(pruned, "tts"), "native", "…so the bundled tier stops winning with nothing to serve");
+assert.equal(resolveTier(pruned, "stt"), "bundled", "…while the half whose model survived keeps it");
+
+// A pin is not a licence to serve nothing: the panel already degrades a pin that
+// cannot serve, and a pruned id is exactly that.
+assert.equal(
+  resolveTier({ ...bundled, ...pruneBundled(bundled, new Set()), ttsTier: "bundled" }, "tts"),
+  "native",
+  "a pin at a tier whose model is gone degrades to the OS",
+);
+
+// Nothing to forget must write nothing — a no-op patch that still saves would rewrite
+// settings on every launch.
+assert.deepEqual(pruneBundled(bundled, new Set(["piper-es", "whisper-base"])), {}, "models on disk are left alone");
+assert.deepEqual(pruneBundled({}, new Set()), {}, "…and so is a learner who never chose one");
 
 // --- what the Deepgram field promises, in tier order ---
 // The bug this fixes: the field said "required" while a bundled Whisper model was

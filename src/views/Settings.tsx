@@ -456,9 +456,12 @@ export default function SettingsView({
   // field needs to know whether dictation already works offline.
   const [installed, setInstalled] = useState<Record<string, Installed>>({});
   const [loaded, setLoaded] = useState(false);
+  // null (no store to ask — a browser dev server) renders the same as nothing
+  // installed: every row offers a download, and the one that matters, the Deepgram
+  // field, correctly stops claiming Whisper is already listening.
   const refresh = () =>
     listInstalled().then((list) => {
-      setInstalled(Object.fromEntries(list.map((m) => [m.id, m])));
+      setInstalled(Object.fromEntries((list ?? []).map((m) => [m.id, m])));
       setLoaded(true);
     });
   useEffect(() => {

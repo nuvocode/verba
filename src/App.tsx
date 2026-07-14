@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadSettings, saveSettings, isLocalProvider, onboardingReset, type Settings } from "./lib/settings";
+import { installed } from "./lib/bundled";
+import { pruneBundled } from "./lib/speech";
 import type { BlockKind } from "./lib/learn";
 import { useDay } from "./lib/useDay";
 import { useTalk } from "./lib/useTalk";
@@ -72,6 +74,25 @@ export default function App() {
   useEffect(() => {
     document.body.dataset.vtheme = settings.theme;
   }, [settings.theme]);
+
+  // A bundled model id in settings is a claim about the disk, and the disk can be
+  // cleared behind the app's back. Check it once, on the way in: a model that is gone
+  // has to stop winning the precedence race *before* the first turn, not on it. The
+  // settings are patched through the same setter as everything else, so the Speech
+  // panel and the adapter read the same corrected truth.
+  useEffect(() => {
+    void installed().then((list) => {
+      if (!list) return; // could not look — leave the learner's choice alone
+      const onDisk = new Set(list.map((m) => m.id));
+      setSettings((s) => {
+        const patch = pruneBundled(s, onDisk);
+        if (!Object.keys(patch).length) return s;
+        const next = { ...s, ...patch };
+        saveSettings(next);
+        return next;
+      });
+    });
+  }, []);
 
   const go = useCallback((s: Space) => {
     setSpace(s);
