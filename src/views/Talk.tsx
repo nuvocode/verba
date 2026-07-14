@@ -110,8 +110,10 @@ export default function Talk({
                 return (
                   <button className="spine-item" key={s.id} onClick={() => setOpen(s)}>
                     <div style={{ flex: 1 }}>
+                      {/* Sessions from before titles existed — and any whose title call
+                          failed — still answer to their scenario's name. */}
                       <div className="title">
-                        {sc.emoji} {sc.title}
+                        {sc.emoji} {s.title || sc.title}
                       </div>
                       <div className="meta">{s.summary ?? "no summary — ended early"}</div>
                     </div>

@@ -130,6 +130,40 @@ export interface SessionSummary {
   focus: string[];
 }
 
+/**
+ * Prompt for the short name a conversation carries in the history list.
+ *
+ * Called twice: "opening" right after the first exchange, so the entry has a name
+ * the moment it appears, and "settled" once the subject has actually emerged. The
+ * second call is told it is replacing a guess — otherwise a model handed a title
+ * it already wrote tends to just hand it back.
+ */
+export function titlePrompt(s: Settings, stage: "opening" | "settled" = "opening"): string {
+  return [
+    stage === "opening"
+      ? `Name this conversation, going on what it opened with.`
+      : `The conversation has found its subject. Re-name it for what it actually turned out to be about — do not keep the earlier guess unless it still fits.`,
+    `Answer with ONLY a JSON object: { "title": "the name, written in ${s.nativeLang}" }.`,
+    `The title is a label in a list, not a sentence: 2-5 words, no final punctuation, no quotes.`,
+    `Name the subject, not the exercise — "Cooking and eating out", "Booking a late check-in". Never "${s.targetLang} practice" or the scenario's name.`,
+  ].join("\n");
+}
+
+/** The title, or "" if the model gave us nothing usable — the old title then stands. */
+export function parseTitle(raw: string): string {
+  // Models like to quote the label, and to end it with a full stop.
+  const clean = (s: string) =>
+    s.replace(/\s+/g, " ").trim().replace(/^["'“”]+|["'“”.]+$/g, "").trim();
+
+  const obj = extractJson(raw);
+  if (typeof obj?.title === "string") return clean(obj.title).slice(0, 60).trim();
+
+  // No JSON came back. A bare one-liner is still a usable title; a paragraph of
+  // prose is a failed call, and a failed call leaves the standing title alone.
+  const bare = clean(raw ?? "");
+  return !bare || bare.length > 60 ? "" : bare;
+}
+
 export function parseSummary(raw: string): SessionSummary {
   const obj = extractJson(raw) ?? {};
   return {

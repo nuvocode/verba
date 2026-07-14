@@ -8,6 +8,8 @@ import {
   parseVocab,
   summaryPrompt,
   parseSummary,
+  titlePrompt,
+  parseTitle,
   shouldShowInline,
   type Correction,
   type SessionSummary,
@@ -17,7 +19,7 @@ import { getPack } from "./packs";
 import { levelPrompt, parseLevel } from "./level";
 import { computeMetrics, estimateLevelV2 } from "./metrics";
 import { getSpeech, listenBlocker } from "./speech";
-import { addMessage, addVocab, createSession, setSummary, saveLevelSignal, saveMetrics, vocabCounts } from "./db";
+import { addMessage, addVocab, createSession, setSummary, setTitle, saveLevelSignal, saveMetrics, vocabCounts } from "./db";
 
 export interface TalkMsg {
   role: "user" | "ai";
@@ -35,6 +37,13 @@ export interface Reflection extends SessionSummary {
 }
 
 const CONF_START = 50;
+
+/**
+ * Messages exchanged before the coach re-names the conversation. By the fourth
+ * exchange the opening pleasantries are behind us and the actual subject is on
+ * the table — early enough that the name in the list is still worth fixing.
+ */
+const TITLE_SETTLES_AT = 8;
 
 /**
  * One conversation with the coach. Lives above the router so switching to Read
@@ -60,6 +69,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
   const history = useRef<ChatMessage[]>([]); // full provider context, incl. system
   const sessionId = useRef<number | null>(null);
+  // How far the session's title has got: 0 unnamed, 1 named off the opening,
+  // 2 re-named once the subject settled. Not a rolling rewrite — 2 is the end.
+  const titleStage = useRef<0 | 1 | 2>(0);
   const pack = getPack(settings.packId);
   const speech = useMemo(
     () => getSpeech(settings, setNotice),
@@ -90,6 +102,28 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     [settings.speak, speech, pack],
   );
 
+  /**
+   * Name the session in the history list. Deliberately not awaited: the coach
+   * writes the title beside the conversation, and if the provider refuses, the
+   * turn is untouched and whatever title the session already had still stands.
+   */
+  const nameSession = useCallback(
+    (stage: "opening" | "settled") => {
+      const id = sessionId.current;
+      if (!id) return; // no DB row — there is nothing to name
+      const ctx = [...history.current, { role: "user" as const, content: titlePrompt(settings, stage) }];
+      void (async () => {
+        try {
+          const title = parseTitle(await getProvider(settings).chat(ctx, { json: true }));
+          if (title) await setTitle(id, title);
+        } catch {
+          /* a title is never worth interrupting the conversation for */
+        }
+      })();
+    },
+    [settings],
+  );
+
   /** Open a scenario and let the coach speak first. */
   const start = useCallback(
     async (sc: Scenario, goal?: string) => {
@@ -101,6 +135,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       setConfidence(CONF_START);
       setError("");
       setNotice("");
+      titleStage.current = 0;
       const system = buildSystem(settings, sc, pack) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
       history.current = [{ role: "system", content: system }];
       setBusy(true);
@@ -160,6 +195,19 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
           return next;
         });
         setSuggestions(turn.suggestions);
+
+        // The session is named off its first real exchange — that is also the turn
+        // it starts showing up in the history list — and re-named exactly once,
+        // when enough has been said for the subject to be the subject.
+        const exchanged = msgs.filter((m) => !m.isAsk).length + 2; // this turn's pair included
+        if (titleStage.current === 0) {
+          titleStage.current = 1;
+          nameSession("opening");
+        } else if (titleStage.current === 1 && exchanged >= TITLE_SETTLES_AT) {
+          titleStage.current = 2;
+          nameSession("settled");
+        }
+
         // Confidence tracks unaided, accurate production — a picked suggestion is
         // worth less than a sentence the learner found on their own.
         const gain = worst ? (worst.severity === "severe" ? 0 : 2) : fromSuggestion ? 1 : 4;
@@ -171,7 +219,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         setBusy(false);
       }
     },
-    [busy, scenario, msgs.length, settings, say],
+    [busy, scenario, msgs, settings, say, nameSession],
   );
 
   /** Push-to-talk: click to open the mic, click again to stop and transcribe. */

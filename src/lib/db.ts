@@ -15,7 +15,8 @@ async function init(): Promise<Database> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       scenario TEXT NOT NULL,
       started_at INTEGER NOT NULL,
-      summary TEXT
+      summary TEXT,
+      title TEXT
     );
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,6 +82,9 @@ async function init(): Promise<Database> {
   // Added after the first release: the Coach breaks the composite back out into
   // its components, and that needs avg word length. Existing DBs get it here.
   await db.execute("ALTER TABLE session_metrics ADD COLUMN avg_word_len REAL NOT NULL DEFAULT 0").catch(() => {});
+  // Conversations name themselves now. Older sessions keep a NULL title and fall
+  // back to their scenario's name in the history list.
+  await db.execute("ALTER TABLE sessions ADD COLUMN title TEXT").catch(() => {});
   await migrateVocabToPerLanguage(db);
   return db;
 }
@@ -151,13 +155,15 @@ export interface SessionRow {
   scenario: string;
   started_at: number;
   summary: string | null;
+  /** Written by the coach. NULL on sessions that predate titles, or whose title call failed. */
+  title: string | null;
 }
 
 /** Past conversations, newest first. Sessions that never got a message are noise — skip them. */
 export async function listSessions(limit = 50): Promise<SessionRow[]> {
   const db = await getDb();
   return db.select<SessionRow[]>(
-    `SELECT s.id, s.scenario, s.started_at, s.summary,
+    `SELECT s.id, s.scenario, s.started_at, s.summary, s.title,
             (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS n
      FROM sessions s WHERE n > 1 ORDER BY s.started_at DESC LIMIT $1`,
     [limit],
@@ -175,6 +181,11 @@ export async function sessionMessages(sessionId: number): Promise<{ role: string
 export async function setSummary(sessionId: number, summary: string): Promise<void> {
   const db = await getDb();
   await db.execute("UPDATE sessions SET summary = $1 WHERE id = $2", [summary, sessionId]);
+}
+
+export async function setTitle(sessionId: number, title: string): Promise<void> {
+  const db = await getDb();
+  await db.execute("UPDATE sessions SET title = $1 WHERE id = $2", [title, sessionId]);
 }
 
 // ---- vocabulary / SRS ----
