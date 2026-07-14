@@ -75,22 +75,35 @@ export function storyPrompt(s: Settings, opts: StoryOptions = {}, pack?: Languag
   const topic = opts.topic?.trim();
   return [
     base(s, pack),
-    // The reader asking for something outranks both the day's theme and the coach's
-    // file on them: they said what they want the passage to be about.
+    // What the coach knows comes *before* the subject, so the subject gets the last
+    // word. A local model leans on whatever it read most recently, and a passage the
+    // reader asked for by name should not be steered by a fact from the file on them.
+    memories.length ? memoryLine(memories, !!topic) : "",
+    // The reader asking for something outranks both the day's theme and that file:
+    // they said what they want the passage to be about.
     topic
-      ? `The learner asked for a passage about: ${topic}. Write about exactly that.`
+      ? `The learner asked for a passage about: ${topic}. That is the subject. The setting, the characters and the details all come out of it, and nothing else they happen to like needs to appear in the story.`
       : opts.interests
         ? `Tailor the topic to the learner's interests: ${opts.interests}.`
         : `Pick an engaging everyday topic.`,
     opts.goal ? `Where natural, give practice with: ${opts.goal}.` : "",
-    memories.length
-      ? `${memoryBrief(memories)}\nWhere it fits, set the story in the learner's own world — their work, their city, the people they have mentioned. Do not make the story *about* these facts; use them as its furniture.`
-      : "",
     lengthLine(n),
     jsonShape.replace(/TARGET/g, s.targetLang).replace(/NATIVE/g, s.nativeLang),
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * The learner's own world is what makes an unasked-for passage feel written for them —
+ * and what makes an asked-for one feel like it would not listen. When they name a topic,
+ * the facts stay in the prompt but stop being an instruction to use them: a story about
+ * a rainy weekend in Edinburgh has no business reaching for their comic books.
+ */
+function memoryLine(memories: Memory[], asked: boolean): string {
+  return asked
+    ? `${memoryBrief(memories)}\nThis is background about the learner, not the subject of this passage and not a checklist. Use a detail only where it genuinely fits what they asked for; where it does not fit, leave it out entirely. A story that never touches any of it is a good story.`
+    : `${memoryBrief(memories)}\nWhere it fits, set the story in the learner's own world — their work, their city, the people they have mentioned. Do not make the story *about* these facts; use them as its furniture.`;
 }
 
 /**

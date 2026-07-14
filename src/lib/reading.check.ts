@@ -22,10 +22,31 @@ assert(long.includes("Do not pad it out"), "…and forbids the padding it would 
 assert(!storyPrompt(s, { sentences: LENGTHS.short }).includes("Do not pad it out"), "short needs none of that");
 
 // --- topic: what the reader typed outranks the day's plan and the coach's file ---
-const asked = storyPrompt(s, { topic: "a trip to Japan", interests: "cooking", memories: [{ id: 1, fact: "Lives in Ankara", created_at: 0 }] });
+const known = [
+  { id: 1, fact: "Lives in Ankara", created_at: 0 },
+  { id: 2, fact: "Loves Superman comics", created_at: 0 },
+];
+const asked = storyPrompt(s, { topic: "a trip to Japan", interests: "cooking", memories: known });
 assert(asked.includes("The learner asked for a passage about: a trip to Japan"), "the topic they named is the topic");
 assert(!asked.includes("Tailor the topic to the learner's interests"), "…and the day's theme stands down for it");
-assert(asked.includes("Lives in Ankara"), "…while their world is still the furniture, not the subject");
+
+// A named topic must not be furnished out of the learner's file: a story about Japan
+// has no business reaching for their comic books just because we know about them.
+assert(asked.includes("not the subject of this passage"), "with a topic, the memories are demoted to background");
+assert(asked.includes("A story that never touches any of it is a good story"), "…and ignoring them entirely is allowed");
+assert(!asked.includes("set the story in the learner's own world"), "…so the instruction to use them is gone");
+
+// Recency is the other half of it: a small model leans on what it read last, so the
+// subject has to come after the facts, not before them.
+assert(
+  asked.indexOf("Loves Superman comics") < asked.indexOf("The learner asked for a passage about"),
+  "the facts are stated before the subject, so the subject gets the last word",
+);
+
+// With no topic named, the learner's world is exactly what makes the passage theirs.
+const unasked = storyPrompt(s, { interests: "the market", memories: known });
+assert(unasked.includes("set the story in the learner's own world"), "an unasked-for passage is still set in their world");
+assert(unasked.includes("Loves Superman comics"), "…and still knows them");
 
 // Empty is not a topic — it is "keep today's plan", which is what keeps the daily flow one keystroke.
 const planned = storyPrompt(s, { topic: "   ", interests: "the market" });
