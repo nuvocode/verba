@@ -1,0 +1,116 @@
+# Builds Verba for every desktop it runs on and attaches the artifacts to the
+# release for the tag that triggered it.
+#
+# Why CI and not a laptop: each target needs its own webview and system libraries
+# (WebKitGTK on Linux, WebView2 on Windows), so there is no honest way to
+# cross-compile these from a Mac. The runners are the only place all four get
+# built the same way.
+#
+# sherpa-onnx does not need special handling here: its build script downloads a
+# prebuilt static library per target, which is exactly why the bundled speech
+# tier can cross platforms at all. It does mean the first build on each runner
+# spends ~20s fetching that library before it compiles anything.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # Lets a tag that was cut before this workflow existed (v0.1.0) be built and
+  # have its artifacts attached after the fact.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and attach artifacts to"
+        required: true
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      # One target failing must not delete the artifacts of the three that
+      # worked — a release with three platforms beats a release with none.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            label: macOS (Apple Silicon)
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            label: macOS (Intel)
+          - platform: ubuntu-22.04
+            target: ""
+            label: Linux
+          - platform: windows-latest
+            target: ""
+            label: Windows
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # Tauri v2 on Linux wants WebKitGTK 4.1 (not 4.0 — that is Tauri v1) and
+      # patchelf for the AppImage.
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            build-essential curl wget file libxdo-dev libssl-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # Pure-logic checks, on every target. They are fast, and a pack that fails
+      # validation should not be shipped to anyone.
+      - name: Run checks
+        run: |
+          node --experimental-strip-types src/lib/srs.check.ts
+          node --experimental-strip-types src/lib/phase2.check.ts
+          node --experimental-strip-types src/lib/phase3.check.ts
+          node --experimental-strip-types src/lib/lang.check.ts
+          node --experimental-strip-types src/lib/speech.check.ts
+          node --experimental-strip-types src/lib/onboarding.check.ts
+        shell: bash
+
+      # Build only. tauri-action can cut the release itself, but it also owns the
+      # title and body when it does — and v0.1.0's notes were written by hand.
+      # Building here and uploading below keeps the action away from the prose.
+      - uses: tauri-apps/tauri-action@v0
+        id: build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+
+      # `--clobber` so re-running a build replaces its own artifact instead of
+      # failing on a name that is already there.
+      - name: Attach artifacts to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          PATHS: ${{ steps.build.outputs.artifactPaths }}
+        run: |
+          echo "$PATHS" | tr -d '[]"' | tr ',' '\n' | while read -r p; do
+            p=$(echo "$p" | xargs)
+            [ -f "$p" ] || continue
+            echo "uploading $p"
+            gh release upload "$TAG" "$p" --clobber --repo "$GITHUB_REPOSITORY"
+          done
+        shell: bash
