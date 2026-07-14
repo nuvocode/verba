@@ -32,9 +32,8 @@ assert(!asked.includes("Tailor the topic to the learner's interests"), "…and t
 
 // A named topic must not be furnished out of the learner's file: a story about Japan
 // has no business reaching for their comic books just because we know about them.
-assert(asked.includes("not the subject of this passage"), "with a topic, the memories are demoted to background");
+assert(asked.includes("background you happen to know"), "with a topic, the memories are demoted to background");
 assert(asked.includes("A story that never touches any of it is a good story"), "…and ignoring them entirely is allowed");
-assert(!asked.includes("set the story in the learner's own world"), "…so the instruction to use them is gone");
 
 // Recency is the other half of it: a small model leans on what it read last, so the
 // subject has to come after the facts, not before them.
@@ -43,10 +42,13 @@ assert(
   "the facts are stated before the subject, so the subject gets the last word",
 );
 
-// With no topic named, the learner's world is exactly what makes the passage theirs.
+// With no topic named either: the interests are the subject, and the file on the learner
+// may furnish a detail — but it is never an instruction to write about Superman again.
 const unasked = storyPrompt(s, { interests: "the market", memories: known });
-assert(unasked.includes("set the story in the learner's own world"), "an unasked-for passage is still set in their world");
-assert(unasked.includes("Loves Superman comics"), "…and still knows them");
+assert(unasked.includes("Loves Superman comics"), "an unasked-for passage still knows them");
+assert(unasked.includes("background you happen to know"), "…as background, not as a brief");
+assert(unasked.includes("a story that never touches any of it is a good story"), "…and it may leave every fact alone");
+assert(unasked.includes("Tailor the topic to the learner's interests: the market"), "…the interests are still what it is about");
 
 // Empty is not a topic — it is "keep today's plan", which is what keeps the daily flow one keystroke.
 const planned = storyPrompt(s, { topic: "   ", interests: "the market" });

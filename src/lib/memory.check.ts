@@ -9,6 +9,7 @@ import {
   memoryBrief,
   memoryDate,
   memoryPrompt,
+  memoryStance,
   parseMemory,
   planMemory,
   type Memory,
@@ -82,12 +83,20 @@ assert(system.includes("Lives in Ankara"), "the coach's system prompt carries th
 assert(system.includes("Never read the list back"), "…and is told not to recite it");
 assert(!buildSystem(s, scenario).includes("What you know about the learner"), "no memory, no block");
 
+// Knowing them is not a reason to talk about them. A list of facts reads to a model as a
+// list of things to work in — so the same caveat rides along with the facts everywhere.
+assert(system.includes(memoryStance), "the coach is told the facts are background, not an agenda");
+assert(system.includes("The scenario is what you talk about"), "…and that the scenario, not the file, sets the topic");
+assert(storyPrompt(s, { memories: known }).includes(memoryStance), "the reading generator is told the same");
+
 const story = storyPrompt(s, { memories: known });
-assert(story.includes("Works as a backend developer"), "the reading generator can lean on the memory for topics");
+assert(story.includes("Works as a backend developer"), "the reading generator is given the memory");
 assert(!storyPrompt(s, {}).includes("What you know about the learner"), "…and says nothing when there is none");
 
 const stats = { sessions: 3, messages: 40, wordsPracticed: 300, vocabLearned: 8, vocabReviewed: 20, avgLevelScore: 60, focusAreas: [] };
-assert(weeklyReportPrompt(s, stats, undefined, known).includes("Lives in Ankara"), "the weekly report knows them too");
+const report = weeklyReportPrompt(s, stats, undefined, known);
+assert(report.includes("Lives in Ankara"), "the weekly report knows them too");
+assert(report.includes("Leave the rest of them out"), "…but only their reason for learning belongs in it");
 
 // --- extraction: the model is shown what is already recorded, by id, so it can supersede ---
 const extract = memoryPrompt(s, known);

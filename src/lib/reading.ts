@@ -1,6 +1,6 @@
 import { level, type Settings } from "./settings.ts";
 import type { LanguagePack } from "./packs/schema";
-import { memoryBrief, packGuidance, type Memory } from "./prompts.ts";
+import { memoryBrief, memoryStance, packGuidance, type Memory } from "./prompts.ts";
 
 // Reading immersion: story mode + flow reading share one shape — a title plus
 // sentence-aligned target/native pairs, which the reader renders dual-page and
@@ -95,15 +95,20 @@ export function storyPrompt(s: Settings, opts: StoryOptions = {}, pack?: Languag
 }
 
 /**
- * The learner's own world is what makes an unasked-for passage feel written for them —
- * and what makes an asked-for one feel like it would not listen. When they name a topic,
- * the facts stay in the prompt but stop being an instruction to use them: a story about
- * a rainy weekend in Edinburgh has no business reaching for their comic books.
+ * What the passage is about is decided below this block — by the topic the reader
+ * named, or failing that by their interests and the day's plan. The facts are only
+ * ever furniture, and never every passage's furniture: a story about a rainy weekend
+ * in Edinburgh has no business reaching for their comic books, and neither does the
+ * next one about the market.
  */
 function memoryLine(memories: Memory[], asked: boolean): string {
-  return asked
-    ? `${memoryBrief(memories)}\nThis is background about the learner, not the subject of this passage and not a checklist. Use a detail only where it genuinely fits what they asked for; where it does not fit, leave it out entirely. A story that never touches any of it is a good story.`
-    : `${memoryBrief(memories)}\nWhere it fits, set the story in the learner's own world — their work, their city, the people they have mentioned. Do not make the story *about* these facts; use them as its furniture.`;
+  return [
+    memoryBrief(memories),
+    memoryStance,
+    asked
+      ? `What they asked for is the subject of this passage; where a fact above does not fit it, leave it out entirely. A story that never touches any of it is a good story.`
+      : `The subject below is the subject. A fact above may furnish a detail where it genuinely fits — their city, their work, the people they have mentioned — but a story that never touches any of it is a good story.`,
+  ].join("\n");
 }
 
 /**

@@ -15,7 +15,7 @@ export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack
     packGuidance(pack),
     memoryBrief(memories),
     memories.length
-      ? `Bring one of those up only where it fits — ask after it, or build on it. Never read the list back, and never tell the learner you keep notes on them.`
+      ? `${memoryStance} The scenario is what you talk about. Never read the list back, and never tell the learner you keep notes on them.`
       : "",
     ``,
     `Hold a natural conversation in ${s.targetLang}. Match your vocabulary and sentence length to a ${level(s)} learner. Always keep the conversation going by ending your reply with a question or prompt.`,
@@ -222,6 +222,21 @@ export function memoryBrief(memories: Memory[]): string {
     ...memories.map((m) => `- ${m.fact} · ${memoryDate(m.created_at)}`),
   ].join("\n");
 }
+
+/**
+ * The caveat that travels with the facts, wherever they are read.
+ *
+ * A model handed a list of facts reads it as a list of things to bring in, and
+ * then every opening line asks after the superhero and every passage is set in
+ * Metropolis. The memory is there so the coach is not surprised by the learner's
+ * own world when it comes up — not so it has something to talk about. Sessions
+ * where none of it surfaces are the normal case, not a failure to personalise.
+ */
+export const memoryStance = [
+  `Those facts are background you happen to know, not material to work in and not a checklist.`,
+  `Do not steer towards them, do not open on them, and do not reach for one to show that you remembered.`,
+  `Most of what you write should not touch them at all; lean on a fact only where the learner's own words or the task in front of you have already led there.`,
+].join(" ");
 
 /** Prompt to pull durable facts about the learner out of a finished conversation. */
 export function memoryPrompt(s: Settings, known: Memory[]): string {

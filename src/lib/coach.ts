@@ -23,8 +23,11 @@ export function weeklyReportPrompt(s: Settings, w: WeekStats, pack?: LanguagePac
     `Write in ${s.nativeLang}. Be specific and encouraging, not generic.`,
     packGuidance(pack),
     memoryBrief(memories),
+    // The one place a fact earns its keep unprompted: a week of numbers means
+    // something measured against why they are learning at all. But only that —
+    // the report is about the week, not about them.
     memories.length
-      ? `Tie the report to why they are actually learning — a week's numbers mean something against that, and nothing on their own.`
+      ? `If why they are learning ${s.targetLang} is among those facts, measure the week against it. Leave the rest of them out; the report is about the week's work, not about the learner.`
       : "",
     `This week's data:`,
     `- practice sessions: ${w.sessions}`,
