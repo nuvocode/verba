@@ -43,7 +43,7 @@ nohup npm run dev &                                              # restart it
 Get the pid and window box, then act on that process by pid (there may be two):
 
 ```bash
-PID=$(pgrep -f "target/debug/tauri-app" | tail -1)
+PID=$(pgrep -f "target/debug/verba" | tail -1)
 osascript -e "tell application \"System Events\" to tell (first process whose unix id is $PID) to get {position, size} of window \"Verba\""
 ```
 
