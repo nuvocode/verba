@@ -62,9 +62,11 @@ jobs:
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
             build-essential curl wget file libxdo-dev libssl-dev
 
+      # 22, not 20: the .check.ts scripts are run through `--experimental-strip-types`,
+      # which does not exist before 22.6.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
