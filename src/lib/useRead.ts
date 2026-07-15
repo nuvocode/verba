@@ -14,7 +14,7 @@ import {
   type ReadingText,
 } from "./reading";
 import { getPack } from "./packs";
-import { addVocab, recentMemories, saveReading } from "./db";
+import { addVocab, recentMemories, saveReading, listReadings, getReading, type ReadingRow } from "./db";
 
 export interface WordPopover {
   term: string;
@@ -43,6 +43,8 @@ export function useRead(settings: Settings) {
   const [saved, setSaved] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Past passages, newest first — the empty state's library. Loaded on demand.
+  const [library, setLibrary] = useState<ReadingRow[]>([]);
   // What they asked for last, so the sheet opens where they left it. Session-only:
   // a topic is a mood, not a setting, and it has no business surviving a restart.
   const [ask, setAsk] = useState<Ask>({ length: DEFAULT_LENGTH, topic: "" });
@@ -145,6 +147,31 @@ export function useRead(settings: Settings) {
     [settings],
   );
 
+  /** Load the reading library for the empty state. */
+  const loadLibrary = useCallback(async () => {
+    setLibrary(await listReadings(settings.targetLang).catch(() => []));
+  }, [settings.targetLang]);
+
+  /** Clear the current passage — drops back to the empty state, where the library lives. */
+  const close = useCallback(() => {
+    setText(null);
+    setFocusIdx(-1);
+    setPopover(null);
+    setSaved([]);
+    setError("");
+  }, []);
+
+  /** Reopen a saved passage — sets it as the current text without re-generating or re-saving. */
+  const open = useCallback(async (id: number) => {
+    const t = (await getReading(id).catch(() => null)) as ReadingText | null;
+    if (!t?.sentences?.length) return;
+    setFocusIdx(-1);
+    setPopover(null);
+    setSaved([]);
+    setError("");
+    setText(t);
+  }, []);
+
   return {
     text,
     focusIdx,
@@ -164,6 +191,11 @@ export function useRead(settings: Settings) {
     generate,
     extend,
     explain,
+    /** Past passages (newest first) and the loader/opener behind the empty-state library. */
+    library,
+    loadLibrary,
+    open,
+    close,
     /** Sentences carrying a coach note, with their index — the margin rail. */
     notes: (text?.sentences ?? []).map((s, i) => ({ i, note: s.note })).filter((n): n is { i: number; note: string } => !!n.note),
   };

@@ -155,6 +155,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
             <div className="meter">
               <div style={{ width: `${cells.complexity}%`, background: "var(--ink2)" }} />
             </div>
+            <div className="mnote">Words per sentence and average word length in what you write.</div>
           </div>
           <div className="mcell">
             <div className="h">
@@ -166,6 +167,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
             <div className="meter">
               <div style={{ width: `${cells.accuracy}%` }} />
             </div>
+            <div className="mnote">How often you self-correct — fewer corrections per message reads as higher accuracy.</div>
           </div>
           <div className="mcell">
             <div className="h">
@@ -177,6 +179,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
             <div className="meter">
               <div style={{ width: `${cells.coverage}%`, background: "var(--ink2)" }} />
             </div>
+            <div className="mnote">Variety of words you use, plus the size of your studied deck.</div>
           </div>
           <div className="mcell">
             <div className="h">
@@ -191,6 +194,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
                 <i key={i} className={i === days.length - 1 ? (on ? "today" : "") : on ? "on" : ""} />
               ))}
             </div>
+            <div className="mnote">Days you practiced in the last seven.</div>
           </div>
         </div>
       ) : (

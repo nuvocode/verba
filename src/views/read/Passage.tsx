@@ -16,7 +16,7 @@ export default function Passage({
   read,
   view,
   onView,
-  onAsk,
+  onNewPassage,
   onDone,
   sheet,
 }: {
@@ -24,8 +24,8 @@ export default function Passage({
   read: ReadState;
   view: ReadView;
   onView: (v: ReadView) => void;
-  /** Open the sheet that asks what the next passage should be. */
-  onAsk: () => void;
+  /** Leave this passage and go back to the library, where a new one can be started. */
+  onNewPassage: () => void;
   /** Finished with the reading block — mark it done and move the day on. */
   onDone: () => void;
   /** Rendered inside the grid, never inside `.fade`: see the note in Read.tsx. */
@@ -94,7 +94,7 @@ export default function Passage({
           <button className="btn sm ghost" onClick={() => void read.extend()} disabled={read.busy}>
             {read.busy ? "Writing…" : "Keep reading"}
           </button>
-          <button className="btn sm ghost" onClick={onAsk} disabled={read.busy}>
+          <button className="btn sm ghost" onClick={onNewPassage} disabled={read.busy}>
             New passage
           </button>
         </div>

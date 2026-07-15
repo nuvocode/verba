@@ -44,6 +44,11 @@ export default function Read({
     return () => onCaptureKeys(false);
   }, [asking, onCaptureKeys]);
 
+  // The library only shows in the empty state, so only load it there.
+  useEffect(() => {
+    if (!read.text) void read.loadLibrary();
+  }, [read.text, read.loadLibrary]);
+
   // Whatever the sheet is asked for, the day's plan is still underneath it: an empty
   // topic falls back to the theme, and the day's weak area is folded in either way.
   const generate = (ask: Ask) => {
@@ -85,6 +90,24 @@ export default function Read({
             </button>
           )}
           {read.error && <div className="err" style={{ maxWidth: 520, margin: "20px auto 0" }}>{read.error}</div>}
+          {!read.busy && read.library.length > 0 && (
+            <div className="readlib">
+              <div className="eyebrow">Your library · {read.library.length}</div>
+              <ul>
+                {read.library.map((r) => (
+                  <li key={r.id}>
+                    <button className="readlib-item" onClick={() => void read.open(r.id)}>
+                      <span className="t">{r.title}</span>
+                      <span className="m">
+                        {r.length ?? "—"}
+                        {r.topic ? ` · ${r.topic}` : ""}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
         {sheet}
       </>
@@ -111,7 +134,7 @@ export default function Read({
       read={read}
       view={settings.readView}
       onView={setView}
-      onAsk={() => setAsking(true)}
+      onNewPassage={() => read.close()}
       onDone={finish}
       sheet={sheet}
     />

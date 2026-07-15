@@ -291,6 +291,30 @@ export async function saveReading(
   );
 }
 
+/** One row for the reading library — the passage text is fetched lazily by `getReading`. */
+export interface ReadingRow {
+  id: number;
+  title: string;
+  created_at: number;
+  length: string | null;
+  topic: string | null;
+}
+
+export async function listReadings(lang: string): Promise<ReadingRow[]> {
+  const db = await getDb();
+  return db.select<ReadingRow[]>(
+    "SELECT id, title, created_at, length, topic FROM reading_sessions WHERE lang = $1 ORDER BY created_at DESC",
+    [lang],
+  );
+}
+
+/** The full passage for one saved reading. Returns a parsed ReadingText (typed by the caller). */
+export async function getReading(id: number): Promise<unknown | null> {
+  const db = await getDb();
+  const rows = await db.select<{ text: string }[]>("SELECT text FROM reading_sessions WHERE id = $1", [id]);
+  return rows[0] ? JSON.parse(rows[0].text) : null;
+}
+
 // ---- listening sessions ----
 
 /** Store a finished listening piece with the learner's answers and comprehension accuracy. */
