@@ -1,6 +1,6 @@
 [package]
 name = "verba"
-version = "0.1.0"
+version = "0.2.0"
 description = "A local-first AI language tutor: conversation, reading and recall, with speech that can run entirely on your own machine."
 authors = ["Nuvo Code"]
 license = "MIT"
