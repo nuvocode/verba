@@ -89,7 +89,7 @@ main { display: block; }
    only a hairline and a shadow — anything more and you get two title bars. */
 .shot { margin: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg2); box-shadow: var(--shadow); }
 .shot.wide { margin-top: 72px; }
-.shot img { width: 100%; height: auto; }
+.shot img, .shot video { width: 100%; height: auto; display: block; }
 
 /* ---------- bands ---------- */
 .band { max-width: var(--max); margin: 0 auto; padding: 96px var(--pad); border-top: 1px solid var(--line); }
