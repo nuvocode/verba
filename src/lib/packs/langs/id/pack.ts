@@ -20,5 +20,5 @@ export const pack: LanguagePack = {
   ],
   promptHint:
     "Teach Standard Indonesian (Bahasa Indonesia). Prefer formal, standard vocabulary unless the scenario naturally calls for informal everyday speech. Explain important affixes when they affect meaning.",
-  speech: { locale: "id-ID", voiceHint: "Indonesian", recommendedVoices: ["piper-id"] },
+  speech: { locale: "id-ID", voiceHint: "Indonesian" },
 };

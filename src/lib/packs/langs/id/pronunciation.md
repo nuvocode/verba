@@ -27,8 +27,8 @@ schwa or merged together.
 ## Consonants worth flagging
 
 - **c** is always pronounced like **ch** in *chair*.
-- **g** is always pronounced as a hard **g**, as in *go*. It is never pronounced like the **g** in *giant*.
-  in *giant*.
+- **g** is always pronounced as a hard **g**, as in *go*. It is never
+  pronounced like the **g** in *giant*.
 - **j** is pronounced like the **j** in *jam*.
 - **ng** represents a single sound, as in English *sing*.
 - **ny** represents the same sound as the **ny** in *canyon*.
