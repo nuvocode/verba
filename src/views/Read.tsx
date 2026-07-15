@@ -3,6 +3,7 @@ import type { ReadView, Settings } from "../lib/settings";
 import type { BlockKind } from "../lib/learn";
 import type { Day } from "../lib/useDay";
 import type { Ask, Read as ReadState } from "../lib/useRead";
+import { CEFR_LEVELS } from "../lib/level";
 import AskSheet from "./read/AskSheet";
 import Passage from "./read/Passage";
 import Prompter from "./read/Prompter";
@@ -38,6 +39,8 @@ export default function Read({
 }) {
   const block = day.plan?.blocks.find((b) => b.kind === "reading");
   const [asking, setAsking] = useState(false);
+  // null = show every level. Only levels actually present in the library get a chip.
+  const [levelFilter, setLevelFilter] = useState<string | null>(null);
 
   useEffect(() => {
     onCaptureKeys(asking);
@@ -90,11 +93,31 @@ export default function Read({
             </button>
           )}
           {read.error && <div className="err" style={{ maxWidth: 520, margin: "20px auto 0" }}>{read.error}</div>}
-          {!read.busy && read.library.length > 0 && (
+          {!read.busy && read.library.length > 0 && (() => {
+            // The chip row only offers levels the library actually has, in CEFR order.
+            const levels = CEFR_LEVELS.filter((l) => read.library.some((r) => r.cefr === l));
+            const shown = levelFilter ? read.library.filter((r) => r.cefr === levelFilter) : read.library;
+            return (
             <div className="readlib">
-              <div className="eyebrow">Your library · {read.library.length}</div>
+              <div className="eyebrow">Your library · {shown.length}</div>
+              {levels.length > 1 && (
+                <div className="readlib-chips">
+                  <button className={`chip${levelFilter === null ? " on" : ""}`} onClick={() => setLevelFilter(null)}>
+                    All
+                  </button>
+                  {levels.map((l) => (
+                    <button
+                      key={l}
+                      className={`chip${levelFilter === l ? " on" : ""}`}
+                      onClick={() => setLevelFilter(l)}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              )}
               <ul>
-                {read.library.map((r) => (
+                {shown.map((r) => (
                   <li key={r.id}>
                     <button className="readlib-item" onClick={() => void read.open(r.id)}>
                       <span className="t">{r.title}</span>
@@ -107,7 +130,8 @@ export default function Read({
                 ))}
               </ul>
             </div>
-          )}
+            );
+          })()}
         </div>
         {sheet}
       </>

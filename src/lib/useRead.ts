@@ -88,7 +88,7 @@ export function useRead(settings: Settings) {
         const t = parseReading(raw);
         if (!t.sentences.length) throw new Error("The model returned no readable sentences. Try again.");
         setText(t);
-        await saveReading(settings.targetLang, t.title, t, { length, topic }).catch(() => {});
+        await saveReading(settings.targetLang, t.title, t, { length, topic, cefr: settings.cefr }).catch(() => {});
       } catch (e: any) {
         setError(String(e?.message ?? e));
       } finally {

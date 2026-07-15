@@ -112,6 +112,9 @@ async function init(): Promise<Database> {
   // Passages generated before that keep NULLs — "we didn't ask", not "they wanted nothing".
   await db.execute("ALTER TABLE reading_sessions ADD COLUMN length TEXT").catch(() => {});
   await db.execute("ALTER TABLE reading_sessions ADD COLUMN topic TEXT").catch(() => {});
+  // The level a passage was written at, so the library can be filtered by it. Older
+  // rows keep NULL — their level wasn't recorded — and only show under "All".
+  await db.execute("ALTER TABLE reading_sessions ADD COLUMN cefr TEXT").catch(() => {});
   await migrateVocabToPerLanguage(db);
   return db;
 }
@@ -282,12 +285,12 @@ export async function saveReading(
   lang: string,
   title: string,
   text: unknown,
-  asked: { length?: string; topic?: string } = {},
+  asked: { length?: string; topic?: string; cefr?: string } = {},
 ): Promise<void> {
   const db = await getDb();
   await db.execute(
-    "INSERT INTO reading_sessions (lang, title, text, created_at, length, topic) VALUES ($1, $2, $3, $4, $5, $6)",
-    [lang, title, JSON.stringify(text), Date.now(), asked.length ?? null, asked.topic?.trim() || null],
+    "INSERT INTO reading_sessions (lang, title, text, created_at, length, topic, cefr) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    [lang, title, JSON.stringify(text), Date.now(), asked.length ?? null, asked.topic?.trim() || null, asked.cefr ?? null],
   );
 }
 
@@ -298,12 +301,13 @@ export interface ReadingRow {
   created_at: number;
   length: string | null;
   topic: string | null;
+  cefr: string | null;
 }
 
 export async function listReadings(lang: string): Promise<ReadingRow[]> {
   const db = await getDb();
   return db.select<ReadingRow[]>(
-    "SELECT id, title, created_at, length, topic FROM reading_sessions WHERE lang = $1 ORDER BY created_at DESC",
+    "SELECT id, title, created_at, length, topic, cefr FROM reading_sessions WHERE lang = $1 ORDER BY created_at DESC",
     [lang],
   );
 }
