@@ -12,9 +12,7 @@ vocabulary capture, and a voice on both ends. Runs entirely on your machine.
 [![License](https://img.shields.io/badge/license-MIT-black?style=for-the-badge)](./LICENSE)
 [![Platforms](https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux-grey?style=for-the-badge)](#download)
 
-<a href="https://youtu.be/5JQC3_omELw"><img src="./docs/demo-poster.jpg" alt="Watch a full Verba session — talk, get corrected, hear the reply" width="760" /></a>
-
-<sub>▶︎ Click to play — one session end to end: talk, get corrected, hear the reply.</sub>
+<iframe width="560" height="315" src="https://www.youtube.com/embed/5JQC3_omELw?si=tkqJzx6JnwLtCo8W" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
 </div>
 
