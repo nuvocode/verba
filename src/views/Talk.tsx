@@ -12,6 +12,7 @@ const CONTINUE: Record<BlockKind, string> = {
   reading: "Continue to reading →",
   scenario: "Continue to the role-play →",
   vocab: "Continue to your words →",
+  listening: "Continue to listening →",
   summary: "Wrap up the day →",
 };
 

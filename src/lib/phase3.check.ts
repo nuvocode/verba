@@ -16,7 +16,7 @@ import { PACK_FORMAT_VERSION } from "./packs/schema.ts";
 const plan = buildDailyPlan(defaultSettings, { date: "2026-07-11", dueVocab: 8 });
 assert(plan.theme === themeForDate("2026-07-11"), "theme is deterministic for a date");
 const kinds = plan.blocks.map((b) => b.kind);
-for (const k of ["conversation", "reading", "scenario", "vocab", "summary"])
+for (const k of ["conversation", "reading", "scenario", "vocab", "listening", "summary"])
   assert(kinds.includes(k as any), `plan must include a ${k} block`);
 assert(plan.blocks.at(-1)!.kind === "summary", "summary/wrap-up is always last");
 assert(plan.totalMinutes === plan.blocks.reduce((n, b) => n + b.minutes, 0), "totalMinutes sums the blocks");
@@ -32,9 +32,12 @@ assert(nextBlock(plan, []) === "conversation", "an untouched day starts at the c
 // reading hands off to the role-play — never straight to vocab, and never back to Talk's picker
 assert(nextBlock(plan, ["conversation", "reading"]) === "scenario", "reading is followed by the role-play");
 assert(nextBlock(plan, ["conversation", "reading", "scenario"]) === "vocab", "then the words that are due");
-// a day with nothing due skips vocab entirely — and ends, rather than dead-ending on Memory
-assert(nextBlock(noVocab, ["conversation", "reading", "scenario"]) === "summary", "no vocab due → wrap-up is next");
-assert(nextBlock(noVocab, ["conversation", "reading", "scenario", "summary"]) === null, "a finished day has no next");
+// listening is a cool-down before the recap — the working blocks end on it
+assert(nextBlock(plan, ["conversation", "reading", "scenario", "vocab"]) === "listening", "vocab hands off to listening");
+assert(nextBlock(plan, ["conversation", "reading", "scenario", "vocab", "listening"]) === "summary", "listening is followed by the wrap-up");
+// a day with nothing due skips vocab entirely — straight from the role-play to listening
+assert(nextBlock(noVocab, ["conversation", "reading", "scenario"]) === "listening", "no vocab due → listening is next");
+assert(nextBlock(noVocab, ["conversation", "reading", "scenario", "listening", "summary"]) === null, "a finished day has no next");
 assert(nextBlock(null, []) === null, "no plan, nowhere to send them");
 
 // --- level estimation v2: metrics + CEFR heuristic ---

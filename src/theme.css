@@ -389,6 +389,25 @@ input { font: inherit; }
 .ask .len .n { font-family: var(--mono); font-size: 10px; color: var(--ink3); margin-top: 4px; }
 .ask .len.on .n { color: var(--ink2); }
 
+/* ---------- listening ---------- */
+.listen { max-width: 640px; margin: 0 auto; padding: 40px 24px 80px; }
+.listen-head { margin-bottom: 24px; }
+.listen-title { font-family: var(--serif); font-size: 26px; font-weight: 500; margin-top: 6px; }
+.listen-play { margin-bottom: 34px; }
+.listen-qs { display: flex; flex-direction: column; gap: 22px; margin-bottom: 28px; }
+.listen-q { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+.listen-q.ok { border-color: var(--good); }
+.listen-q.miss { border-color: var(--warn); }
+.listen-q-prompt { font-size: 15px; margin-bottom: 14px; line-height: 1.5; }
+.listen-input { width: 100%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 7px; padding: 10px 12px; font-size: 14px; outline: none; font-family: inherit; }
+.listen-input:focus { border-color: var(--ink3); }
+.listen-fix { margin-top: 14px; font-size: 13px; color: var(--ink2); }
+.listen-line { margin-top: 6px; font-style: italic; color: var(--ink3); }
+.listen-good { margin-top: 12px; font-size: 13px; color: var(--good); }
+.listen-after { display: flex; flex-direction: column; gap: 20px; align-items: flex-start; }
+.listen-transcript p { font-size: 15px; line-height: 1.6; margin: 0 0 10px; }
+.listen-transcript .tr-native { color: var(--ink2); }
+
 /* ---------- confirm ---------- */
 .confirm { padding: 26px 26px 20px; }
 .confirm h2 { font-family: var(--serif); font-size: 26px; font-weight: 500; margin: 0 0 12px; }

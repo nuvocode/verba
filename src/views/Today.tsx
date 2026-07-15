@@ -104,7 +104,7 @@ export default function Today({
             <span className="kbd">↵</span> begin next
           </span>
           <span>
-            <span className="kbd">1–5</span> spaces
+            <span className="kbd">1–6</span> spaces
           </span>
           <span>
             <span className="kbd">⌘K</span> anything — ask, jump, search

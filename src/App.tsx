@@ -6,23 +6,29 @@ import type { BlockKind } from "./lib/learn";
 import { useDay } from "./lib/useDay";
 import { useTalk } from "./lib/useTalk";
 import { useRead } from "./lib/useRead";
+import { useListening } from "./lib/useListening";
 import Onboarding from "./views/Onboarding";
 import Today from "./views/Today";
 import Talk from "./views/Talk";
 import Read from "./views/Read";
+import Listening from "./views/Listening";
 import Memory from "./views/Memory";
 import Coach from "./views/Coach";
 import SettingsView from "./views/Settings";
 import "./theme.css";
 
-export type Space = "onboarding" | "today" | "talk" | "read" | "memory" | "coach" | "settings";
+export type Space = "onboarding" | "today" | "talk" | "read" | "listening" | "memory" | "coach" | "settings";
 
+// Listen sits next to Read — the two input skills, and the two that share the
+// question layer — so the six keys read 1-6 down the bar rather than bolting the
+// newcomer on at the end.
 const NAV: [string, Space, string][] = [
   ["Today", "today", "1"],
   ["Talk", "talk", "2"],
   ["Read", "read", "3"],
-  ["Memory", "memory", "4"],
-  ["Coach", "coach", "5"],
+  ["Listen", "listening", "4"],
+  ["Memory", "memory", "5"],
+  ["Coach", "coach", "6"],
 ];
 
 const PROVIDER_NAMES: Record<string, string> = {
@@ -69,6 +75,7 @@ export default function App() {
   // Talk can write a level back: if onboarding was skipped, the first conversation places them.
   const talk = useTalk(settings, update);
   const read = useRead(settings);
+  const listening = useListening(settings);
   const paletteInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -125,6 +132,11 @@ export default function App() {
           go("read");
           if (!read.text && !read.busy) void read.generate({ interests: day.plan?.theme, goal: block?.goal });
           break;
+        case "listening":
+          go("listening");
+          if (!listening.piece && !listening.busy)
+            void listening.generate({ interests: day.plan?.theme, goal: block?.goal });
+          break;
         case "vocab":
           go("memory");
           setReviewSignal((n) => n + 1);
@@ -135,7 +147,7 @@ export default function App() {
           break;
       }
     },
-    [day, talk, read, go],
+    [day, talk, read, listening, go],
   );
 
   /**
@@ -158,8 +170,9 @@ export default function App() {
       { section: "Go to", label: "Today — your session plan", kbd: "1", run: () => go("today") },
       { label: "Talk — conversation with the coach", kbd: "2", run: () => go("talk") },
       { label: "Read — a passage at your level", kbd: "3", run: () => go("read") },
-      { label: "Memory — everything you've met", kbd: "4", run: () => go("memory") },
-      { label: "Coach — your weekly report", kbd: "5", run: () => go("coach") },
+      { label: "Listen — a chaptered story to hear", kbd: "4", run: () => go("listening") },
+      { label: "Memory — everything you've met", kbd: "5", run: () => go("memory") },
+      { label: "Coach — your weekly report", kbd: "6", run: () => go("coach") },
       { label: "Settings — providers, packs, offline", kbd: ",", run: () => go("settings") },
       {
         section: "Do",
@@ -173,6 +186,14 @@ export default function App() {
         run: () => {
           go("read");
           void read.generate({ interests: day.plan?.theme });
+        },
+      },
+      {
+        label: "Start a listening session",
+        run: () => {
+          go("listening");
+          if (!listening.piece && !listening.busy)
+            void listening.generate({ interests: day.plan?.theme });
         },
       },
       {
@@ -213,7 +234,7 @@ export default function App() {
       },
     });
     return hits;
-  }, [query, go, begin, day, read, talk, settings.theme, update]);
+  }, [query, go, begin, day, read, talk, listening, settings.theme, update]);
 
   // The one thing Esc does on this screen. The key and the visible pill run it, so nobody
   // has to know the shortcut exists. Memory's review owns its own Esc while it's captured.
@@ -305,8 +326,9 @@ export default function App() {
         "1": "today",
         "2": "talk",
         "3": "read",
-        "4": "memory",
-        "5": "coach",
+        "4": "listening",
+        "5": "memory",
+        "6": "coach",
         ",": "settings",
       };
       if (nav[e.key]) go(nav[e.key]);
@@ -320,6 +342,7 @@ export default function App() {
     paletteItems,
     talk,
     read,
+    listening,
     day,
     begin,
     go,
@@ -415,6 +438,9 @@ export default function App() {
             onCaptureKeys={setCaptured}
             onChange={update}
           />
+        )}
+        {space === "listening" && (
+          <Listening settings={settings} listening={listening} day={day} onAdvance={advance} />
         )}
         {space === "memory" && (
           <Memory

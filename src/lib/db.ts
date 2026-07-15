@@ -48,6 +48,15 @@ async function init(): Promise<Database> {
       length TEXT,               -- what was asked for: short | medium | long
       topic TEXT                 -- what the reader asked it to be about; NULL when they left it to the day's plan
     );
+    CREATE TABLE IF NOT EXISTS listening_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lang TEXT NOT NULL,
+      title TEXT NOT NULL,
+      piece TEXT NOT NULL,       -- JSON ListeningPiece (chapters + questions + transcript)
+      answers TEXT NOT NULL,     -- JSON: per-question { given, correct }
+      accuracy REAL NOT NULL,    -- 0..1 comprehension over the whole piece
+      created_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS level_signals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lang TEXT NOT NULL,
@@ -279,6 +288,23 @@ export async function saveReading(
   await db.execute(
     "INSERT INTO reading_sessions (lang, title, text, created_at, length, topic) VALUES ($1, $2, $3, $4, $5, $6)",
     [lang, title, JSON.stringify(text), Date.now(), asked.length ?? null, asked.topic?.trim() || null],
+  );
+}
+
+// ---- listening sessions ----
+
+/** Store a finished listening piece with the learner's answers and comprehension accuracy. */
+export async function saveListening(
+  lang: string,
+  title: string,
+  piece: unknown,
+  answers: unknown,
+  accuracy: number,
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    "INSERT INTO listening_sessions (lang, title, piece, answers, accuracy, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+    [lang, title, JSON.stringify(piece), JSON.stringify(answers), accuracy, Date.now()],
   );
 }
 

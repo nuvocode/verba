@@ -11,7 +11,7 @@ import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 // "Completed end-to-end" (the phase's done-when) = every block marked done and
 // the recap generated. The Daily view drives that; this module owns the shape.
 
-export type BlockKind = "conversation" | "reading" | "scenario" | "vocab" | "summary";
+export type BlockKind = "conversation" | "reading" | "scenario" | "vocab" | "listening" | "summary";
 
 export interface DailyBlock {
   kind: BlockKind;
@@ -105,6 +105,16 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
       minutes: Math.min(10, Math.max(2, Math.ceil(ctx.dueVocab / 4))),
     });
   }
+
+  // A listening cool-down before the recap — an input skill to close the working
+  // blocks, kept last so it never displaces the conversation-first running order.
+  blocks.push({
+    kind: "listening",
+    title: "Listening",
+    detail: `Hear a short ${s.targetLang} story and answer what you caught.`,
+    minutes: 6,
+    goal: focus[2] ?? drill,
+  });
 
   blocks.push({
     kind: "summary",
