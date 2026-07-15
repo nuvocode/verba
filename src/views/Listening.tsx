@@ -60,10 +60,18 @@ export default function Listening({
       </div>
     );
 
-  const { chapter, chapterIdx, chapterCount, progress } = listening;
+  const { chapter, chapterIdx, chapterCount, progress, dir } = listening;
   if (!chapter) return null;
-  const answered = chapter.questions.every((_, i) => (progress.answers[i] ?? "").trim());
+  const qs = chapter.questions;
   const last = chapterIdx >= chapterCount - 1;
+  // With no voice the chapter can't be heard, so the gate would dead-end — let those
+  // learners straight through to the questions (the transcript is their only way in).
+  const gated = listening.canSpeak && !progress.heard;
+
+  const step = progress.step;
+  const stepChecked = qs.length > 0 && progress.results[step] !== undefined;
+  const currentAnswered = (progress.answers[step] ?? "").trim().length > 0;
+  const allChecked = qs.length === 0 || (step >= qs.length - 1 && progress.results[qs.length - 1] !== undefined);
 
   return (
     <div className="listen fade">
@@ -71,69 +79,90 @@ export default function Listening({
         <div className="eyebrow">
           {listening.piece.title} · Chapter {chapterIdx + 1} of {chapterCount}
         </div>
-        {progress.submitted && <div className="listen-title">{chapter.title}</div>}
+        {allChecked && !gated && <div className="listen-title">{chapter.title}</div>}
       </div>
 
-      {/* Playback — the whole point is hearing it, so the button is the loud thing on the screen. */}
+      {/* Playback — the whole point is hearing it, so it is the loud thing on the screen. */}
       <div className="listen-play">
-        {listening.canSpeak ? (
-          listening.playing ? (
-            <button className="btn ghost" onClick={listening.stop}>
-              ◼ Stop
-            </button>
-          ) : (
-            <button className="btn" onClick={() => void listening.play()}>
-              ▶ {progress.submitted ? "Replay chapter" : "Play chapter"}
-            </button>
-          )
-        ) : (
+        {!listening.canSpeak ? (
           <div className="err" style={{ maxWidth: 480 }}>
-            No voice is available to play this. Turn one on in Settings → Speech — until then, the transcript below is your only way in.
+            No voice is available to play this. Turn one on in Settings → Speech — until then, the transcript is your only
+            way in.
           </div>
-        )}
-      </div>
-
-      {/* The check. Hidden nothing extra: the questions are the exercise, the transcript stays locked. */}
-      <div className="listen-qs">
-        {chapter.questions.map((q, i) => (
-          <QuestionCard
-            key={i}
-            q={q}
-            value={progress.answers[i] ?? ""}
-            result={progress.submitted ? progress.results[i] : undefined}
-            dir={listening.dir}
-            onChange={(v) => listening.setAnswer(i, v)}
-          />
-        ))}
-        {chapter.questions.length === 0 && (
-          <p style={{ color: "var(--ink2)" }}>This chapter came without questions — listen, then move on.</p>
-        )}
-      </div>
-
-      {!progress.submitted ? (
-        <button className="btn" disabled={!answered} onClick={() => void listening.submit()}>
-          Check answers
-        </button>
-      ) : (
-        <div className="listen-after">
-          {!progress.revealed ? (
-            <button className="btn ghost" onClick={listening.reveal}>
-              Show transcript
+        ) : listening.playing ? (
+          <div className="speaking">
+            <em>Playing chapter {chapterIdx + 1}…</em>
+            <i />
+            <i />
+            <i />
+            <i />
+            <i />
+            <button className="btn ghost sm" style={{ marginLeft: 14 }} onClick={listening.stop}>
+              Stop
             </button>
-          ) : (
-            <div className="listen-transcript" dir={listening.dir}>
-              {chapter.lines.map((l, i) => (
-                <p key={i}>
-                  <span>{l.target}</span>
-                  {l.native && <span className="tr-native"> — {l.native}</span>}
-                </p>
-              ))}
-            </div>
-          )}
+          </div>
+        ) : (
+          <button className="btn" onClick={() => void listening.play()}>
+            ▶ {progress.heard ? "Replay chapter" : "Play chapter"}
+          </button>
+        )}
+      </div>
+
+      {gated ? (
+        <p className="listen-hint">The chapter is read aloud — press play. The questions appear once it has finished.</p>
+      ) : qs.length === 0 ? (
+        <div className="listen-after">
+          <p style={{ color: "var(--ink2)" }}>This chapter came without questions — listen, then move on.</p>
           <button className="btn" onClick={listening.next}>
             {last ? "Finish →" : "Next chapter →"}
           </button>
         </div>
+      ) : (
+        <>
+          {/* One question, one answer at a time — the check is a walk through the chapter, not a wall of it. */}
+          <div className="eyebrow listen-count">
+            Question {step + 1} of {qs.length}
+          </div>
+          <div className="listen-qs">
+            <QuestionCard
+              q={qs[step]}
+              value={progress.answers[step] ?? ""}
+              result={progress.results[step]}
+              dir={dir}
+              onChange={(v) => listening.setAnswer(step, v)}
+            />
+          </div>
+
+          {!stepChecked ? (
+            <button className="btn" disabled={!currentAnswered} onClick={() => void listening.check()}>
+              Check answer
+            </button>
+          ) : !allChecked ? (
+            <button className="btn" onClick={listening.nextQuestion}>
+              Next question →
+            </button>
+          ) : (
+            <div className="listen-after">
+              {!progress.revealed ? (
+                <button className="btn ghost" onClick={listening.reveal}>
+                  Show transcript
+                </button>
+              ) : (
+                <div className="listen-transcript" dir={dir}>
+                  {chapter.lines.map((l, i) => (
+                    <p key={i}>
+                      <span>{l.target}</span>
+                      {l.native && <span className="tr-native"> — {l.native}</span>}
+                    </p>
+                  ))}
+                </div>
+              )}
+              <button className="btn" onClick={listening.next}>
+                {last ? "Finish →" : "Next chapter →"}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

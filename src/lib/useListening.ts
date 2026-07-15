@@ -18,13 +18,20 @@ import { addVocab, recentMemories, saveListening, saveMetrics, vocabCounts } fro
 
 /** One chapter's worth of the learner's work — kept per chapter so it survives moving on. */
 export interface ChapterProgress {
+  heard: boolean; // chapter played to the end at least once — gates the questions
+  step: number; // index of the question currently in front of the learner
   answers: string[]; // index-aligned with the chapter's questions
-  results: boolean[]; // filled on submit
-  submitted: boolean;
+  results: (boolean | undefined)[]; // per question, set the moment it is checked
   revealed: boolean; // transcript unlocked
 }
 
-const blank = (n: number): ChapterProgress => ({ answers: Array(n).fill(""), results: [], submitted: false, revealed: false });
+const blank = (n: number): ChapterProgress => ({
+  heard: false,
+  step: 0,
+  answers: Array(n).fill(""),
+  results: Array(n).fill(undefined),
+  revealed: false,
+});
 
 /**
  * A listening session, mirroring useTalk / useRead. Generation is front-loaded (an
@@ -106,7 +113,12 @@ export function useListening(settings: Settings) {
   const chapter: Chapter | null = piece?.chapters[chapterIdx] ?? null;
   const here: ChapterProgress = progress[chapterIdx] ?? blank(0);
 
-  /** Play (or replay) the current chapter aloud. The transcript stays hidden. */
+  /**
+   * Play (or replay) the current chapter aloud. The questions stay hidden until it
+   * has been heard to the end — the whole point is that this is a listening exercise.
+   * `heard` is set only when playback resolves naturally; stopping early leaves it
+   * unset, so a learner who cuts it off can replay before the questions appear.
+   */
   const play = useCallback(async () => {
     if (!chapter || playing) return;
     const text = chapter.lines.map((l) => l.target).join(" ");
@@ -117,12 +129,17 @@ export function useListening(settings: Settings) {
     // write) if replay latency proves annoying in practice.
     try {
       await speech.speak(text, { locale: pack?.speech.locale, voiceHint: pack?.speech.voiceHint });
+      setProgress((p) => {
+        const next = [...p];
+        if (next[chapterIdx] && !next[chapterIdx].heard) next[chapterIdx] = { ...next[chapterIdx], heard: true };
+        return next;
+      });
     } catch {
       /* a TTS hiccup should not wedge the button */
     } finally {
       setPlaying(false);
     }
-  }, [chapter, playing, speech, pack]);
+  }, [chapter, playing, speech, pack, chapterIdx]);
 
   const stop = useCallback(() => {
     speech.cancel();
@@ -134,7 +151,8 @@ export function useListening(settings: Settings) {
       setProgress((p) => {
         const next = [...p];
         const cur = next[chapterIdx];
-        if (!cur || cur.submitted) return p;
+        // A question already checked is settled — its answer does not change under it.
+        if (!cur || cur.results[qIdx] !== undefined) return p;
         const answers = [...cur.answers];
         answers[qIdx] = value;
         next[chapterIdx] = { ...cur, answers };
@@ -144,26 +162,39 @@ export function useListening(settings: Settings) {
     [chapterIdx],
   );
 
-  /** Score the current chapter, and let a word from a missed cloze fall into the SRS. */
-  const submit = useCallback(async () => {
-    if (!chapter || here.submitted) return;
-    const results = chapter.questions.map((q, i) => scoreAnswer(q, here.answers[i] ?? ""));
+  /** Check the question in front of the learner; a missed cloze word falls into the SRS. */
+  const check = useCallback(async () => {
+    if (!chapter) return;
+    const i = here.step;
+    const q = chapter.questions[i];
+    if (!q || here.results[i] !== undefined) return; // already checked
+    const ok = scoreAnswer(q, here.answers[i] ?? "");
     setProgress((p) => {
       const next = [...p];
-      next[chapterIdx] = { ...next[chapterIdx], results, submitted: true };
+      const results = [...next[chapterIdx].results];
+      results[i] = ok;
+      next[chapterIdx] = { ...next[chapterIdx], results };
       return next;
     });
     // A missed cloze already names the exact word worth reviewing; a missed multiple
     // choice does not (its answer is a whole native phrase), so only cloze seeds a card.
-    for (let i = 0; i < chapter.questions.length; i++) {
-      const q = chapter.questions[i];
-      if (!results[i] && q.kind === "cloze" && q.answer) {
-        // ponytail: translation is left blank here — the card exists to resurface the
-        // word the learner missed; its gloss gets filled the next time they tap it.
-        await addVocab(settings.targetLang, { term: q.answer, translation: "", example: q.line }).catch(() => {});
-      }
+    if (!ok && q.kind === "cloze" && q.answer) {
+      // ponytail: translation is left blank here — the card exists to resurface the
+      // word the learner missed; its gloss gets filled the next time they tap it.
+      await addVocab(settings.targetLang, { term: q.answer, translation: "", example: q.line }).catch(() => {});
     }
   }, [chapter, here, chapterIdx, settings.targetLang]);
+
+  /** Move to the next question in this chapter (the last one hands off to the chapter, not here). */
+  const nextQuestion = useCallback(() => {
+    setProgress((p) => {
+      const next = [...p];
+      const cur = next[chapterIdx];
+      if (!cur || cur.step >= cur.answers.length - 1) return p;
+      next[chapterIdx] = { ...cur, step: cur.step + 1 };
+      return next;
+    });
+  }, [chapterIdx]);
 
   const reveal = useCallback(() => {
     setProgress((p) => {
@@ -179,7 +210,7 @@ export function useListening(settings: Settings) {
     stop();
     const allQ = piece.chapters.flatMap((c) => c.questions);
     const allResults = progress.flatMap((p) => p.results);
-    const correct = allResults.filter(Boolean).length;
+    const correct = allResults.filter((r) => r === true).length;
     const total = allQ.length || 1;
     const accuracy = correct / total;
 
@@ -212,7 +243,10 @@ export function useListening(settings: Settings) {
     setChapterIdx((i) => i + 1);
   }, [piece, chapterIdx, finish, stop]);
 
-  const score = { correct: progress.flatMap((p) => p.results).filter(Boolean).length, total: piece?.chapters.flatMap((c) => c.questions).length ?? 0 };
+  const score = {
+    correct: progress.flatMap((p) => p.results).filter((r) => r === true).length,
+    total: piece?.chapters.flatMap((c) => c.questions).length ?? 0,
+  };
 
   return {
     piece,
@@ -234,7 +268,8 @@ export function useListening(settings: Settings) {
     stop,
     canSpeak: speech.canSpeak,
     setAnswer,
-    submit,
+    check,
+    nextQuestion,
     reveal,
     next,
     reset: () => {

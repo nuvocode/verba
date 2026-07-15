@@ -393,7 +393,16 @@ input { font: inherit; }
 .listen { max-width: 640px; margin: 0 auto; padding: 40px 24px 80px; }
 .listen-head { margin-bottom: 24px; }
 .listen-title { font-family: var(--serif); font-size: 26px; font-weight: 500; margin-top: 6px; }
-.listen-play { margin-bottom: 34px; }
+.listen-play { margin-bottom: 34px; min-height: 46px; display: flex; align-items: center; }
+.speaking { display: flex; align-items: center; gap: 4px; }
+.speaking em { font-style: normal; font-size: 13px; color: var(--accent-ink); margin-right: 10px; }
+.speaking i { width: 3px; height: 18px; background: var(--accent); border-radius: 2px; animation: vbar .7s ease infinite; }
+.speaking i:nth-child(3) { animation-delay: .15s; }
+.speaking i:nth-child(4) { animation-delay: .3s; }
+.speaking i:nth-child(5) { animation-delay: .45s; }
+.speaking i:nth-child(6) { animation-delay: .6s; }
+.listen-hint { color: var(--ink2); font-size: 14px; }
+.listen-count { margin-bottom: 12px; }
 .listen-qs { display: flex; flex-direction: column; gap: 22px; margin-bottom: 28px; }
 .listen-q { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
 .listen-q.ok { border-color: var(--good); }
