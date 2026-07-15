@@ -14,7 +14,7 @@ vocabulary capture, and a voice on both ends. Runs entirely on your machine.
 
 <a href="https://youtu.be/5JQC3_omELw"><img src="./docs/social-preview.png" alt="Watch a full Verba session — talk, get corrected, hear the reply" width="760" /></a>
 
-<sub>▶︎ Click to play — one session end to end: talk, get corrected, hear the reply.</sub>
+<sub><a href="https://youtu.be/5JQC3_omELw">▶︎ Click to play — one session end to end: talk, get corrected, hear the reply.</a></sub>
 
 </div>
 
