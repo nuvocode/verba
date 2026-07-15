@@ -2,7 +2,7 @@ import type { Settings } from "../lib/settings";
 import type { BlockKind } from "../lib/learn";
 import type { Day } from "../lib/useDay";
 import type { Listening as ListeningState } from "../lib/useListening";
-import type { Question } from "../lib/questions";
+import QuestionCard from "./QuestionCard";
 
 /**
  * The listening screen: a chaptered story you hear, not read, with a comprehension
@@ -164,68 +164,6 @@ export default function Listening({
           )}
         </>
       )}
-    </div>
-  );
-}
-
-/** One question — a multiple choice or a fill-in-the-blank — with its after-answer state. */
-function QuestionCard({
-  q,
-  value,
-  result,
-  dir,
-  onChange,
-}: {
-  q: Question;
-  value: string;
-  result: boolean | undefined; // undefined until the chapter is checked
-  dir: string;
-  onChange: (v: string) => void;
-}) {
-  const done = result !== undefined;
-  return (
-    <div className={`listen-q ${done ? (result ? "ok" : "miss") : ""}`}>
-      <div className="listen-q-prompt" dir={q.kind === "cloze" ? dir : undefined}>
-        {q.prompt}
-      </div>
-
-      {q.kind === "mcq" ? (
-        <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-          {q.options?.map((opt) => (
-            <button
-              key={opt}
-              className={`chip ${value === opt ? "on" : ""}`}
-              disabled={done}
-              onClick={() => onChange(opt)}
-            >
-              {opt}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <input
-          className="listen-input"
-          dir={dir}
-          value={value}
-          disabled={done}
-          placeholder="Type the missing word…"
-          onChange={(e) => onChange(e.target.value)}
-        />
-      )}
-
-      {done && !result && (
-        <div className="listen-fix">
-          <div>
-            Answer: <strong dir={dir}>{q.answer}</strong>
-          </div>
-          {q.line && (
-            <div className="listen-line" dir={dir}>
-              “{q.line}”
-            </div>
-          )}
-        </div>
-      )}
-      {done && result && <div className="listen-good">✓ Correct</div>}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { CEFR_LEVELS } from "../lib/level";
 import AskSheet from "./read/AskSheet";
 import Passage from "./read/Passage";
 import Prompter from "./read/Prompter";
+import ReadingCheck from "./read/ReadingCheck";
 
 /**
  * The reading screen: one passage, two ways to work it.
@@ -59,7 +60,12 @@ export default function Read({
     void read.generate({ ...ask, interests: day.plan?.theme, goal: block?.goal });
   };
 
-  const finish = () => onAdvance("reading");
+  // Finishing a passage runs the comprehension check first; only when it produces no
+  // questions (or the model errors) do we advance straight away — a broken check must
+  // never trap the reader on a passage they've finished.
+  const finish = async () => {
+    if (!(await read.startCheck())) onAdvance("reading");
+  };
 
   const setView = (view: ReadView) => onChange({ readView: view });
 
@@ -72,6 +78,11 @@ export default function Read({
       onGenerate={generate}
     />
   );
+
+  // The comprehension check takes over the screen once a passage is finished — it is
+  // the last step of the read, ahead of the passage itself and the empty state.
+  if (read.checking || read.check)
+    return <ReadingCheck read={read} onDone={() => onAdvance("reading")} />;
 
   // The sheet is a *sibling* of the empty state, never a child of it: `.fade` animates
   // a transform, and a transformed ancestor is the containing block for everything

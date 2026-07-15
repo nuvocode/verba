@@ -5,16 +5,20 @@ import {
   storyPrompt,
   continueReadingPrompt,
   explainWordPrompt,
+  comprehensionPrompt,
   parseReading,
   parseWordExplanation,
+  parseComprehension,
   bareWord,
   LENGTHS,
   DEFAULT_LENGTH,
   type PassageLength,
   type ReadingText,
 } from "./reading";
+import { scoreAnswer, type Question } from "./questions";
+import { computeMetrics } from "./metrics";
 import { getPack } from "./packs";
-import { addVocab, recentMemories, saveReading, listReadings, getReading, type ReadingRow } from "./db";
+import { addVocab, recentMemories, saveReading, saveMetrics, vocabCounts, listReadings, getReading, type ReadingRow } from "./db";
 
 export interface WordPopover {
   term: string;
@@ -35,6 +39,14 @@ export interface Ask {
   topic: string;
 }
 
+/** The comprehension check the reader walks after finishing a passage, one question at a time. */
+interface CheckState {
+  questions: Question[];
+  step: number; // the question in front of the reader
+  answers: string[]; // index-aligned with questions
+  results: (boolean | undefined)[]; // set the moment each is graded
+}
+
 export function useRead(settings: Settings) {
   const [text, setText] = useState<ReadingText | null>(null);
   const [focusIdx, setFocusIdx] = useState(-1);
@@ -45,6 +57,10 @@ export function useRead(settings: Settings) {
   const [error, setError] = useState("");
   // Past passages, newest first — the empty state's library. Loaded on demand.
   const [library, setLibrary] = useState<ReadingRow[]>([]);
+  // The comprehension check the reader takes after finishing a passage. Null until
+  // it's generated; `checking` covers the wait while the questions are written.
+  const [check, setCheck] = useState<CheckState | null>(null);
+  const [checking, setChecking] = useState(false);
   // What they asked for last, so the sheet opens where they left it. Session-only:
   // a topic is a mood, not a setting, and it has no business surviving a restart.
   const [ask, setAsk] = useState<Ask>({ length: DEFAULT_LENGTH, topic: "" });
@@ -72,6 +88,7 @@ export function useRead(settings: Settings) {
       setFocusIdx(-1);
       setPopover(null);
       setSaved([]);
+      setCheck(null);
       try {
         // The passage is set in the learner's own world where it can be — the same
         // facts the coach talks to them about, doing a second job here.
@@ -163,6 +180,7 @@ export function useRead(settings: Settings) {
     setPopover(null);
     setSaved([]);
     setError("");
+    setCheck(null);
   }, []);
 
   /** Reopen a saved passage — sets it as the current text without re-generating or re-saving. */
@@ -173,8 +191,104 @@ export function useRead(settings: Settings) {
     setPopover(null);
     setSaved([]);
     setError("");
+    setCheck(null);
     setText(t);
   }, []);
+
+  /**
+   * Turn the finished passage into a comprehension check. Returns whether a check was
+   * produced — a passage that yields no questions (or a model that errors) must never
+   * block finishing the read, so the caller advances on false.
+   */
+  const startCheck = useCallback(async (): Promise<boolean> => {
+    if (!text) return false;
+    setChecking(true);
+    setError("");
+    try {
+      const raw = await getProvider(settings).chat(
+        [{ role: "user", content: comprehensionPrompt(settings, text, pack) }],
+        { json: true },
+      );
+      const questions = parseComprehension(raw);
+      if (!questions.length) return false;
+      setCheck({
+        questions,
+        step: 0,
+        answers: Array(questions.length).fill(""),
+        results: Array(questions.length).fill(undefined),
+      });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setChecking(false);
+    }
+  }, [text, settings, pack]);
+
+  const answerCheck = useCallback((i: number, v: string) => {
+    setCheck((c) => {
+      if (!c || c.results[i] !== undefined) return c; // a checked answer is settled
+      const answers = [...c.answers];
+      answers[i] = v;
+      return { ...c, answers };
+    });
+  }, []);
+
+  /** Grade the question in front of the reader; a missed cloze word falls into the SRS. */
+  const gradeCheck = useCallback(async () => {
+    const c = check;
+    if (!c) return;
+    const i = c.step;
+    const q = c.questions[i];
+    if (!q || c.results[i] !== undefined) return;
+    const ok = scoreAnswer(q, c.answers[i] ?? "");
+    setCheck((cur) => {
+      if (!cur) return cur;
+      const results = [...cur.results];
+      results[i] = ok;
+      return { ...cur, results };
+    });
+    // Only a missed cloze names an exact word worth reviewing (a missed mcq answer is
+    // a whole native phrase), so only cloze seeds a card. Gloss is left blank — the
+    // card exists to resurface the word; its meaning fills in the next time it's tapped.
+    if (!ok && q.kind === "cloze" && q.answer) {
+      await addVocab(settings.targetLang, { term: q.answer, translation: "", example: q.line }).catch(() => {});
+    }
+  }, [check, settings.targetLang]);
+
+  const nextCheckQuestion = useCallback(() => {
+    setCheck((c) => (!c || c.step >= c.questions.length - 1 ? c : { ...c, step: c.step + 1 }));
+  }, []);
+
+  /**
+   * Fold the check's accuracy into the level signal, then clear it. Comprehension is
+   * the cleanest reading-level signal we have, so it rides the same session_metrics
+   * row the Coach reads — words = what they read, corrections = what they missed.
+   */
+  const finishCheck = useCallback(async () => {
+    const c = check;
+    if (!c || !text) {
+      setCheck(null);
+      return;
+    }
+    const correct = c.results.filter((r) => r === true).length;
+    const total = c.questions.length || 1;
+    try {
+      const deckSize = (await vocabCounts(settings.targetLang)).total;
+      const m = computeMetrics(text.sentences.map((s) => s.target), {
+        corrections: total - correct,
+        deckSize,
+        locale: pack?.speech.locale,
+      });
+      await saveMetrics(settings.targetLang, m, Math.round((correct / total) * 100));
+    } catch {
+      /* the signal is best-effort — a finished check still counts */
+    }
+    setCheck(null);
+  }, [check, text, settings.targetLang, pack]);
+
+  /** Leave the check without recording anything — an escape hatch, not the happy path. */
+  const skipCheck = useCallback(() => setCheck(null), []);
 
   return {
     text,
@@ -202,6 +316,18 @@ export function useRead(settings: Settings) {
     loadLibrary,
     open,
     close,
+    /** The post-passage comprehension check — runs on the shared question layer. */
+    check,
+    checking,
+    checkScore: check
+      ? { correct: check.results.filter((r) => r === true).length, total: check.questions.length }
+      : { correct: 0, total: 0 },
+    startCheck,
+    answerCheck,
+    gradeCheck,
+    nextCheckQuestion,
+    finishCheck,
+    skipCheck,
     /** Sentences carrying a coach note, with their index — the margin rail. */
     notes: (text?.sentences ?? []).map((s, i) => ({ i, note: s.note })).filter((n): n is { i: number; note: string } => !!n.note),
   };

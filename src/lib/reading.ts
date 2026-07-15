@@ -1,6 +1,7 @@
 import { level, type Settings } from "./settings.ts";
 import type { LanguagePack } from "./packs/schema";
 import { memoryBrief, memoryStance, packGuidance, type Memory } from "./prompts.ts";
+import { questionInstructions, questionsShape, parseQuestions, type Question } from "./questions.ts";
 
 // Reading immersion: story mode + flow reading share one shape — a title plus
 // sentence-aligned target/native pairs, which the reader renders dual-page and
@@ -153,6 +154,26 @@ export interface WordExplanation {
   meaning: string;
   lemma: string;
   note: string;
+}
+
+/**
+ * The comprehension check for a finished passage. Reading owns no question logic of
+ * its own — it hands the passage text to the shared question layer (lib/questions)
+ * and gets back the same multiple-choice / cloze model listening uses.
+ */
+export function comprehensionPrompt(s: Settings, text: ReadingText, pack?: LanguagePack): string {
+  const passage = text.sentences.map((x) => x.target).join(" ");
+  return [
+    base(s, pack),
+    `The learner has just finished reading this passage:`,
+    passage,
+    questionInstructions(s.targetLang, s.nativeLang, 3),
+    `Answer with ONLY a JSON object: { ${questionsShape(s.targetLang, s.nativeLang)} }.`,
+  ].join("\n\n");
+}
+
+export function parseComprehension(raw: string): Question[] {
+  return parseQuestions((extractJson(raw) ?? {}).questions);
 }
 
 export function parseReading(raw: string): ReadingText {
