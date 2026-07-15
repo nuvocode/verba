@@ -75,7 +75,7 @@ export default function Passage({
                   <span key={wi}>{t.text}</span>
                 ),
               )}
-              {read.bilingual && (
+              {read.bilingual && read.canBilingual && (
                 <span className="en" dir="auto">
                   {" "}
                   {s.native}{" "}
@@ -104,9 +104,11 @@ export default function Passage({
             <span>
               <span className="kbd">← →</span> move focus
             </span>
-            <span>
-              <span className="kbd">T</span> bilingual mode
-            </span>
+            {read.canBilingual && (
+              <span>
+                <span className="kbd">T</span> bilingual mode
+              </span>
+            )}
             <span>
               <span className="kbd">P</span> read it out loud
             </span>
@@ -139,7 +141,7 @@ export default function Passage({
           <div className="eyebrow" style={{ fontSize: 10, marginBottom: 8 }}>
             Sentence {focusIdx + 1} of {text.sentences.length}
           </div>
-          <div className="en">{focused.native}</div>
+          {read.canBilingual && <div className="en">{focused.native}</div>}
           {focused.note && (
             <div className="nt">
               <span style={{ color: "var(--accent-ink)" }}>✳</span> {focused.note}

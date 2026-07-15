@@ -51,6 +51,10 @@ export function useRead(settings: Settings) {
 
   const pack = getPack(settings.packId);
 
+  // Nothing to translate when the target and native language are the same — the
+  // "native" line is just the sentence again. Bilingual mode has no meaning here.
+  const canBilingual = settings.targetLang.trim().toLowerCase() !== settings.nativeLang.trim().toLowerCase();
+
   /**
    * Generate a fresh passage. `goal` folds the day's weak area into the text.
    *
@@ -180,7 +184,9 @@ export function useRead(settings: Settings) {
     locale: pack?.speech.locale ?? "en",
     dir: pack?.direction ?? "ltr",
     bilingual,
-    toggleBilingual: () => setBilingual((b) => !b),
+    /** False when target and native language match — there is no translation to show. */
+    canBilingual,
+    toggleBilingual: () => canBilingual && setBilingual((b) => !b),
     popover,
     closePopover: () => setPopover(null),
     saved,
