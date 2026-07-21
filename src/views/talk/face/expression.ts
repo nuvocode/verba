@@ -31,7 +31,24 @@ export interface Cue {
  * it. Coming back remounts it, which re-reads the counters rather than replaying
  * them — no stale correction fires on the way in.
  */
-export type Mode = "idle" | "listening";
+export type Mode = "idle" | "listening" | "attending" | "thinking";
+
+/**
+ * Which situation the face is in, from the three flags the session already keeps.
+ *
+ * The order is the whole content of this function. The learner acting outranks
+ * the coach working: an open mic and a half-typed sentence are both someone
+ * taking their turn, and a face that looks away to think while a learner is
+ * mid-sentence has stopped listening to them. `thinking` gets what is left, which
+ * is exactly the dead air it was added to fill — the model's latency, with nobody
+ * typing into it.
+ */
+export function modeFor(s: { mic: boolean; typing: boolean; waiting: boolean }): Mode {
+  if (s.mic) return "attending";
+  if (s.typing) return "listening";
+  if (s.waiting) return "thinking";
+  return "idle";
+}
 
 /**
  * How long a moment stays on the face. Long enough to be seen at a glance, short
@@ -55,8 +72,10 @@ export const CUE_MS: Record<Cue["kind"], number> = { raised: 1200, smiling: 2800
  */
 export function expressionFor(cue: Cue | null, mode: Mode, now: number): Expression {
   if (cue && now - cue.at < CUE_MS[cue.kind]) return cue.kind;
-  if (mode === "listening") return "listening";
-  return "neutral";
+  // Every mode but `idle` names the expression it wears. That is not a shortcut:
+  // a mode with no face of its own is a mode with nothing to say, and the row it
+  // would point at is the one it should have been named after.
+  return mode === "idle" ? "neutral" : mode;
 }
 
 /**
@@ -91,6 +110,45 @@ const PLEASED = /[\u{1F600}-\u{1F60A}\u{1F60D}\u{1F642}\u{263A}\u{1F44D}\u{1F44F
 
 export function looksPleased(text: string): boolean {
   return PLEASED.test(text);
+}
+
+/**
+ * The shape of a message this file needs — not `TalkMsg`, which would drag the
+ * whole session type into a file that runs under node with no React.
+ */
+export interface Turn {
+  role: "user" | "ai";
+  text: string;
+  corrections: unknown[];
+  isAsk?: boolean;
+}
+
+/** Shortest sentence worth a nod. Below this the learner is answering, not
+ *  producing — "yes, sometimes" is not the thing being encouraged. */
+export const NOD_MIN_CHARS = 60;
+
+/**
+ * Turns worth nodding at: a long one the coach found nothing to fix in.
+ *
+ * Counted rather than flagged, so the component watches it the same way it
+ * watches corrections — a rise is the event. The `isAsk` skip keeps ⌘K asides
+ * out; they are questions about the language, in the learner's own tongue, and
+ * nodding along to one would be praise for asking.
+ *
+ * Only counted once the coach has answered. Corrections arrive with the reply,
+ * so a turn still in flight has an empty list for the same reason a perfect one
+ * does — reacting then would nod at every sentence the moment it was sent, which
+ * is precisely the fake signal Part A took out.
+ */
+export function noddable(msgs: Turn[]): number {
+  let n = 0;
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role !== "user" || m.isAsk) continue;
+    if (m.text.trim().length < NOD_MIN_CHARS || m.corrections.length > 0) continue;
+    if (msgs.slice(i + 1).some((later) => later.role === "ai" && !later.isAsk)) n++;
+  }
+  return n;
 }
 
 /**

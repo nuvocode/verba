@@ -5,9 +5,9 @@ import {
   earnedSmile,
   expressionFor,
   looksPleased,
+  modeFor,
   rose,
   type Cue,
-  type Mode,
 } from "./face/expression";
 import { EXPRESSIONS } from "./face/paths";
 import { Brows, Eyes, Glasses, Head, MouthPart } from "./face/rig";
@@ -47,6 +47,10 @@ const reducedMotion = () =>
 export interface FaceProps {
   /** The learner has something in the composer. */
   typing?: boolean;
+  /** The mic is open — the learner is taking their turn out loud. */
+  mic?: boolean;
+  /** A reply is in flight. This is the dead air the thinking state covers. */
+  waiting?: boolean;
   /** Corrections delivered so far this session. Watched for increases, not read. */
   corrections?: number;
   /** The confidence signal shown in the rail. Watched for a full step, not read. */
@@ -63,6 +67,8 @@ export interface FaceProps {
  */
 export default function Face({
   typing = false,
+  mic = false,
+  waiting = false,
   corrections = 0,
   confidence = 0,
   coachTurns = 0,
@@ -73,12 +79,12 @@ export default function Face({
   const [cue, setCue] = useState<Cue | null>(null);
   const still = useRef(reducedMotion());
 
-  const mode: Mode = typing ? "listening" : "idle";
+  const mode = modeFor({ mic, typing, waiting });
   // Reduced motion keeps the mouth (it is the content) and drops everything the
   // face does on its own — the sway is the part that makes people ill, and an
   // expression that arrives unbidden is the same category of motion.
   const shown = still.current ? "neutral" : expressionFor(cue, mode, performance.now());
-  const { brow, smiling, tilt } = EXPRESSIONS[shown];
+  const { brow, smiling, tilt, gaze } = EXPRESSIONS[shown];
 
   const fade = useRef(0);
   /** When a smile was last earned but could not be seen. See the mouth effect. */
@@ -157,6 +163,15 @@ export default function Face({
 
   useEffect(() => () => clearTimeout(fade.current), []);
 
+  // No nod yet. `noddable` in face/expression.ts picks the turns that deserve one
+  // and its rule is checked, but the movement itself is not shipped: from idle a
+  // head-dip renders fine, and at the moment it is actually earned — the reply
+  // landing, speech starting, the mouth re-rendering — it did not, through both a
+  // keyframe animation and a transition on two different groups. Only a dip held
+  // for seconds survived that, and a nod held for seconds is a bow. Shipping a cue
+  // that cannot be seen is the exact mistake Part A was written to undo.
+
+
   // The blink. One timer, re-armed at a random gap — cheap enough to be free, and
   // the single thing that stops a silent character from reading as a static image.
   useEffect(() => {
@@ -187,7 +202,7 @@ export default function Face({
         <g className="tilt" style={{ transform: `rotate(${tilt}deg)` }}>
           <Head />
           <Brows state={brow} />
-          <Eyes shut={blinking} />
+          <Eyes shut={blinking} gaze={gaze} />
           <Glasses />
           <MouthPart mouth={mouth} smiling={smiling} />
         </g>

@@ -13,10 +13,14 @@ import {
   earnedSmile,
   expressionFor,
   looksPleased,
+  modeFor,
+  noddable,
+  NOD_MIN_CHARS,
   rose,
   SMILE_STEP,
   type Cue,
   type Mode,
+  type Turn,
 } from "./expression.ts";
 import { BROWS, cornerY, EXPRESSIONS, MOUTHS, mouthPath } from "./paths.ts";
 
@@ -51,13 +55,39 @@ assert.equal(
 // ---- situations ----
 
 assert.equal(expressionFor(null, "listening", 0), "listening");
+assert.equal(expressionFor(null, "attending", 0), "attending");
+assert.equal(expressionFor(null, "thinking", 0), "thinking");
 assert.equal(expressionFor(null, "idle", 0), "neutral");
 
 // There is deliberately no "reflecting" mode: Talk.tsx returns the wrap-up from a
 // branch above the rail, so the face is unmounted for the whole of it. If that
 // ever changes, this is the line that should start failing to compile.
-const modes: Mode[] = ["idle", "listening"];
-assert.equal(modes.length, 2);
+const modes: Mode[] = ["idle", "listening", "attending", "thinking"];
+assert.equal(modes.length, 4);
+
+// ---- which situation wins ----
+// The learner acting outranks the coach working. A face that looks away to think
+// while someone is still typing has stopped listening to them.
+
+assert.equal(modeFor({ mic: true, typing: true, waiting: true }), "attending", "an open mic wins");
+assert.equal(modeFor({ mic: false, typing: true, waiting: true }), "listening", "typing beats waiting");
+assert.equal(modeFor({ mic: false, typing: false, waiting: true }), "thinking", "dead air is what it fills");
+assert.equal(modeFor({ mic: false, typing: false, waiting: false }), "idle");
+
+// Typing and speaking must not draw the same face — the task asks for a mic state
+// *distinct* from the typing tilt, and identical rows would satisfy every other
+// assertion here while shipping nothing.
+const t = EXPRESSIONS.listening;
+const a = EXPRESSIONS.attending;
+assert.ok(t.brow !== a.brow || t.tilt !== a.tilt || t.gaze !== a.gaze, "attending must differ from listening");
+
+// Thinking is the only expression that looks away. Anything else that did would
+// be the coach avoiding eye contact with a learner who is waiting on it.
+const aside = Object.entries(EXPRESSIONS).filter(([, e]) => e.gaze === "aside");
+assert.deepEqual(
+  aside.map(([k]) => k),
+  ["thinking"],
+);
 
 // ---- counters ----
 
@@ -87,6 +117,28 @@ assert.equal(looksPleased("🙂"), true);
 assert.equal(looksPleased("Und was hast du dann gemacht?"), false, "plain prose is not a smile");
 assert.equal(looksPleased("Hmm 🤔 nicht ganz."), false, "an ambiguous mark is not evidence");
 assert.equal(looksPleased("Leider falsch 😕"), false);
+
+// ---- the nod ----
+// A nod is for a long sentence the coach found nothing to fix in. The trap it has
+// to avoid is the one Part A removed from the smile: reacting to a turn before the
+// reply that judges it has arrived, which would nod at every sentence on send.
+
+const user = (text: string, corrections: unknown[] = [], isAsk = false): Turn => ({
+  role: "user",
+  text,
+  corrections,
+  isAsk,
+});
+const coach = (text = "…"): Turn => ({ role: "ai", text, corrections: [] });
+const LONG = "I spent the whole morning reading about how cities plan their transport.";
+assert.ok(LONG.length >= NOD_MIN_CHARS);
+
+assert.equal(noddable([user(LONG), coach()]), 1, "long, clean, and answered");
+assert.equal(noddable([user(LONG)]), 0, "a turn still in flight has no corrections *yet*");
+assert.equal(noddable([user(LONG, [{}]), coach()]), 0, "a corrected turn is not a nod");
+assert.equal(noddable([user("Yes, sometimes."), coach()]), 0, "short is answering, not producing");
+assert.equal(noddable([user(LONG, [], true), coach()]), 0, "a ⌘K aside is a question, not a sentence");
+assert.equal(noddable([user(LONG), coach(), user(LONG), coach()]), 2, "counted, so a rise is the event");
 
 // ---- speech outranks expression ----
 // The one rule that is not in expressionFor: a mouth mid-syllable must not be

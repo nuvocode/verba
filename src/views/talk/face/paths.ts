@@ -67,11 +67,15 @@ export function cornerY(d: string): number {
 export const MOUTH_FILL = 0.5;
 
 /** The brow frames the rig can draw. */
-export type Brow = "neutral" | "raised" | "soft";
+export type Brow = "neutral" | "raised" | "soft" | "interested";
+
+/** Where the eyes are pointed. `at` is at the learner; `aside` is the half-second
+ *  a person spends not looking at you while they work out what to say. */
+export type Gaze = "at" | "aside";
 
 /** What the face is doing that is not speech, named for the situation rather than
  *  the muscle — Part C maps app events onto these and nothing else. */
-export type Expression = "neutral" | "listening" | "raised" | "smiling";
+export type Expression = "neutral" | "listening" | "attending" | "thinking" | "raised" | "smiling";
 
 /**
  * One expression decomposed into the parts that move. Keeping the mapping here,
@@ -79,18 +83,35 @@ export type Expression = "neutral" | "listening" | "raised" | "smiling";
  * spread across the component: an event picks an `Expression`, and the rig reads
  * the row.
  */
-export const EXPRESSIONS: Record<Expression, { brow: Brow; smiling: boolean; tilt: number }> = {
-  neutral: { brow: "neutral", smiling: false, tilt: 0 },
+export const EXPRESSIONS: Record<Expression, { brow: Brow; smiling: boolean; tilt: number; gaze: Gaze }> = {
+  neutral: { brow: "neutral", smiling: false, tilt: 0, gaze: "at" },
   // The tilt is what says "listening"; a raised brow while the learner is still
   // typing reads as surprise at a sentence nobody has finished yet.
   //
   // −4° and not less: at the 92px this ships at, −2.5° was measured and does not
   // register at all. The ceiling is roughly −6°, past which a tilted head stops
   // reading as attention and starts reading as a question.
-  listening: { brow: "neutral", smiling: false, tilt: -4 },
-  raised: { brow: "raised", smiling: false, tilt: 0 },
-  smiling: { brow: "soft", smiling: true, tilt: 0 },
+  listening: { brow: "neutral", smiling: false, tilt: -4, gaze: "at" },
+  // The mic is open. Typing and speaking are both the learner taking a turn, so
+  // the tilt is the same — what separates them is that speech is happening *now*,
+  // in the room, and a face that only tilts reads as waiting rather than
+  // attending. The brow is the difference, and it is why `interested` exists.
+  attending: { brow: "interested", smiling: false, tilt: -4, gaze: "at" },
+  // Waiting on the model. Nobody holds eye contact while thinking; the gaze goes
+  // off and the brow relaxes. This is the one expression that fills time the app
+  // did not choose to spend — Ollama's latency is its trigger, so it lasts exactly
+  // as long as the wait and never needs a timer of its own.
+  thinking: { brow: "soft", smiling: false, tilt: 0, gaze: "aside" },
+  raised: { brow: "raised", smiling: false, tilt: 0, gaze: "at" },
+  smiling: { brow: "soft", smiling: true, tilt: 0, gaze: "at" },
 };
+
+/**
+ * How far the pupils travel when the gaze goes aside, in the box's own units.
+ * Small: the eye is 4.2 units of pupil inside an 8.6-unit lens, so anything past
+ * about 3 puts the pupil on the frame and reads as an eye-roll.
+ */
+export const GAZE_ASIDE: [number, number] = [-2.4, -0.5];
 
 /**
  * Which mouth to draw. Speech outranks expression: a coach that freezes into a
@@ -117,6 +138,13 @@ export const BROWS: Record<Brow, string> = {
   soft:
     "M38.2 53.8 Q46.8 49.5 56 50.8 Q46.8 51.9 38.2 55.2 Z" +
     "M81.8 53.2 Q73.2 48.8 64 50.4 Q73.2 51.4 81.8 54.8 Z",
+  // Between neutral and raised, and a different shape rather than a smaller
+  // amount of the same one: the apex lifts *and* thickens, where `raised` peaks
+  // sharply. A corrective brow is a spike; an interested one is a swell. Half of
+  // `raised`'s travel would just have read as a weak correction.
+  interested:
+    "M38.2 53.4 Q46.8 45.8 56 50.4 Q46.8 51.9 38.2 55.2 Z" +
+    "M81.8 52.8 Q73.2 45.1 64 50.0 Q73.2 51.4 81.8 54.8 Z",
 };
 
 /** Eyes open: upper lid, lower lid, pupil — per side. */

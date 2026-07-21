@@ -208,6 +208,9 @@ input { font: inherit; }
 /* The tilt origin is the base of the neck, in viewBox units. Nothing drives this
    yet; the rig defines it so Part C only has to supply an angle. */
 .face .tilt { transform-origin: 60px 96px; transition: transform .5s cubic-bezier(.22,.61,.36,1); }
+/* The gaze. Slower than a saccade on purpose — a pupil that arrives instantly
+   reads as a rendering glitch, and the eye is the smallest thing on the face. */
+.face .pu { transition: transform .34s cubic-bezier(.32,.72,.35,1); }
 .face .lbl { margin-bottom: 0; }
 @keyframes vbreathe { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-1.5px) scale(1.012); } }
 /* The sway is the part that makes people ill; the mouth is the content. Keep the
@@ -218,7 +221,7 @@ input { font: inherit; }
   /* The component already pins the expression to neutral, so there is nothing to
      tween — but a transition left armed would still animate the one change from
      whatever was on screen when the preference flipped. */
-  .face .br, .face .tilt { transition: none; }
+  .face .br, .face .tilt, .face .pu { transition: none; }
 }
 
 /* reflection */

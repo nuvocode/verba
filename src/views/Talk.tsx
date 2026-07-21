@@ -401,6 +401,8 @@ export default function Talk({
               worse than one that doesn't smile. */}
           <Face
             typing={talk.input.trim() !== ""}
+            mic={talk.micPhase === "recording"}
+            waiting={talk.busy}
             corrections={talk.msgs.reduce((n, m) => n + m.corrections.length, 0)}
             confidence={talk.confidence}
             coachTurns={coachSaid.length}

@@ -18,14 +18,23 @@ export function Head() {
   );
 }
 
-export function Eyes({ shut }: { shut: boolean }) {
+/**
+ * The eyes. Only the pupils move for gaze — the lids stay put, because an eye
+ * whose whole shape slides is a head turning, and the head has its own transform.
+ * The offset is a transform rather than new coordinates so `.face .pu` can tween
+ * it; a pupil that teleports reads as a glitch, not a glance.
+ */
+export function Eyes({ shut, gaze }: { shut: boolean; gaze: P.Gaze }) {
   if (shut) return <path fill="currentColor" d={P.EYES_SHUT} />;
+  const [dx, dy] = gaze === "aside" ? P.GAZE_ASIDE : [0, 0];
   return (
     <>
       <path fill="currentColor" d={P.EYES_OPEN} />
-      {P.PUPILS.map((p) => (
-        <circle key={p.cx} fill="currentColor" cx={p.cx} cy={p.cy} r={p.r} />
-      ))}
+      <g className="pu" style={{ transform: `translate(${dx}px, ${dy}px)` }}>
+        {P.PUPILS.map((p) => (
+          <circle key={p.cx} fill="currentColor" cx={p.cx} cy={p.cy} r={p.r} />
+        ))}
+      </g>
     </>
   );
 }
