@@ -9,7 +9,11 @@
 // Run: node --experimental-strip-types src/views/talk/face/expression.check.ts
 import assert from "node:assert";
 import {
+  BLINK_MS,
+  blinkPlan,
   CUE_MS,
+  DRIFT_MS,
+  driftGap,
   earnedSmile,
   expressionFor,
   looksPleased,
@@ -22,7 +26,7 @@ import {
   type Mode,
   type Turn,
 } from "./expression.ts";
-import { BROWS, cornerY, EXPRESSIONS, MOUTHS, mouthPath } from "./paths.ts";
+import { BROWS, cornerY, EXPRESSIONS, GAZE_OFFSET, GLASS_R, MOUTHS, mouthPath, PUPILS } from "./paths.ts";
 
 const cue = (kind: Cue["kind"], at: number): Cue => ({ kind, at });
 
@@ -117,6 +121,51 @@ assert.equal(looksPleased("🙂"), true);
 assert.equal(looksPleased("Und was hast du dann gemacht?"), false, "plain prose is not a smile");
 assert.equal(looksPleased("Hmm 🤔 nicht ganz."), false, "an ambiguous mark is not evidence");
 assert.equal(looksPleased("Leider falsch 😕"), false);
+
+// ---- the idle schedules ----
+// What the face does when nothing is happening, which is most of the time. Both
+// timers live in the component; the arithmetic is here so "this does not feel
+// like a metronome" is a property something can hold rather than a comment.
+
+assert.equal(blinkPlan(0, 1).after, 2500, "the shortest gap");
+assert.equal(blinkPlan(1, 1).after, 5200, "the longest");
+assert.ok(blinkPlan(0.5, 1).after > 3000, "the middle of the range is a comfortable gap");
+
+// A double is the minority case. If it ever became the common one the pair would
+// be the shape that repeats, which is the thing this exists to break.
+assert.equal(blinkPlan(0.5, 0).double, true);
+assert.equal(blinkPlan(0.5, 0.5).double, false);
+assert.equal(blinkPlan(0.5, 1).double, false);
+
+// Drift is an order of magnitude rarer than blinking. Eyes that wander often stop
+// reading as idleness and start reading as inattention.
+assert.ok(
+  driftGap(0) > blinkPlan(1, 1).after * 2,
+  `even the soonest drift must be rarer than the longest blink gap (${driftGap(0)} vs ${blinkPlan(1, 1).after})`,
+);
+assert.ok(driftGap(1) > driftGap(0));
+assert.ok(DRIFT_MS > BLINK_MS * 5, "a drift rests; a blink passes");
+
+// ---- gaze geometry ----
+// The pupil has to stay inside its lens. Off the glass it stops being a glance
+// and becomes an eye-roll — and the frame is drawn in the one accent colour, so
+// a pupil crossing it is the most conspicuous mistake this rig can make.
+
+for (const [name, [dx, dy]] of Object.entries(GAZE_OFFSET)) {
+  for (const p of PUPILS) {
+    const lens = { cx: p.cx < 60 ? 47 : 73, cy: 64 };
+    const reach = Math.hypot(p.cx + dx - lens.cx, p.cy + dy - lens.cy) + p.r;
+    assert.ok(reach < GLASS_R - 1, `gaze ${name} puts a pupil ${reach.toFixed(1)} out, past the frame at ${GLASS_R}`);
+  }
+}
+
+// The two ways of leaving must not look like the same habit.
+assert.ok(GAZE_OFFSET.aside[0] * GAZE_OFFSET.drift[0] < 0, "thought and idleness look opposite ways");
+assert.ok(
+  Math.abs(GAZE_OFFSET.drift[0]) < Math.abs(GAZE_OFFSET.aside[0]),
+  "a drift is smaller than a look-away",
+);
+assert.deepEqual(GAZE_OFFSET.at, [0, 0]);
 
 // ---- the nod ----
 // A nod is for a long sentence the coach found nothing to fix in. The trap it has

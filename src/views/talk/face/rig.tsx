@@ -26,7 +26,7 @@ export function Head() {
  */
 export function Eyes({ shut, gaze }: { shut: boolean; gaze: P.Gaze }) {
   if (shut) return <path fill="currentColor" d={P.EYES_SHUT} />;
-  const [dx, dy] = gaze === "aside" ? P.GAZE_ASIDE : [0, 0];
+  const [dx, dy] = P.GAZE_OFFSET[gaze];
   return (
     <>
       <path fill="currentColor" d={P.EYES_OPEN} />

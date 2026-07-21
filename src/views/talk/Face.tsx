@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as voice from "../../lib/voice";
 import {
+  BLINK_MS,
+  blinkPlan,
   CUE_MS,
+  DOUBLE_GAP_MS,
+  DRIFT_MS,
+  driftGap,
   earnedSmile,
   expressionFor,
   looksPleased,
@@ -28,11 +33,6 @@ import { Brows, Eyes, Glasses, Head, MouthPart } from "./face/rig";
 // Nobody reads a mouth for phonemes; they read it for "that one is talking", and
 // amplitude carries that. Real lip-sync (visemes, phoneme timings) is still a
 // separate task.
-
-/** Blink gaps, in ms. Evenly spaced blinking reads as a metronome, not a face. */
-const BLINK_MIN = 2500;
-const BLINK_MAX = 5200;
-const BLINK_MS = 120;
 
 /**
  * How long a smile stays owed while the coach is still talking. Longer than any
@@ -76,6 +76,7 @@ export default function Face({
 }: FaceProps) {
   const [mouth, setMouth] = useState<voice.Mouth>("rest");
   const [blinking, setBlinking] = useState(false);
+  const [drifting, setDrifting] = useState(false);
   const [cue, setCue] = useState<Cue | null>(null);
   const still = useRef(reducedMotion());
 
@@ -85,6 +86,10 @@ export default function Face({
   // expression that arrives unbidden is the same category of motion.
   const shown = still.current ? "neutral" : expressionFor(cue, mode, performance.now());
   const { brow, smiling, tilt, gaze } = EXPRESSIONS[shown];
+  // Drift only on the plain resting face. Thinking already has the eyes; a mic
+  // that is open or a moment that just landed is the coach being *with* you, and
+  // wandering eyes there would undo the cue that was the point.
+  const eyes = drifting && shown === "neutral" ? "drift" : gaze;
 
   const fade = useRef(0);
   /** When a smile was last earned but could not be seen. See the mouth effect. */
@@ -174,24 +179,50 @@ export default function Face({
 
   // The blink. One timer, re-armed at a random gap — cheap enough to be free, and
   // the single thing that stops a silent character from reading as a static image.
+  // Roughly one in five comes as a quick pair: a lone blink at a random interval
+  // is still one shape repeating, and the shape is what the eye reads.
   useEffect(() => {
     if (still.current) return;
-    let open = 0;
-    let shut = 0;
+    let timer = 0;
+    const shut = (then: () => void) => {
+      setBlinking(true);
+      timer = window.setTimeout(() => {
+        setBlinking(false);
+        then();
+      }, BLINK_MS);
+    };
     const arm = () => {
-      open = window.setTimeout(() => {
-        setBlinking(true);
-        shut = window.setTimeout(() => {
-          setBlinking(false);
-          arm();
-        }, BLINK_MS);
-      }, BLINK_MIN + Math.random() * (BLINK_MAX - BLINK_MIN));
+      const plan = blinkPlan(Math.random(), Math.random());
+      timer = window.setTimeout(() => {
+        shut(() => {
+          if (!plan.double) return arm();
+          timer = window.setTimeout(() => shut(arm), DOUBLE_GAP_MS);
+        });
+      }, plan.after);
     };
     arm();
-    return () => {
-      clearTimeout(open);
-      clearTimeout(shut);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // The gaze drift: the small aimless one nobody notices themselves doing. Same
+  // shape as the blink — one timer, re-armed — and an order of magnitude rarer,
+  // because eyes that wander often stop reading as idleness and start reading as
+  // inattention. Unmounting the Talk screen takes both timers with it, so a face
+  // nobody is looking at costs nothing.
+  useEffect(() => {
+    if (still.current) return;
+    let timer = 0;
+    const arm = () => {
+      timer = window.setTimeout(() => {
+        setDrifting(true);
+        timer = window.setTimeout(() => {
+          setDrifting(false);
+          arm();
+        }, DRIFT_MS);
+      }, driftGap(Math.random()));
     };
+    arm();
+    return () => clearTimeout(timer);
   }, []);
 
   return (
@@ -202,7 +233,7 @@ export default function Face({
         <g className="tilt" style={{ transform: `rotate(${tilt}deg)` }}>
           <Head />
           <Brows state={brow} />
-          <Eyes shut={blinking} gaze={gaze} />
+          <Eyes shut={blinking} gaze={eyes} />
           <Glasses />
           <MouthPart mouth={mouth} smiling={smiling} />
         </g>

@@ -112,6 +112,49 @@ export function looksPleased(text: string): boolean {
   return PLEASED.test(text);
 }
 
+// ---- the idle schedules ----
+//
+// The blink and the gaze drift are the two things the face does when nothing is
+// happening, which is most of the time. Both are timers in the component; the
+// arithmetic lives here so the claim "this does not feel like a metronome" is
+// something a check can hold rather than something a comment asserts.
+
+/** How long an eye stays shut. Shorter than this and the lids never arrive. */
+export const BLINK_MS = 120;
+const BLINK_MIN = 2500;
+const BLINK_MAX = 5200;
+
+/** Gap between the two halves of a double blink, and how often one happens. */
+export const DOUBLE_GAP_MS = 190;
+const DOUBLE_CHANCE = 0.18;
+
+/**
+ * The next blink. Two random draws in, one plan out — so the component holds no
+ * arithmetic and this stays testable.
+ *
+ * The double is the point of the rework. A single blink at a random interval is
+ * still one shape repeating, and the eye reads the *shape*, not the spacing;
+ * roughly one blink in five coming as a quick pair is what real eyes do and what
+ * stops the character reading as a clock.
+ */
+export function blinkPlan(gapRand: number, doubleRand: number): { after: number; double: boolean } {
+  return { after: BLINK_MIN + gapRand * (BLINK_MAX - BLINK_MIN), double: doubleRand < DOUBLE_CHANCE };
+}
+
+/** How long the eyes rest off-centre when they drift. */
+export const DRIFT_MS = 1150;
+const DRIFT_MIN = 11_000;
+const DRIFT_MAX = 26_000;
+
+/**
+ * When the gaze next drifts. An order of magnitude rarer than a blink, and
+ * deliberately so: a blink is punctuation and goes unnoticed, but eyes that
+ * wander often stop reading as idleness and start reading as inattention.
+ */
+export function driftGap(r: number): number {
+  return DRIFT_MIN + r * (DRIFT_MAX - DRIFT_MIN);
+}
+
 /**
  * The shape of a message this file needs — not `TalkMsg`, which would drag the
  * whole session type into a file that runs under node with no React.

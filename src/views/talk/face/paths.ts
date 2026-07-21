@@ -69,9 +69,16 @@ export const MOUTH_FILL = 0.5;
 /** The brow frames the rig can draw. */
 export type Brow = "neutral" | "raised" | "soft" | "interested";
 
-/** Where the eyes are pointed. `at` is at the learner; `aside` is the half-second
- *  a person spends not looking at you while they work out what to say. */
-export type Gaze = "at" | "aside";
+/**
+ * Where the eyes are pointed. `at` is at the learner; `aside` is the half-second
+ * a person spends not looking at you while they work out what to say; `drift` is
+ * the smaller, aimless one nobody notices themselves doing.
+ *
+ * Drift goes the other way on purpose. Both are the eyes leaving, but one is
+ * thought and the other is idleness, and the same offset for both would make the
+ * character look like it has a habit rather than an inner life.
+ */
+export type Gaze = "at" | "aside" | "drift";
 
 /** What the face is doing that is not speech, named for the situation rather than
  *  the muscle — Part C maps app events onto these and nothing else. */
@@ -107,11 +114,18 @@ export const EXPRESSIONS: Record<Expression, { brow: Brow; smiling: boolean; til
 };
 
 /**
- * How far the pupils travel when the gaze goes aside, in the box's own units.
- * Small: the eye is 4.2 units of pupil inside an 8.6-unit lens, so anything past
- * about 3 puts the pupil on the frame and reads as an eye-roll.
+ * How far the pupils travel, in the box's own units. Small: the eye is 4.2 units
+ * of pupil inside an 8.6-unit lens, so anything past about 3 puts the pupil on
+ * the frame and reads as an eye-roll.
  */
-export const GAZE_ASIDE: [number, number] = [-2.4, -0.5];
+export const GAZE_OFFSET: Record<Gaze, [number, number]> = {
+  at: [0, 0],
+  aside: [-2.4, -0.5],
+  // Half the travel of a look-away and slightly down, which is where an eye goes
+  // when it is resting rather than avoiding. Any larger and idling reads as
+  // distraction — the coach is supposed to still be with you between turns.
+  drift: [1.2, 0.45],
+};
 
 /**
  * Which mouth to draw. Speech outranks expression: a coach that freezes into a
