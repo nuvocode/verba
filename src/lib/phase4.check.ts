@@ -2,7 +2,7 @@
 // word normalisation, and the Coach's metric round-trip.
 // Run: node --experimental-strip-types src/lib/phase4.check.ts
 import assert from "node:assert";
-import { shouldShowInline, parseTurn } from "./prompts.ts";
+import { shouldShowInline, parseTurn, partialReply } from "./prompts.ts";
 import { strength, newCard, schedule } from "./srs.ts";
 import { bareWord, parseReading } from "./reading.ts";
 import { computeMetrics, estimateLevelV2, metricsFromRow } from "./metrics.ts";
@@ -35,6 +35,34 @@ const nested = parseTurn(
 assert(nested.reply === "That sounds fun!", "nested reply is unwrapped, not printed raw");
 assert(nested.corrections[0].fixed === "I played the Uncharted video game", "nested corrections survive");
 assert(nested.suggestions[0] === "It was Uncharted 4.", "nested suggestions survive");
+
+// --- streaming: the reply is readable long before the object closes ---
+const full = JSON.stringify({
+  reply: 'Wie geht\'s? Ich sagte "hallo".\nUnd du?',
+  corrections: [{ original: "ein Kaffee", fixed: "einen Kaffee", note: "akkusatif", severity: "minor" }],
+  suggestions: ["Mir geht es gut."],
+});
+// Every prefix must be safe to render: the parser is fed a growing string, and a chunk
+// boundary can fall anywhere — including inside \" or halfway through \uXXXX.
+for (let i = 0; i < full.length; i++) {
+  const seen = partialReply(full.slice(0, i));
+  assert(parseTurn(full).reply.startsWith(seen), `prefix ${i} shows only real reply text, got ${JSON.stringify(seen)}`);
+}
+assert(partialReply(full) === parseTurn(full).reply, "the closed reply matches what parseTurn lands on");
+assert(partialReply('{"reply": "Guten T') === "Guten T", "an open reply streams as far as it got");
+assert(partialReply('{"corrections": []') === "", "no reply key yet, nothing to show");
+assert(partialReply('```json\n{"reply": "Hallo') === "Hallo", "a code fence does not hide the reply");
+assert(partialReply('{"reply": "\\u00e4h') === "äh", "a completed unicode escape decodes");
+assert(partialReply('{"reply": "gut\\u00e') === "gut", "a half-arrived escape waits rather than printing garbage");
+assert(partialReply('{"reply": "{ \\"reply\\": \\"nested') === "", "a nested object is never flashed at the learner");
+
+// Verbatim from glm-5.2: a stray quote in the suggestions array, so the object will not
+// parse. The reply is still in there, and printing the raw JSON at the learner instead —
+// which is what the fallback used to do — is the worse answer.
+const malformed =
+  '{\n  "reply": "Okay, ein Kaffee kommt sofort!",\n  "corrections": [],\n  "suggestions": [\n    "Einen normalen Kaffee, bitte.",\n    " "Ich möchte einen Espresso, bitte."\n  ]\n}';
+assert(parseTurn(malformed).reply === "Okay, ein Kaffee kommt sofort!", "unparseable turn still yields its reply");
+assert(!parseTurn(malformed).reply.includes('"corrections"'), "…and never shows the learner raw JSON");
 
 // The cloze front these assertions covered is gone: its own fallback — appending a
 // blank to a complete sentence when the term was inflected — made a card that asked

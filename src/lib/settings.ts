@@ -36,6 +36,15 @@ export interface Settings {
   openrouterKey: string;
   lmstudioModel: string;
   lmstudioHost: string;
+  /**
+   * Let a reasoning model think before it answers.
+   *
+   * Off by default. Thinking is charged entirely to the pause before the coach
+   * starts speaking — the learner watches an empty screen for the whole of it —
+   * and a two-sentence reply at A2 is not the kind of problem it pays for. The
+   * models that don't reason ignore this either way.
+   */
+  thinking: boolean;
   nativeLang: string; // learner's first language — explanations are given in it
   targetLang: string; // language being practised
   cefr: string; // self-reported level (A1–C2), "" until the first conversation places them
@@ -115,6 +124,7 @@ export const defaultSettings: Settings = {
   openrouterKey: "",
   lmstudioModel: "local-model",
   lmstudioHost: "http://localhost:1234/v1",
+  thinking: false,
   nativeLang: detectNativeLang(),
   targetLang: "Spanish",
   cefr: "B1",

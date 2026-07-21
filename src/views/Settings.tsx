@@ -909,6 +909,17 @@ export default function SettingsView({
               )}
             </div>
           )}
+
+          {/* Sits with the model rather than under Coaching: it is a property of
+              the model chosen above, and it is the first thing to reach for when
+              a provider that should be quick is not. */}
+          <div className="sec" style={{ marginTop: 22 }}>Speed</div>
+          {toggleRow(
+            "Let the model think first",
+            "Better answers from reasoning models, at the cost of a longer silence before the coach starts — the thinking happens before the first word appears. Models that don't reason are unaffected.",
+            settings.thinking,
+            () => onChange({ thinking: !settings.thinking }),
+          )}
         </>
       )}
 

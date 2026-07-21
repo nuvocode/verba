@@ -4,6 +4,8 @@ import { getProvider, type ChatMessage } from "./providers";
 import {
   buildSystem,
   parseTurn,
+  partialReply,
+  TURN_MAX_TOKENS,
   vocabPrompt,
   parseVocab,
   summaryPrompt,
@@ -60,6 +62,24 @@ const CONF_START = 50;
 const TITLE_SETTLES_AT = 8;
 
 /**
+ * A provider `onDelta` handler that keeps the raw text and publishes the reply
+ * inside it as it grows.
+ *
+ * The deltas are fragments of a JSON object, not of the reply, so most of them
+ * move nothing on screen — `partialReply` returns "" until the reply key opens,
+ * and again for a model that nested its answer. Publishing those blanks would
+ * clear a bubble mid-sentence, so an empty read is treated as "no news".
+ */
+function live(publish: (text: string) => void): (chunk: string) => void {
+  let raw = "";
+  return (chunk) => {
+    raw += chunk;
+    const so_far = partialReply(raw);
+    if (so_far) publish(so_far);
+  };
+}
+
+/**
  * One conversation with the coach. Lives above the router so switching to Read
  * or opening ⌘K mid-sentence doesn't throw the session away.
  */
@@ -77,6 +97,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   // conversation carried on. Raised once per adapter, and cleared when the next
   // turn starts so a server that came back doesn't leave a stale warning behind.
   const [notice, setNotice] = useState("");
+  // The coach's reply as it arrives, before the turn's JSON has closed and the
+  // corrections and suggestions are known. Rendered as the last bubble and
+  // handed over to `msgs` in the same commit the finished turn lands in.
+  const [streaming, setStreaming] = useState("");
   const [reflecting, setReflecting] = useState(false);
   const [reflection, setReflection] = useState<Reflection | null>(null);
   const [confidence, setConfidence] = useState(CONF_START);
@@ -164,17 +188,26 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         } catch {
           sessionId.current = null; // DB unavailable — the conversation still works
         }
-        history.current.push({ role: "user", content: "(Begin the conversation. Greet me and start.)" });
-        const raw = await getProvider(settings).chat(history.current, { json: true });
+        history.current.push({
+          role: "user",
+          content: "(Begin the conversation. Greet me and start.)",
+        });
+        const raw = await getProvider(settings).chat(history.current, {
+          json: true,
+          maxTokens: TURN_MAX_TOKENS,
+          onDelta: live(setStreaming),
+        });
         const turn = parseTurn(raw);
         history.current.push({ role: "assistant", content: turn.reply });
         if (sessionId.current) await addMessage(sessionId.current, "assistant", turn.reply);
+        setStreaming(""); // same commit as the message that replaces it
         setMsgs([{ role: "ai", text: turn.reply, corrections: [], inline: false }]);
         setSuggestions(turn.suggestions);
         say(turn.reply);
       } catch (e: any) {
         setError(String(e?.message ?? e));
       } finally {
+        setStreaming(""); // a half-streamed reply is not a turn — it must not linger
         setBusy(false);
       }
     },
@@ -196,12 +229,19 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
       setBusy(true);
       try {
-        const raw = await getProvider(settings).chat(history.current, { json: true });
+        const raw = await getProvider(settings).chat(history.current, {
+          json: true,
+          maxTokens: TURN_MAX_TOKENS,
+          onDelta: live(setStreaming),
+        });
         const turn = parseTurn(raw);
         history.current.push({ role: "assistant", content: turn.reply });
         if (sessionId.current) await addMessage(sessionId.current, "assistant", turn.reply).catch(() => {});
 
         const worst = turn.corrections.find((c) => c.severity === "severe") ?? turn.corrections[0];
+        // Dropped in the same commit the real message lands in — anywhere earlier
+        // and the DB write above sits between them as a frame of empty screen.
+        setStreaming("");
         setMsgs((m) => {
           const next = [...m];
           if (next[idx])
@@ -235,6 +275,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       } catch (e: any) {
         setError(String(e?.message ?? e));
       } finally {
+        setStreaming(""); // a half-streamed reply is not a turn — it must not linger
         setBusy(false);
       }
     },
@@ -381,6 +422,8 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
           role: "user",
           content: `Step out of the roleplay for one message. Answer this question about ${settings.targetLang} in ${settings.nativeLang}, clearly and briefly, as plain prose (no JSON): ${q}`,
         });
+        // Not streamed: an aside is short prose, and the live bubble is labelled
+        // and laid out as a scenario turn — it would carry the wrong voice here.
         const raw = await getProvider(settings).chat(ctx);
         setMsgs((m) => [...m, { role: "ai", text: raw.trim(), corrections: [], inline: false, isAsk: true }]);
       } catch (e: any) {
@@ -398,6 +441,8 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     /** Writing direction of the target language — target text is laid out with it. */
     dir: pack?.direction ?? "ltr",
     msgs,
+    /** The coach's reply mid-flight: render it as the last bubble while it lasts. */
+    streaming,
     suggestions,
     input,
     setInput,

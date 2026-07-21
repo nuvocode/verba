@@ -45,6 +45,17 @@ export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack
   ].join("\n");
 }
 
+/**
+ * Ceiling on one conversational turn.
+ *
+ * A turn measures around 280 tokens — a two-sentence reply, a correction or two,
+ * three suggestions — so this is roughly two and a half times what the prompt asks
+ * for. It is not there to shape the answer but to end a model that has stopped
+ * answering and started rambling: without it, a turn that goes wrong goes wrong for
+ * as long as the model feels like it, and the learner watches a spinner throughout.
+ */
+export const TURN_MAX_TOKENS = 700;
+
 export type Severity = "minor" | "severe";
 
 /**
@@ -72,6 +83,52 @@ export interface TurnResult {
   suggestions: string[];
 }
 
+/** The JSON escapes worth decoding mid-stream; `\uXXXX` is handled separately. */
+const ESCAPES: Record<string, string> = { '"': '"', "\\": "\\", "/": "/", n: "\n", r: "\r", t: "\t", b: "\b", f: "\f" };
+
+/**
+ * The reply so far, read out of a turn JSON that is still arriving.
+ *
+ * "reply" is the first key the model writes, and it is about a fifth of the bytes in
+ * a finished turn — the rest is corrections and suggestions the learner is not reading
+ * yet. Pulling the reply out as it lands is what turns a four-second wait into a
+ * one-second one; `parseTurn` still has the last word once the object closes.
+ *
+ * Returns "" when there is nothing showable yet, which is also the answer for a model
+ * that nested its real object inside "reply" — `parseTurn` unwraps that, and
+ * half-rendered JSON should never reach the learner in the meantime.
+ */
+export function partialReply(raw: string): string {
+  const key = raw.indexOf('"reply"');
+  if (key < 0) return "";
+  const colon = raw.indexOf(":", key + 7);
+  if (colon < 0) return "";
+  const open = raw.indexOf('"', colon + 1);
+  if (open < 0) return "";
+
+  let out = "";
+  for (let i = open + 1; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === '"') break; // the reply is closed; the rest of the object is not ours
+    if (ch !== "\\") {
+      out += ch;
+      continue;
+    }
+    const esc = raw[i + 1];
+    if (esc === undefined) break; // escape split across chunks — wait for the rest
+    if (esc === "u") {
+      const hex = raw.slice(i + 2, i + 6);
+      if (hex.length < 4) break; // ditto, mid-codepoint
+      out += String.fromCharCode(parseInt(hex, 16));
+      i += 5;
+      continue;
+    }
+    out += ESCAPES[esc] ?? esc;
+    i += 1;
+  }
+  return out.trimStart().startsWith("{") || out.includes('"reply"') ? "" : out;
+}
+
 /** Defensive parse: models sometimes wrap JSON in prose or code fences. */
 export function parseTurn(raw: string): TurnResult {
   let obj = extractJson(raw);
@@ -79,7 +136,10 @@ export function parseTurn(raw: string): TurnResult {
   // nesting the real answer — fences and all — inside "reply". Unwrap one level.
   if (typeof obj?.reply === "string" && obj.reply.includes('"reply"')) obj = extractJson(obj.reply) ?? obj;
   return {
-    reply: typeof obj?.reply === "string" ? obj.reply : raw.trim(),
+    // When the object won't parse — a stray quote in the suggestions array is the
+    // common one — the reply is still sitting in the text, and reading it out beats
+    // showing the learner the raw JSON the fallback used to print.
+    reply: typeof obj?.reply === "string" ? obj.reply : partialReply(raw) || raw.trim(),
     corrections: Array.isArray(obj?.corrections)
       ? obj.corrections
           .filter((c: any) => c && c.original && c.fixed)

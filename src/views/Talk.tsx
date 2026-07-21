@@ -44,7 +44,9 @@ export default function Talk({
 
   useEffect(() => {
     scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: "smooth" });
-  }, [talk.msgs.length, talk.busy]);
+    // `streaming` is in here so a reply that outgrows the viewport as it arrives
+    // keeps its last line in view, rather than scrolling once it has finished.
+  }, [talk.msgs.length, talk.busy, talk.streaming]);
 
   // Which of the day's talking blocks this conversation closes out. Matched on the scenario
   // actually being practised — the plan's role-play names one, the conversation block is
@@ -312,7 +314,19 @@ export default function Talk({
                 </div>
               ))}
 
-              {talk.busy && <div className="typing">…</div>}
+              {/* The reply as it lands. It carries no corrections yet — those
+                  arrive with the rest of the turn, and this bubble is replaced
+                  by the real message the moment they do. */}
+              {talk.streaming && (
+                <div className="msg ai">
+                  <div className="who">COACH</div>
+                  <div className="text" dir={talk.dir}>
+                    {talk.streaming}
+                  </div>
+                </div>
+              )}
+
+              {talk.busy && !talk.streaming && <div className="typing">…</div>}
               {talk.error && <div className="err">{talk.error}</div>}
               {/* A degraded turn, not a broken one — the conversation kept going. The
                   fix is always one panel away, so say where. */}
