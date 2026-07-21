@@ -25,11 +25,19 @@ export interface Cue {
 /**
  * A situation that lasts. `idle` is the ordinary case: talking, or waiting.
  *
- * The task also asks for a calm neutral during the reflection, and there is no
- * mode for it because there is nothing to be calm: Talk.tsx returns the wrap-up
- * from an early branch above the rail, so the face is unmounted for the whole of
- * it. Coming back remounts it, which re-reads the counters rather than replaying
- * them — no stale correction fires on the way in.
+ * There is no mode for the reflection, and that is now a decision rather than an
+ * accident. The wrap-up is a document — counts, the corrections to revisit, the
+ * words kept, the summary — and it is read, not talked to. A character standing
+ * beside it turns a report into a conversation, and it would be a silent
+ * character at that: nothing is spoken there, so the face would have only its
+ * idle loop to run. The coach speaks in the reflection through the summary it
+ * wrote, which is the right register for the one screen that tells you what you
+ * got wrong.
+ *
+ * Talk.tsx returns the wrap-up from an early branch above the rail, so the face
+ * is unmounted for the whole of it — and coming back remounts it, which re-reads
+ * the counters rather than replaying them. No stale correction fires on the way
+ * in, which is a second reason to leave this alone.
  */
 export type Mode = "idle" | "listening" | "attending" | "thinking";
 

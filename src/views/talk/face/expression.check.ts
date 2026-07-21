@@ -63,11 +63,11 @@ assert.equal(expressionFor(null, "attending", 0), "attending");
 assert.equal(expressionFor(null, "thinking", 0), "thinking");
 assert.equal(expressionFor(null, "idle", 0), "neutral");
 
-// There is deliberately no "reflecting" mode: Talk.tsx returns the wrap-up from a
-// branch above the rail, so the face is unmounted for the whole of it. If that
-// ever changes, this is the line that should start failing to compile.
+// No "reflecting" mode, by decision: the wrap-up is a document, read rather than
+// talked to, and the face is unmounted for all of it. See the `Mode` doc comment
+// for the reasoning — this is settled, not pending.
 const modes: Mode[] = ["idle", "listening", "attending", "thinking"];
-assert.equal(modes.length, 4);
+for (const m of modes) assert.ok(EXPRESSIONS[expressionFor(null, m, 0)], `mode ${m} must name a face`);
 
 // ---- which situation wins ----
 // The learner acting outranks the coach working. A face that looks away to think
