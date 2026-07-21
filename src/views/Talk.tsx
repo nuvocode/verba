@@ -4,6 +4,7 @@ import type { BlockKind } from "../lib/learn";
 import type { Day } from "../lib/useDay";
 import type { Talk as TalkState } from "../lib/useTalk";
 import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
+import Face from "./talk/Face";
 
 // Where the reflection sends them, named by what the plan has next. The wording is the
 // day's, not this screen's — Talk never decides that reading (or anything) comes after.
@@ -388,6 +389,8 @@ export default function Talk({
         </div>
 
         <div className="rail">
+          <Face />
+
           {goals.length > 0 && (
             <>
               <div className="lbl">Scenario goals</div>

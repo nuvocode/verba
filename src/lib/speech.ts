@@ -20,6 +20,7 @@
 
 import { fetch } from "@tauri-apps/plugin-http";
 import { invoke } from "@tauri-apps/api/core";
+import * as voice from "./voice.ts";
 
 export interface SpeakOptions {
   locale?: string; // BCP-47, e.g. "es-ES"
@@ -89,8 +90,17 @@ export function webSpeech(): SpeechAdapter {
         const v = pickVoice(opts.locale, opts.voiceHint);
         if (v) u.voice = v;
         u.rate = opts.rate ?? 0.95;
-        u.onend = () => resolve();
-        u.onerror = () => resolve(); // never hang the UI on a TTS hiccup
+        const done = () => {
+          voice.synthetic(false);
+          resolve();
+        };
+        u.onend = done;
+        u.onerror = done; // never hang the UI on a TTS hiccup
+        // This tier speaks outside the webview, so there is no audio to measure —
+        // the coach's mouth runs on a synthetic curve instead, nudged onto each
+        // word by whatever boundary events the synthesiser bothers to fire.
+        u.onboundary = () => voice.boundary();
+        voice.synthetic(true);
         synth.speak(u);
       });
     },
@@ -111,6 +121,9 @@ export function webSpeech(): SpeechAdapter {
 
     cancel() {
       synth?.cancel();
+      // A cancelled utterance fires no `end` on every engine — close the mouth here
+      // too, or an interrupted reply leaves the coach mid-syllable forever.
+      voice.synthetic(false);
       recognition?.stop?.();
     },
   };
@@ -157,10 +170,18 @@ function record(onStart: (r: MediaRecorder) => void, maxMs = 60_000): Promise<Bl
   });
 }
 
-/** Play returned audio bytes to the end. Resolves on error too — a TTS hiccup must not hang the turn. */
+/**
+ * Play returned audio bytes to the end. Resolves on error too — a TTS hiccup must not hang the turn.
+ *
+ * Three of the four tiers land here — bundled, local and cloud all come back as
+ * bytes — which makes this the one place the coach's face has to be wired to.
+ * `attach` is best-effort by construction: it never throws and never delays the
+ * play, and if it cannot measure the element the audio is untouched.
+ */
 function play(bytes: ArrayBuffer, mime: string, hold: (a: HTMLAudioElement) => void): Promise<void> {
   const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
   const a = new Audio(url);
+  voice.attach(a);
   hold(a);
   return new Promise<void>((resolve) => {
     a.onended = a.onerror = () => {

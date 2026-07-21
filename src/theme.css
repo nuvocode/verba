@@ -192,6 +192,22 @@ input { font: inherit; }
 .meter { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .meter > div { height: 100%; background: var(--accent); border-radius: 2px; transition: width .4s; }
 
+/* The coach's face. Mouth frames come from lib/voice.ts, driven by the audio;
+   the breathing and the blink are the character's own. It sits at the top of the
+   rail rather than beside a message on purpose: the stream scrolls, and a face
+   that scrolls away is a face nobody sees while it is talking. */
+.face { display: flex; flex-direction: column; align-items: center; gap: 9px; padding-bottom: 26px; margin-bottom: 26px; border-bottom: 1px solid var(--line); }
+.face svg { width: 92px; height: 92px; color: var(--ink2); animation: vbreathe 4.6s ease-in-out infinite; }
+/* Frames are swapped, not tweened — but every mouth path is written with the same
+   commands, so a browser that can interpolate `d` softens the change for free. */
+.face .m { transition: d .07s linear; }
+.face .lbl { margin-bottom: 0; }
+@keyframes vbreathe { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-1.5px) scale(1.012); } }
+/* The sway is the part that makes people ill; the mouth is the content. Keep the
+   mouth tracking the voice and drop the idle motion (the blink goes with it, in
+   the component — a timer that fires nothing is still a timer). */
+@media (prefers-reduced-motion: reduce) { .face svg { animation: none; } }
+
 /* reflection */
 .refl { max-width: 760px; margin: 0 auto; padding: 64px 32px 80px; animation: vfade .45s ease both; }
 .refl h1 { font-size: 40px; margin: 12px 0 30px; }

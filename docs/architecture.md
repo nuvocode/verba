@@ -127,6 +127,7 @@ node --experimental-strip-types src/lib/phase2.check.ts   # pack/scenario valida
 node --experimental-strip-types src/lib/phase3.check.ts   # daily plan engine + metrics + coaching + registry
 node --experimental-strip-types src/lib/lang.check.ts     # segmentation, punctuation, pack guidance reaching every prompt
 node --experimental-strip-types src/lib/speech.check.ts   # the speech ladder, and every tier degrading to the OS voice
+node --experimental-strip-types src/lib/voice.check.ts   # the coach's mouth: no flicker on a wobbling level
 node --experimental-strip-types src/lib/backup.check.ts  # backup envelope, SQL literal escaping, the sync decision
 ```
 
