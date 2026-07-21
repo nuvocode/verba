@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Settings } from "../lib/settings";
 import type { Day } from "../lib/useDay";
-import { allVocab, reviewVocab, type VocabRow } from "../lib/db";
+import { allVocab, deleteVocab, reviewVocab, type VocabRow } from "../lib/db";
 import { getPack } from "../lib/packs";
-import { cloze, strength, type Grade } from "../lib/srs";
+import { strength, type Grade } from "../lib/srs";
+import { suspect } from "../lib/vocab";
 
 const GRADES: [string, Grade, string][] = [
   ["Slipped", 0, "1"],
@@ -49,11 +50,32 @@ export default function Memory({
   }, [load]);
 
   const now = Date.now();
-  const due = words.filter((w) => w.due <= now);
-  const settled = words.filter((w) => w.due > now);
+  // Cards the old, looser capture let in: a time, a name, a card with no meaning on
+  // the back. They are pulled out of the deck's own groups and shown together, because
+  // the honest thing to do with a card that cannot be reviewed is offer to delete it —
+  // not quietly keep resurfacing it.
+  const junk = words.filter((w) => suspect(w) !== null);
+  const good = words.filter((w) => suspect(w) === null);
+  const due = good.filter((w) => w.due <= now);
+  const settled = good.filter((w) => w.due > now);
+
+  /** Drop a card. Optimistic — the row leaves the list before the delete lands. */
+  const drop = useCallback(async (id: number) => {
+    setWords((ws) => ws.filter((w) => w.id !== id));
+    setQueue((q) => q.filter((c) => c.id !== id));
+    await deleteVocab(id).catch((e) => setError(String(e?.message ?? e)));
+  }, []);
+
+  /** Clear the whole "needs a look" group in one go. */
+  const dropAllJunk = useCallback(async () => {
+    const ids = junk.map((w) => w.id);
+    setWords((ws) => ws.filter((w) => !ids.includes(w.id)));
+    for (const id of ids) await deleteVocab(id).catch(() => {});
+  }, [junk]);
 
   const start = useCallback(() => {
-    const q = words.filter((w) => w.due <= Date.now());
+    // Only reviewable cards are queued: a card with no meaning has no back to reveal.
+    const q = words.filter((w) => w.due <= Date.now() && suspect(w) === null);
     if (!q.length) return;
     setQueue(q);
     setIdx(0);
@@ -87,6 +109,21 @@ export default function Memory({
     },
     [queue, idx, day, load],
   );
+
+  /**
+   * Let go of the card in front of them, mid-review.
+   *
+   * `drop` filters it out of the queue, which slides the next card into the same
+   * index — so there is nothing to advance. Dropping the last one still closes the
+   * block out: they did the session, they just ended it by pruning.
+   */
+  const dropCard = useCallback(async () => {
+    const card = queue[idx];
+    if (!card) return;
+    setRevealed(false);
+    await drop(card.id);
+    if (idx + 1 >= queue.length) void day.complete("vocab");
+  }, [queue, idx, drop, day]);
 
   // Review-mode keys. App stands down while this is mounted (onCaptureKeys).
   useEffect(() => {
@@ -126,32 +163,38 @@ export default function Memory({
               <div style={{ fontSize: 12.5, color: "var(--ink3)", marginBottom: 14 }}>
                 You met this {card.reps > 0 ? `${card.reps} review(s) ago` : "for the first time recently"}.
               </div>
-              <div className="cloze" dir={dir}>
-                {cloze(card.term, card.example)}
+
+              {/* The card asks one thing: what does this mean? The sentence it was met
+                  in stands underneath as context — it is not what is being tested, and
+                  the meaning stays behind the reveal, where an answer belongs. */}
+              <div className="q" dir={dir}>
+                {card.term}
               </div>
-              <div style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 34 }}>
-                meaning: <span style={{ fontStyle: "italic" }}>{card.translation || "—"}</span>
-              </div>
+              {card.example && (
+                <div className="ctx" dir={dir}>
+                  “{card.example}”
+                </div>
+              )}
 
               {!revealed ? (
                 <button className="btn ghost" onClick={() => setRevealed(true)}>
-                  Reveal <span className="kbd">space</span>
+                  Reveal the meaning <span className="kbd">space</span>
                 </button>
               ) : (
                 <div style={{ borderTop: "1px solid var(--line)", paddingTop: 24, animation: "vfade .25s ease both" }}>
-                  <div className="term" dir={dir}>
-                    {card.term}
-                  </div>
-                  <div dir={dir} style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 28 }}>
-                    {card.example}
-                  </div>
-                  <div style={{ display: "flex", gap: 10 }}>
+                  <div className="a">{card.translation}</div>
+                  <div style={{ display: "flex", gap: 10, marginTop: 28 }}>
                     {GRADES.map(([label, g, kbd]) => (
                       <button key={g} className={`grade ${g === 0 ? "miss" : ""}`} onClick={() => void grade(g)}>
                         {label} <span className="k">{kbd}</span>
                       </button>
                     ))}
                   </div>
+                  {/* Judging a card is only half of reviewing it: a word they'll never
+                      need is not a word to grade harder, it is one to let go of. */}
+                  <button className="drop" onClick={() => void dropCard()}>
+                    Drop this card
+                  </button>
                 </div>
               )}
             </>
@@ -182,8 +225,9 @@ export default function Memory({
 
   // ---- the collection ----
   const groups = [
-    { label: `Due for resurfacing · ${due.length}`, words: due },
-    { label: "Settled — resting in long-term memory", words: settled },
+    { label: `Due for resurfacing · ${due.length}`, words: due, junk: false },
+    { label: "Settled — resting in long-term memory", words: settled, junk: false },
+    { label: `Needs a look · ${junk.length}`, words: junk, junk: true },
   ].filter((g) => g.words.length);
 
   return (
@@ -191,7 +235,7 @@ export default function Memory({
       <div className="mem-head">
         <div>
           <div className="eyebrow">
-            Memory · {words.length} {words.length === 1 ? "word" : "words"} · {settings.targetLang}
+            Memory · {good.length} {good.length === 1 ? "word" : "words"} · {settings.targetLang}
           </div>
           <h1 className="display">Everything you've met, in context.</h1>
         </div>
@@ -202,8 +246,8 @@ export default function Memory({
         )}
       </div>
       <div className="intro">
-        Nothing here was typed into a list. Words arrive from your conversations and reading, and resurface exactly when
-        you're about to forget them.
+        Nothing here was typed into a list, and nothing lands here on its own — a word arrives because you kept it while
+        reading, or left it in place after a conversation. Each one resurfaces just before you'd forget it.
       </div>
 
       {error && <div className="err">{error}</div>}
@@ -217,7 +261,20 @@ export default function Memory({
 
       {groups.map((g) => (
         <div key={g.label} style={{ marginBottom: 40 }}>
-          <div className="sec">{g.label}</div>
+          <div className="sec" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <span>{g.label}</span>
+            {g.junk && (
+              <button style={{ font: "inherit", letterSpacing: "inherit", color: "var(--sev)" }} onClick={() => void dropAllJunk()}>
+                Remove all {g.words.length}
+              </button>
+            )}
+          </div>
+          {g.junk && (
+            <div style={{ fontSize: 13, color: "var(--ink2)", padding: "12px 4px 4px", lineHeight: 1.6 }}>
+              These were captured before Verba was choosy about what a card is — a time from a story, a name, a card with
+              no meaning on the back. They aren't resurfaced.
+            </div>
+          )}
           {g.words.map((w) => {
             const str = strength(w);
             return (
@@ -225,13 +282,18 @@ export default function Memory({
                 <div className="term" dir={dir}>
                   {w.term}
                 </div>
-                <div className="gloss">{w.translation}</div>
+                <div className="gloss">{g.junk ? <em>{suspect(w)}</em> : w.translation}</div>
                 <div className="ctx" dir={dir}>
                   “{w.example}”
                 </div>
+                {/* Rendered empty rather than omitted for a junk row: the strength rail
+                    is what holds the × in the same column all the way down the list. */}
                 <div className="bar">
-                  <div className={str < 0.4 ? "weak" : ""} style={{ width: `${Math.round(str * 100)}%` }} />
+                  {!g.junk && <div className={str < 0.4 ? "weak" : ""} style={{ width: `${Math.round(str * 100)}%` }} />}
                 </div>
+                <button className="x" title="Remove from Memory" onClick={() => void drop(w.id)}>
+                  ×
+                </button>
               </div>
             );
           })}

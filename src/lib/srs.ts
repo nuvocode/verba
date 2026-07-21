@@ -33,19 +33,12 @@ export function schedule(card: CardState, grade: Grade, now: number): CardState 
   return { ease, interval, reps, due: now + interval * DAY_MS };
 }
 
-const BLANK = "‗‗‗‗‗";
-
-/**
- * Blank a term out of the sentence it was met in — recall in context beats recall
- * in isolation. Falls back to appending the blank when the term doesn't appear
- * verbatim (an inflected form, or no example at all).
- */
-export function cloze(term: string, example: string): string {
-  if (!example.trim()) return BLANK;
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const out = example.replace(new RegExp(escaped, "i"), BLANK);
-  return out === example ? `${example} — ${BLANK}` : out;
-}
+// A cloze front used to live here: the term blanked out of the sentence it was met
+// in. It was dropped because it could not hold its own promise — a separable verb
+// ("walk through" met as "Let me walk you through the menu") never matches
+// literally, so the blank was tacked onto the end of an otherwise complete sentence
+// and the card asked nothing. Memory now tests the term against its meaning, and
+// shows the sentence as context; see Memory.tsx.
 
 /** How settled a card is, 0..1: a fresh card reads weak, a three-week interval solid. */
 export function strength(card: { interval: number }): number {

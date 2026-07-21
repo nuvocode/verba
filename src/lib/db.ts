@@ -1,5 +1,6 @@
 import Database from "@tauri-apps/plugin-sql";
 import { newCard, schedule, type Grade } from "./srs";
+import { worthLearning } from "./vocab";
 import { planMemory, type Memory, type MemoryWrite } from "./prompts";
 
 let dbPromise: Promise<Database> | null = null;
@@ -234,22 +235,68 @@ export interface VocabRow {
 // Every read and write below is scoped to one language: a deck belongs to the
 // language it was met in, and switching language must not resurface the old one.
 
+/**
+ * Add a card, if it is one.
+ *
+ * Every write goes through `worthLearning` here rather than at each call site, so
+ * there is exactly one door into the deck and no surface can quietly widen it.
+ *
+ * Returns whether a new row was actually written — false covers both "not
+ * vocabulary" and "already captured", which is what a caller wanting to say
+ * "added" or "already in Memory" needs to know.
+ */
 export async function addVocab(
   lang: string,
   item: { term: string; translation: string; example: string },
-): Promise<void> {
+): Promise<boolean> {
+  if (!worthLearning(item).ok) return false;
   const db = await getDb();
   // INSERT OR IGNORE keeps existing SRS progress if the term was already captured.
-  await db.execute(
+  const r = await db.execute(
     `INSERT OR IGNORE INTO vocab (lang, term, translation, example, ease, interval, due, reps, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [lang, item.term, item.translation, item.example, newCard.ease, newCard.interval, Date.now(), newCard.reps, Date.now()],
+    [lang, item.term.trim(), item.translation.trim(), item.example, newCard.ease, newCard.interval, Date.now(), newCard.reps, Date.now()],
   );
+  return (r.rowsAffected ?? 0) > 0;
 }
+
+/** The learner dropping a card. A deck they cannot prune is a deck they stop opening. */
+export async function deleteVocab(id: number): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM vocab WHERE id = $1", [id]);
+}
+
+/**
+ * Drop a card by its term — the conversation wrap-up's undo, which never saw a row id.
+ *
+ * Safe there because the wrap-up only offers cards that conversation actually
+ * inserted; a term that was already in the deck is never on that list, so this
+ * cannot reach a card carrying weeks of review history.
+ */
+export async function deleteVocabTerm(lang: string, term: string): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM vocab WHERE lang = $1 AND term = $2", [lang, term]);
+}
+
+/**
+ * The SQL half of `suspect()` — the two rules that can be expressed in SQLite, and
+ * between them the two that produced every junk card the old capture let through: a
+ * row with nothing on its back, and a term that is really a number, time or date.
+ *
+ * Counting has to agree with reviewing. Memory refuses to queue these, so a plan
+ * block promising "3 cards due" that opens onto nothing would be the app lying to
+ * the learner about their own day. The finer rules in `suspect()` (a term that
+ * echoes its meaning, a term the length of a clause) are left out: they cost a
+ * handful of over-counted rows, and only until the learner clears the group.
+ */
+const REVIEWABLE = "TRIM(COALESCE(translation, '')) <> '' AND term NOT GLOB '*[0-9]*'";
 
 export async function dueVocab(lang: string, now = Date.now()): Promise<VocabRow[]> {
   const db = await getDb();
-  return db.select<VocabRow[]>("SELECT * FROM vocab WHERE lang = $1 AND due <= $2 ORDER BY due ASC", [lang, now]);
+  return db.select<VocabRow[]>(
+    `SELECT * FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE} ORDER BY due ASC`,
+    [lang, now],
+  );
 }
 
 export async function allVocab(lang: string): Promise<VocabRow[]> {
@@ -259,9 +306,12 @@ export async function allVocab(lang: string): Promise<VocabRow[]> {
 
 export async function vocabCounts(lang: string, now = Date.now()): Promise<{ total: number; due: number }> {
   const db = await getDb();
-  const total = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM vocab WHERE lang = $1", [lang]);
+  const total = await db.select<{ n: number }[]>(
+    `SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND ${REVIEWABLE}`,
+    [lang],
+  );
   const due = await db.select<{ n: number }[]>(
-    "SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND due <= $2",
+    `SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE}`,
     [lang, now],
   );
   return { total: total[0]?.n ?? 0, due: due[0]?.n ?? 0 };

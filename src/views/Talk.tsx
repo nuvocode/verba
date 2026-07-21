@@ -213,12 +213,15 @@ export default function Talk({
             {r.words.length > 0 && (
               <>
                 <div className="eyebrow" style={{ marginBottom: 14 }}>
-                  Captured to memory
+                  Kept in memory · drop the ones you already know
                 </div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 40 }}>
                   {r.words.map((w) => (
                     <div className="wchip" key={w.term}>
                       {w.term} <span>— {w.translation}</span>
+                      <button className="x" title="Remove from Memory" onClick={() => void talk.dropWord(w.term)}>
+                        ×
+                      </button>
                     </div>
                   ))}
                 </div>

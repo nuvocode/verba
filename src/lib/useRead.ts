@@ -21,11 +21,18 @@ import { getPack } from "./packs";
 import { addVocab, recentMemories, saveReading, saveMetrics, vocabCounts, listReadings, getReading, type ReadingRow } from "./db";
 
 export interface WordPopover {
+  /** What was tapped, as it appears in the text. */
   term: string;
   gloss: string;
+  /** The dictionary form the card is filed under; falls back to `term`. Empty until the gloss lands. */
+  lemma: string;
+  /** The sentence it was met in — the card's context, kept so a later save still has it. */
+  sentence: string;
   x: number;
   y: number;
   flip: boolean;
+  /** Set once this word is in the deck: by this tap, or because it already was. */
+  saved: boolean;
 }
 
 /** Kept in step with `.popover` in theme.css — the clamp below needs to know how wide it is. */
@@ -138,7 +145,13 @@ export function useRead(settings: Settings) {
     }
   }, [text, busy, settings, pack]);
 
-  /** Tap a word: the coach explains it and it goes straight into Memory. */
+  /**
+   * Tap a word: the coach explains it. Nothing is written.
+   *
+   * It used to save every word it explained, which is how a deck fills with words
+   * the reader only wanted to get past. Wanting to understand a word is not wanting
+   * to learn it — the save is a second, deliberate act (`saveWord`).
+   */
   const explain = useCallback(
     async (word: string, sentence: string, rect: DOMRect) => {
       const term = bareWord(word);
@@ -148,25 +161,36 @@ export function useRead(settings: Settings) {
       // hang it off the window, so the anchor is kept half a popover away from both edges.
       const half = POPOVER_WIDTH / 2 + 8;
       const x = Math.min(Math.max(rect.left + rect.width / 2, half), window.innerWidth - half);
-      setPopover({ term, gloss: "…", x, y: flip ? rect.top : rect.bottom, flip });
+      const here = { term, gloss: "…", lemma: "", sentence, x, y: flip ? rect.top : rect.bottom, flip };
+      setPopover({ ...here, saved: saved.includes(term) });
       try {
         const raw = await getProvider(settings).chat(
           [{ role: "user", content: explainWordPrompt(settings, term, sentence) }],
           { json: true },
         );
         const w = parseWordExplanation(raw);
-        const gloss = w.meaning || "—";
-        setPopover((p) => (p && p.term === term ? { ...p, gloss } : p));
-        await addVocab(settings.targetLang, { term: w.lemma || term, translation: gloss, example: sentence }).catch(
-          () => {},
-        );
-        setSaved((s) => (s.includes(term) ? s : [...s, term]));
+        setPopover((p) => (p && p.term === term ? { ...p, gloss: w.meaning || "—", lemma: w.lemma || term } : p));
       } catch (e: any) {
         setPopover((p) => (p && p.term === term ? { ...p, gloss: String(e?.message ?? e) } : p));
       }
     },
-    [settings],
+    [settings, saved],
   );
+
+  /**
+   * Keep the word in front of them. The deliberate half of `explain`.
+   *
+   * A word whose explanation failed has no meaning to file, so there is nothing to
+   * save; `addVocab` would turn it away anyway. The tapped word is marked saved
+   * either way the write goes — "already in Memory" is still in Memory.
+   */
+  const saveWord = useCallback(async () => {
+    const p = popover;
+    if (!p || !p.lemma || p.gloss === "…") return;
+    await addVocab(settings.targetLang, { term: p.lemma, translation: p.gloss, example: p.sentence }).catch(() => {});
+    setPopover((cur) => (cur && cur.term === p.term ? { ...cur, saved: true } : cur));
+    setSaved((s) => (s.includes(p.term) ? s : [...s, p.term]));
+  }, [popover, settings.targetLang]);
 
   /** Load the reading library for the empty state. */
   const loadLibrary = useCallback(async () => {
@@ -248,13 +272,12 @@ export function useRead(settings: Settings) {
       results[i] = ok;
       return { ...cur, results };
     });
-    // Only a missed cloze names an exact word worth reviewing (a missed mcq answer is
-    // a whole native phrase), so only cloze seeds a card. Gloss is left blank — the
-    // card exists to resurface the word; its meaning fills in the next time it's tapped.
-    if (!ok && q.kind === "cloze" && q.answer) {
-      await addVocab(settings.targetLang, { term: q.answer, translation: "", example: q.line }).catch(() => {});
-    }
-  }, [check, settings.targetLang]);
+    // A missed comprehension answer used to seed a card here, with a deliberately
+    // blank gloss. It was the wrong instinct twice over: the answer is usually a
+    // detail of the passage (a time, a name, a number) rather than a word, and a
+    // card with no meaning on the back cannot be reviewed at all. Missing a question
+    // is a comprehension signal — it feeds the metrics below, and nothing else.
+  }, [check]);
 
   const nextCheckQuestion = useCallback(() => {
     setCheck((c) => (!c || c.step >= c.questions.length - 1 ? c : { ...c, step: c.step + 1 }));
@@ -311,6 +334,8 @@ export function useRead(settings: Settings) {
     generate,
     extend,
     explain,
+    /** Commit the word in the popover to Memory — nothing is captured without it. */
+    saveWord,
     /** Past passages (newest first) and the loader/opener behind the empty-state library. */
     library,
     loadLibrary,

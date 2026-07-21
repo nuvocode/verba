@@ -1,9 +1,9 @@
-// Runnable self-check for the Verba-shell logic: correction gating, cloze recall,
-// card strength, word normalisation, and the Coach's metric round-trip.
+// Runnable self-check for the Verba-shell logic: correction gating, card strength,
+// word normalisation, and the Coach's metric round-trip.
 // Run: node --experimental-strip-types src/lib/phase4.check.ts
 import assert from "node:assert";
 import { shouldShowInline, parseTurn } from "./prompts.ts";
-import { cloze, strength, newCard, schedule } from "./srs.ts";
+import { strength, newCard, schedule } from "./srs.ts";
 import { bareWord, parseReading } from "./reading.ts";
 import { computeMetrics, estimateLevelV2, metricsFromRow } from "./metrics.ts";
 
@@ -36,15 +36,11 @@ assert(nested.reply === "That sounds fun!", "nested reply is unwrapped, not prin
 assert(nested.corrections[0].fixed === "I played the Uncharted video game", "nested corrections survive");
 assert(nested.suggestions[0] === "It was Uncharted 4.", "nested suggestions survive");
 
-// --- cloze: recall in context, and a safe fallback when the term is inflected ---
-assert(
-  cloze("marchando", "¡Marchando! ¿Algo de comer?") === "¡‗‗‗‗‗! ¿Algo de comer?",
-  "the term is blanked out of its own sentence, case-insensitively",
-);
-assert(cloze("regatear", "A veces regatea el precio.").endsWith("— ‗‗‗‗‗"), "an inflected term appends the blank");
-assert(cloze("x", "") === "‗‗‗‗‗", "no example still gives something to recall");
-// Regex metacharacters in a term must not blow up the RegExp.
-assert(cloze("¿qué?", "Dijo ¿qué? otra vez.") === "Dijo ‗‗‗‗‗ otra vez.", "punctuation in the term is escaped");
+// The cloze front these assertions covered is gone: its own fallback — appending a
+// blank to a complete sentence when the term was inflected — made a card that asked
+// nothing, which is exactly what a separable verb ("walk you through") always hit.
+// Memory now tests the term against its meaning. See vocab.check.ts for the gate that
+// decides what becomes a card at all.
 
 // --- card strength tracks the SRS interval ---
 assert(strength(newCard) < 0.4, "a brand-new card reads weak");

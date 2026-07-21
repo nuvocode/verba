@@ -14,7 +14,7 @@ import { scoreAnswer, type Question } from "./questions";
 import { getPack } from "./packs";
 import { getSpeech } from "./speech";
 import { computeMetrics } from "./metrics";
-import { addVocab, recentMemories, saveListening, saveMetrics, vocabCounts } from "./db";
+import { recentMemories, saveListening, saveMetrics, vocabCounts } from "./db";
 
 /** One chapter's worth of the learner's work — kept per chapter so it survives moving on. */
 export interface ChapterProgress {
@@ -176,14 +176,12 @@ export function useListening(settings: Settings) {
       next[chapterIdx] = { ...next[chapterIdx], results };
       return next;
     });
-    // A missed cloze already names the exact word worth reviewing; a missed multiple
-    // choice does not (its answer is a whole native phrase), so only cloze seeds a card.
-    if (!ok && q.kind === "cloze" && q.answer) {
-      // ponytail: translation is left blank here — the card exists to resurface the
-      // word the learner missed; its gloss gets filled the next time they tap it.
-      await addVocab(settings.targetLang, { term: q.answer, translation: "", example: q.line }).catch(() => {});
-    }
-  }, [chapter, here, chapterIdx, settings.targetLang]);
+    // A missed cloze used to seed a card here, with its meaning deliberately left
+    // blank. Both halves were wrong: the answer is usually a detail of the piece (a
+    // time, a name, a number) rather than a word, and a card with nothing on its
+    // back cannot be reviewed. A missed question is a comprehension signal, and the
+    // accuracy this feeds is where it belongs.
+  }, [chapter, here, chapterIdx]);
 
   /** Move to the next question in this chapter (the last one hands off to the chapter, not here). */
   const nextQuestion = useCallback(() => {

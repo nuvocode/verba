@@ -25,6 +25,7 @@ import {
   addMessage,
   addVocab,
   createSession,
+  deleteVocabTerm,
   setSummary,
   setTitle,
   saveLevelSignal,
@@ -272,7 +273,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     setError("");
     const userTexts = msgs.filter((m) => m.role === "user" && !m.isAsk).map((m) => m.text);
     const corrections = msgs.flatMap((m) => m.corrections);
-    let words: { term: string; translation: string }[] = [];
+    const words: { term: string; translation: string }[] = [];
     let summary: SessionSummary = { summary: "", strengths: [], focus: [] };
 
     try {
@@ -281,9 +282,14 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         [...history.current, { role: "user", content: vocabPrompt(settings, pack) }],
         { json: true },
       );
-      const items = parseVocab(vocabRaw);
-      for (const it of items) await addVocab(settings.targetLang, it).catch(() => {});
-      words = items.map((i) => ({ term: i.term, translation: i.translation }));
+      // Only the cards this conversation actually added are reported back, and so
+      // only those can be dropped in the wrap-up: a term already in the deck carries
+      // review history that a stray tap has no business erasing. `addVocab` is also
+      // where the capture gate lives, so anything that isn't vocabulary never counts.
+      for (const it of parseVocab(vocabRaw)) {
+        const added = await addVocab(settings.targetLang, it).catch(() => false);
+        if (added) words.push({ term: it.term, translation: it.translation });
+      }
 
       const sumRaw = await provider.chat(
         [...history.current, { role: "user", content: summaryPrompt(settings, pack) }],
@@ -342,6 +348,22 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     setReflection({ ...summary, turns: userTexts.length, corrections, words });
   }, [scenario, busy, msgs, settings, pack]);
 
+  /**
+   * Strike a word off the wrap-up. The conversation proposes; the learner disposes.
+   *
+   * Written first and undone here, rather than held back and committed on the way
+   * out: the reflection can be left in four ways, one of which is walking away to
+   * another screen, and a capture that depends on leaving correctly is a capture
+   * that gets lost.
+   */
+  const dropWord = useCallback(
+    async (term: string) => {
+      await deleteVocabTerm(settings.targetLang, term).catch(() => {});
+      setReflection((r) => (r ? { ...r, words: r.words.filter((w) => w.term !== term) } : r));
+    },
+    [settings.targetLang],
+  );
+
   /** ⌘K → "ask the coach": a side question, answered in the learner's own language. */
   const ask = useCallback(
     async (question: string) => {
@@ -395,6 +417,8 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     mic,
     end,
     ask,
+    /** Remove one of the wrap-up's captured words from the deck again. */
+    dropWord,
     exitReflection: () => setReflecting(false),
     reset: () => setScenario(null),
     /** The scenario a plan block points at, falling back to free conversation. */

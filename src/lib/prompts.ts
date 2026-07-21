@@ -1,6 +1,15 @@
 import { level, type Settings } from "./settings.ts";
 import type { Scenario } from "./scenarios";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
+import { worthLearning } from "./vocab.ts";
+
+/**
+ * The most cards one conversation may offer.
+ *
+ * It was eight, and eight a session is how a deck reaches seventy-eight entries
+ * nobody chose. Five is a ceiling, not a target — the prompt asks for fewer.
+ */
+export const MAX_VOCAB_PER_SESSION = 5;
 
 export type { Scenario } from "./scenarios";
 export { packGuidance } from "./packs/schema.ts";
@@ -92,28 +101,38 @@ export function parseTurn(raw: string): TurnResult {
 /** Prompt to pull useful vocabulary out of a finished/ongoing conversation. */
 export function vocabPrompt(s: Settings, pack?: LanguagePack): string {
   return [
-    `From the conversation so far, pick up to 8 useful ${s.targetLang} words or short phrases that a ${level(s)} learner should study.`,
+    `From the conversation so far, pick at most 5 ${s.targetLang} words or short phrases that a ${level(s)} learner should study.`,
     packGuidance(pack),
     `Answer with ONLY a JSON object: { "items": [ { "term": "the ${s.targetLang} word/phrase in its dictionary form", "translation": "its meaning in ${s.nativeLang}", "example": "a short example sentence in ${s.targetLang} that uses the term" } ] }.`,
     `Prefer words that actually appeared in the conversation. Skip trivial words (the, a, is).`,
-    // The card is studied as a cloze: Memory blanks "term" out of "example", so
-    // the two must match literally or the learner gets a blank tacked on the end.
-    `The "example" MUST contain "term" written exactly as you wrote it — do not inflect, conjugate or decline it there.`,
+    // Fewer, better cards. The deck used to take eight a session and fill with things
+    // the learner already used correctly, or with details of what was said rather
+    // than with language — and a deck like that stops being worth opening.
+    `Pick fewer than 5 — or none at all — rather than padding the list. Skip anything the learner already used correctly.`,
+    `Never pick a proper name, a number, a time, a date, or a price: those are details of the conversation, not vocabulary.`,
+    `Every "translation" must be a real meaning in ${s.nativeLang}. Never leave it empty and never repeat the term back.`,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
+/**
+ * The candidates a conversation offers. Held to the same gate the deck is, here
+ * rather than at the write, so the wrap-up shows the learner exactly the cards that
+ * would be kept — never a chip that would silently fail to save.
+ */
 export function parseVocab(raw: string): { term: string; translation: string; example: string }[] {
   const obj = extractJson(raw);
   if (!Array.isArray(obj?.items)) return [];
   return obj.items
     .filter((v: any) => v && v.term)
     .map((v: any) => ({
-      term: String(v.term),
-      translation: String(v.translation ?? ""),
-      example: String(v.example ?? ""),
-    }));
+      term: String(v.term).trim(),
+      translation: String(v.translation ?? "").trim(),
+      example: String(v.example ?? "").trim(),
+    }))
+    .filter((v: { term: string; translation: string; example: string }) => worthLearning(v).ok)
+    .slice(0, MAX_VOCAB_PER_SESSION);
 }
 
 /** Prompt for an end-of-session summary. */

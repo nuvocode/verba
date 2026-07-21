@@ -75,7 +75,10 @@ for (const [name, prompt] of [
 ] as const)
   assert(!prompt.includes("Language notes"), `${name} without a pack must not invent guidance`);
 
-// The vocab card is studied as a cloze, so the model is told to keep them alignable.
-assert.match(vocabPrompt(s, pack), /MUST contain "term" written exactly/, "cloze alignment is asked for");
+// The card is a term and its meaning, so the meaning is not optional — and the
+// details of the conversation (a name, a time, a price) are not terms. The cloze
+// alignment this used to demand is gone with the cloze itself.
+assert.match(vocabPrompt(s, pack), /Never leave it empty/, "a card with no meaning may not be proposed");
+assert.match(vocabPrompt(s, pack), /Never pick a proper name, a number, a time/, "story details are not vocabulary");
 
 console.log("lang.check ✓");
