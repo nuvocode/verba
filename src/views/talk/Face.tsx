@@ -1,30 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import * as voice from "../../lib/voice";
+import { CUE_MS, expressionFor, rose, type Cue, type Mode } from "./face/expression";
+import { EXPRESSIONS } from "./face/paths";
+import { Brows, Eyes, Glasses, Head, MouthPart } from "./face/rig";
 
-// The coach, given a body. A line-drawn head that opens its mouth on the sound
-// lib/voice.ts is measuring, blinks on its own, and breathes.
+// The coach, given a face. It opens its mouth on the sound lib/voice.ts is
+// measuring, blinks on its own, and breathes.
+//
+// The drawing lives in face/paths.ts and face/rig.tsx; this file is only the
+// driver — what frame, and when. That split is the point of v1.5: the character
+// was redrawn from scratch and this logic did not have to change with it.
 //
 // Not a mascot. The app is set in a serif and reads like a printed page, so the
-// character is drawn the way an editorial illustration would be: one stroke
-// weight, ink, no fill anywhere except the mouth, which is the one place the
-// terracotta accent is allowed. Everything that says "app character" — the round
-// eyes, the gradient, the wave — is deliberately absent.
+// character is drawn the way an editorial illustration would be: filled contour
+// with the weight shifting down the face, ink everywhere, and exactly one
+// terracotta accent — the glasses. Everything that says "app character" is
+// deliberately absent.
 //
-// Five frames, and that is the whole animation budget: four mouths plus a blink.
-// It works because cartoons have always worked this way. Nobody reads a mouth for
-// phonemes; they read it for "that one is talking", and amplitude is enough to
-// carry that. Real lip-sync (visemes, phoneme timings) is v2 and a separate task.
-
-/** Mouth outlines, all sharing one command structure so the browser can tween `d`. */
-const MOUTHS: Record<voice.Mouth, string> = {
-  // Silence: a closed line with the faintest upward curve. It reads as composure
-  // when nothing is playing, and as a shut mouth between syllables when something is.
-  rest: "M52 79 q8 -2 16 0 q-8 1 -16 0 Z",
-  closed: "M52 79 q8 0 16 0 q-8 0 -16 0 Z",
-  half: "M52 78 q8 4 16 0 q-8 -2 -16 0 Z",
-  open: "M52 76 q8 9 16 0 q-8 -5 -16 0 Z",
-  wide: "M52 75 q8 13 16 0 q-8 -7 -16 0 Z",
-};
+// Nobody reads a mouth for phonemes; they read it for "that one is talking", and
+// amplitude carries that. Real lip-sync (visemes, phoneme timings) is still a
+// separate task.
 
 /** Blink gaps, in ms. Evenly spaced blinking reads as a metronome, not a face. */
 const BLINK_MIN = 2500;
@@ -34,10 +29,37 @@ const BLINK_MS = 120;
 const reducedMotion = () =>
   typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-export default function Face() {
+export interface FaceProps {
+  /** The learner has something in the composer. */
+  typing?: boolean;
+  /** Corrections delivered so far this session. Watched for increases, not read. */
+  corrections?: number;
+  /** Scenario goals ticked, and how many there are. */
+  goalsHit?: number;
+  goalsTotal?: number;
+}
+
+/**
+ * Everything defaults to the quiet case, so a caller that passes nothing gets
+ * exactly what v1 showed.
+ */
+export default function Face({
+  typing = false,
+  corrections = 0,
+  goalsHit = 0,
+  goalsTotal = 0,
+}: FaceProps) {
   const [mouth, setMouth] = useState<voice.Mouth>("rest");
   const [blinking, setBlinking] = useState(false);
+  const [cue, setCue] = useState<Cue | null>(null);
   const still = useRef(reducedMotion());
+
+  const mode: Mode = typing ? "listening" : "idle";
+  // Reduced motion keeps the mouth (it is the content) and drops everything the
+  // face does on its own — the sway is the part that makes people ill, and an
+  // expression that arrives unbidden is the same category of motion.
+  const shown = still.current ? "neutral" : expressionFor(cue, mode, performance.now());
+  const { brow, smiling, tilt } = EXPRESSIONS[shown];
 
   // The mouth. `subscribe` fires per animation frame while something is speaking,
   // but React is only told when the *frame* changes — hysteresis in mouthFor keeps
@@ -54,6 +76,37 @@ export default function Face() {
       state = next;
     });
   }, []);
+
+  // The moments. Both signals are counters that only ever climb during a session,
+  // so a rise is the event — no equality check on the payload, and nothing fires
+  // when a session ends and the counts drop back to zero.
+  //
+  // The smile waits for the *last* goal rather than each one. Talk.tsx ticks goals
+  // off by turn count (its own comment calls that a ponytail), so per-goal smiling
+  // would have the coach beaming through the opening three turns of every session
+  // regardless of what the learner said. All-goals-met fires once and is as true
+  // as the checkmarks beside it.
+  const seen = useRef({ corrections, goals: goalsHit });
+  const fade = useRef(0);
+  useEffect(() => {
+    const was = seen.current;
+    seen.current = { corrections, goals: goalsHit };
+    if (still.current) return;
+
+    const done = goalsTotal > 0 && goalsHit >= goalsTotal;
+    const kind: Cue["kind"] | null = rose(was.goals, goalsHit) && done
+      ? "smiling"
+      : rose(was.corrections, corrections)
+        ? "raised"
+        : null;
+    if (!kind) return;
+
+    setCue({ kind, at: performance.now() });
+    clearTimeout(fade.current);
+    fade.current = window.setTimeout(() => setCue(null), CUE_MS);
+  }, [corrections, goalsHit, goalsTotal]);
+
+  useEffect(() => () => clearTimeout(fade.current), []);
 
   // The blink. One timer, re-armed at a random gap — cheap enough to be free, and
   // the single thing that stops a silent character from reading as a static image.
@@ -79,46 +132,16 @@ export default function Face() {
 
   return (
     <div className="face">
-      <svg
-        viewBox="0 0 120 120"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden
-      >
-        {/* Skull with a jaw rather than an oval, a fringe rather than a hairline,
-            and a nose — the three things that separate a drawn face from a mascot. */}
-        <path d="M60 26 c14 0 24 11 24 25 0 6 -1 12 -3 18 -3 10 -11 19 -21 19 s-18 -9 -21 -19 c-2 -6 -3 -12 -3 -18 0 -14 10 -25 24 -25 Z" />
-        <path d="M37 46 c1 -13 11 -21 23 -21 c9 0 16 5 18 11" />
-        <path d="M55 25 c-3 7 -9 12 -16 15" />
-        <path d="M52 87 v7" />
-        <path d="M68 87 v7" />
-        <path d="M22 118 c4 -16 16 -24 38 -24 s34 8 38 24" />
-
-        {/* brows and nose: single strokes, and most of the character */}
-        <path d="M43 45 q7 -4 13 -1" />
-        <path d="M64 44 q6 -3 13 1" />
-        {/* The nose stops well short of the mouth on purpose — at `wide` the two
-            merge into one shape if the philtrum is any tighter than this. */}
-        <path d="M60 57 c0 4 -1 7 -3 8 q3 2 5 -1" />
-
-        {blinking ? (
-          <>
-            <path d="M44 55 q6 3 12 0" />
-            <path d="M64 55 q6 3 12 0" />
-          </>
-        ) : (
-          <>
-            <path d="M44 54 q6 -6 12 0 q-6 5 -12 0 Z" />
-            <path d="M64 54 q6 -6 12 0 q-6 5 -12 0 Z" />
-            <circle cx="50" cy="54" r="1.5" fill="currentColor" stroke="none" />
-            <circle cx="70" cy="54" r="1.5" fill="currentColor" stroke="none" />
-          </>
-        )}
-
-        <path className="m" d={MOUTHS[mouth]} fill="var(--accent)" />
+      <svg viewBox="0 0 120 120" aria-hidden>
+        {/* The tilt origin sits at the base of the neck rather than the centre of
+            the box; turning a head about its crown reads as a bobbing ball. */}
+        <g className="tilt" style={{ transform: `rotate(${tilt}deg)` }}>
+          <Head />
+          <Brows state={brow} />
+          <Eyes shut={blinking} />
+          <Glasses />
+          <MouthPart mouth={mouth} smiling={smiling} />
+        </g>
       </svg>
       <div className="lbl">Coach</div>
     </div>

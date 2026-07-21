@@ -201,12 +201,25 @@ input { font: inherit; }
 /* Frames are swapped, not tweened — but every mouth path is written with the same
    commands, so a browser that can interpolate `d` softens the change for free. */
 .face .m { transition: d .07s linear; }
+/* Brows change on an expression, not on a level, so they get a slower curve — the
+   mouth's 70ms would read as a twitch. Same `d` interpolation, same requirement:
+   every brow frame shares one command structure (see face/paths.ts). */
+.face .br { transition: d .22s ease; }
+/* The tilt origin is the base of the neck, in viewBox units. Nothing drives this
+   yet; the rig defines it so Part C only has to supply an angle. */
+.face .tilt { transform-origin: 60px 96px; transition: transform .5s cubic-bezier(.22,.61,.36,1); }
 .face .lbl { margin-bottom: 0; }
 @keyframes vbreathe { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-1.5px) scale(1.012); } }
 /* The sway is the part that makes people ill; the mouth is the content. Keep the
    mouth tracking the voice and drop the idle motion (the blink goes with it, in
    the component — a timer that fires nothing is still a timer). */
-@media (prefers-reduced-motion: reduce) { .face svg { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .face svg { animation: none; }
+  /* The component already pins the expression to neutral, so there is nothing to
+     tween — but a transition left armed would still animate the one change from
+     whatever was on screen when the preference flipped. */
+  .face .br, .face .tilt { transition: none; }
+}
 
 /* reflection */
 .refl { max-width: 760px; margin: 0 auto; padding: 64px 32px 80px; animation: vfade .45s ease both; }

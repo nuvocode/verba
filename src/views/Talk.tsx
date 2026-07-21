@@ -389,7 +389,14 @@ export default function Talk({
         </div>
 
         <div className="rail">
-          <Face />
+          {/* The face reacts to what the session is already doing — every one of
+              these is a count or a flag useTalk keeps anyway. See talk/face/. */}
+          <Face
+            typing={talk.input.trim() !== ""}
+            corrections={talk.msgs.reduce((n, m) => n + m.corrections.length, 0)}
+            goalsHit={Math.min(talk.userTurns, goals.length)}
+            goalsTotal={goals.length}
+          />
 
           {goals.length > 0 && (
             <>
