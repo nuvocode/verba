@@ -77,6 +77,48 @@ and unpacked atomically, so a corrupt download installs nothing.
 Whisper is given the active pack's language (`tr-TR` → `language=tr`), so a beginner's
 accent is not auto-detected as English. The same is true of the local-server tier.
 
+## Your data, and moving it
+
+Everything lives in two places on your machine: SQLite for history, cards and
+plans, and localStorage for settings, imported packs and scenarios. Neither is
+portable on its own, so `src/lib/backup.ts` folds both into one versioned JSON
+envelope — and puts it back.
+
+**Export / import** (Settings → Data) is that envelope as a file you name. Import
+*replaces*; it does not merge. Merging two divergent histories means reconciling
+autoincrement ids across ten tables that reference each other, and getting it
+subtly wrong shows up as a conversation quoting someone else's messages.
+
+**Sync folder** (`src/lib/vault.ts`) is the same envelope, kept current in a
+folder you choose — iCloud Drive, Google Drive, Syncthing, a USB stick. Point a
+second machine at it and your history, deck and setup arrive with nothing to
+reconfigure; a reinstall does the same from the first onboarding screen.
+
+The database is **not** moved into that folder, though `tauri-plugin-sql` would
+allow it. A live SQLite file on a sync service is a known way to lose one: `.db`,
+`-wal` and `-shm` sync independently and out of order, iCloud evicts files it
+thinks are cold, and two machines open at once produce `verba 2.db` rather than a
+merge. So the database stays local and what goes in the folder is a snapshot,
+written whole and swapped in by `rename` — a file a sync daemon is good at. Sync
+is therefore session-granular, not keystroke-granular, which for one learner on
+two machines is the right trade.
+
+Two facts decide every sync, in eight lines (`decide()` in `vault.ts`): has the
+folder changed since we last agreed with it, and have we. Both changed is the one
+case a human is asked about, and the side not chosen is written out as
+`verba-conflict-….json` rather than dropped.
+
+Two things worth knowing before touching this code:
+
+- **Every DB write goes through one door** (`write()` in `lib/db.ts`) so the vault
+  learns that something changed. A screen that announces its own writes is a
+  screen that will forget.
+- **A restore is one `execute` call.** The plugin takes a pool connection per
+  call, so a transaction spread over several calls is only a transaction if the
+  pool happens to cooperate. It usually does — which is worse than never, because
+  a short probe passes and the real restore then dies mid-way with
+  `(code: 517) database is locked`. One call is one connection by construction.
+
 ## Verify the pure logic
 
 ```bash
@@ -85,6 +127,7 @@ node --experimental-strip-types src/lib/phase2.check.ts   # pack/scenario valida
 node --experimental-strip-types src/lib/phase3.check.ts   # daily plan engine + metrics + coaching + registry
 node --experimental-strip-types src/lib/lang.check.ts     # segmentation, punctuation, pack guidance reaching every prompt
 node --experimental-strip-types src/lib/speech.check.ts   # the speech ladder, and every tier degrading to the OS voice
+node --experimental-strip-types src/lib/backup.check.ts  # backup envelope, SQL literal escaping, the sync decision
 ```
 
 The bundled engine has its own tests, which really download a model, really speak

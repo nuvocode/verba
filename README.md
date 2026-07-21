@@ -47,8 +47,11 @@ server, nothing on the network.
   models download on demand and run in-process.
 - **It remembers.** Words you stumble on become a spaced-repetition deck, and the
   deck feeds tomorrow's session.
-- **Your data stays put.** Everything lives in a local SQLite file. There is no
-  server to sign up to, because there is no server.
+- **Your data stays put — and it's yours to move.** Everything lives in a local
+  SQLite file. There is no server to sign up to, because there is no server. Export
+  it to one file whenever you like, or point Verba at a folder your own sync service
+  watches (iCloud Drive, Google Drive, Syncthing, a USB stick) and pick up on another
+  machine — same words, same history, nothing to set up again.
 - **Eight languages, and adding one is a folder.** English, Spanish, French, German,
   Japanese, Turkish, Italian, Portuguese — see [CONTRIBUTING.md](./CONTRIBUTING.md).
 

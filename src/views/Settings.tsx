@@ -25,6 +25,7 @@ import { importPack, listPacks, originLabel, packDocs, packOrigin, registry, rem
 import { importScenario, listScenarios } from "../lib/scenarios";
 import { allMemories, deleteMemory, MEMORY_BUDGET, type MemoryRow } from "../lib/db";
 import { memoryDate } from "../lib/prompts";
+import DataPanel from "./DataPanel";
 
 /**
  * Is the speech server the learner typed actually there? Same shape as the model
@@ -412,6 +413,7 @@ const NAV = [
   ["speech", "Speech"],
   ["coaching", "Coaching"],
   ["memory", "User Memory"],
+  ["data", "Data"],
   ["extensions", "Extensions"],
 ] as const;
 
@@ -442,9 +444,12 @@ const TIMINGS: [CorrectionTiming, string, string][] = [
 export default function SettingsView({
   settings,
   onChange,
+  appVersion,
 }: {
   settings: Settings;
   onChange: (patch: Partial<Settings>) => void;
+  /** Stamped into every backup and snapshot, so a file says which Verba wrote it. */
+  appVersion: string;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [packJson, setPackJson] = useState("");
@@ -1105,6 +1110,8 @@ export default function SettingsView({
           )}
         </>
       )}
+
+      {tab === "data" && <DataPanel appVersion={appVersion} />}
 
       {tab === "extensions" && (
         <>

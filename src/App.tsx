@@ -15,6 +15,8 @@ import Listening from "./views/Listening";
 import Memory from "./views/Memory";
 import Coach from "./views/Coach";
 import SettingsView from "./views/Settings";
+import { ConflictDialog } from "./views/DataPanel";
+import { configure as configureVault, flush, type Conflict, type SyncResult } from "./lib/vault";
 import "./theme.css";
 
 export type Space = "onboarding" | "today" | "talk" | "read" | "listening" | "memory" | "coach" | "settings";
@@ -49,7 +51,7 @@ interface PaletteItem {
   run: () => void;
 }
 
-export default function App() {
+export default function App({ appVersion, boot }: { appVersion: string; boot: SyncResult & { error?: string } }) {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [space, setSpace] = useState<Space>(() =>
     !loadSettings().onboarded ? "onboarding" : isSettingsHash() ? "settings" : "today",
@@ -62,6 +64,10 @@ export default function App() {
   const [captured, setCaptured] = useState(false);
   // Replaying onboarding throws away the current setup — never on one stray click.
   const [confirmReplay, setConfirmReplay] = useState(false);
+  // Two machines edited the same sync folder. Raised by the launch reconcile in
+  // main.tsx, or by a push that found the folder had moved under it.
+  const [conflict, setConflict] = useState<Conflict | null>(boot.conflict ?? null);
+  const [syncErr, setSyncErr] = useState(boot.error ?? "");
 
   const update = useCallback((patch: Partial<Settings>) => {
     setSettings((s) => {
@@ -81,6 +87,23 @@ export default function App() {
   useEffect(() => {
     document.body.dataset.vtheme = settings.theme;
   }, [settings.theme]);
+
+  /**
+   * Hand the vault its two outbound edges: which version stamps a snapshot, and
+   * where a background failure or a clash is allowed to appear. Everything that
+   * *triggers* a push is already wired — every DB write goes through one door in
+   * lib/db.ts, and settings save through `update` below.
+   *
+   * The extra push when the window is hidden is the one that matters most in
+   * practice: the debounce is four seconds, and closing the lid on a finished
+   * conversation is exactly the moment a learner expects it to have been saved.
+   */
+  useEffect(() => {
+    configureVault(appVersion, { error: (e) => setSyncErr(String((e as any)?.message ?? e)), conflict: setConflict });
+    const onHide = () => document.visibilityState === "hidden" && void flush();
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  }, [appVersion]);
 
   // A bundled model id in settings is a claim about the disk, and the disk can be
   // cleared behind the app's back. Check it once, on the way in: a model that is gone
@@ -357,6 +380,13 @@ export default function App() {
     if (paletteOpen) paletteInput.current?.focus();
   }, [paletteOpen]);
 
+  // Rendered from both branches: a clash found at launch has to be answerable
+  // even by someone who is still in setup, having just pointed a fresh install
+  // at a folder that turned out to have moved.
+  const conflictDialog = conflict && (
+    <ConflictDialog remote={conflict.remote} appVersion={appVersion} onDone={() => setConflict(null)} />
+  );
+
   if (space === "onboarding")
     return (
       <div className="shell">
@@ -369,6 +399,7 @@ export default function App() {
           // Only a learner who already finished setup has somewhere to escape to.
           onExit={settings.onboarded ? () => go("today") : undefined}
         />
+        {conflictDialog}
       </div>
     );
 
@@ -452,10 +483,20 @@ export default function App() {
           />
         )}
         {space === "coach" && <Coach settings={settings} day={day} />}
-        {space === "settings" && <SettingsView settings={settings} onChange={update} />}
+        {space === "settings" && <SettingsView settings={settings} onChange={update} appVersion={appVersion} />}
       </div>
 
-      {escape && !paletteOpen && !confirmReplay && (
+      {/* A folder that couldn't be reached. Said once, dismissable, and never a
+          reason to stop working — the data is on this machine either way. */}
+      {syncErr && !conflict && (
+        <button className="escape" onClick={() => setSyncErr("")} title={syncErr}>
+          <span className="kbd">sync</span> Your sync folder couldn't be reached
+        </button>
+      )}
+
+      {conflictDialog}
+
+      {escape && !paletteOpen && !confirmReplay && !conflict && (
         <button className="escape" onClick={escape.run}>
           <span className="kbd">esc</span> {escape.label}
         </button>

@@ -1,4 +1,5 @@
 import { detectNativeLang } from "./langs.ts";
+import { markDirty } from "./vault.ts";
 import { migrateSpeech, type Tier } from "./speech.ts";
 import { DEFAULT_WPM } from "./prompter.ts";
 
@@ -161,4 +162,8 @@ export function loadSettings(): Settings {
 
 export function saveSettings(s: Settings): void {
   localStorage.setItem(KEY, JSON.stringify(s));
+  // Settings are half of what a second machine needs to not be reconfigured, so
+  // a sync folder has to hear about them exactly as loudly as it hears about a
+  // finished conversation. This is the one door they are written through.
+  markDirty();
 }

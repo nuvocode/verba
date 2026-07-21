@@ -2,12 +2,32 @@ import Database from "@tauri-apps/plugin-sql";
 import { newCard, schedule, type Grade } from "./srs";
 import { worthLearning } from "./vocab";
 import { planMemory, type Memory, type MemoryWrite } from "./prompts";
+import { markDirty } from "./vault";
 
 let dbPromise: Promise<Database> | null = null;
 
 export function getDb(): Promise<Database> {
   if (!dbPromise) dbPromise = init();
   return dbPromise;
+}
+
+/**
+ * Every write to the learner's data goes through here.
+ *
+ * Not for the SQL's sake — `db.execute` was fine — but because a sync folder has
+ * to know that something changed, and the only honest place to learn that is the
+ * statement that changed it. A screen that remembers to announce its own writes
+ * is a screen that will eventually forget, and the symptom would be a session
+ * that never reaches the other machine. One door, and `markDirty` is behind it.
+ *
+ * Schema migrations in `init` deliberately do *not* come through here: they run
+ * before `getDb` has resolved, and a table shape is not the learner's data.
+ */
+async function write(sql: string, params: unknown[] = []) {
+  const db = await getDb();
+  const r = await db.execute(sql, params);
+  markDirty();
+  return r;
 }
 
 async function init(): Promise<Database> {
@@ -165,20 +185,17 @@ async function migrateVocabToPerLanguage(db: Database): Promise<void> {
 // ---- sessions & messages ----
 
 export async function createSession(scenario: string): Promise<number> {
-  const db = await getDb();
-  const r = await db.execute(
-    "INSERT INTO sessions (scenario, started_at) VALUES ($1, $2)",
-    [scenario, Date.now()],
-  );
+  const r = await write("INSERT INTO sessions (scenario, started_at) VALUES ($1, $2)", [scenario, Date.now()]);
   return r.lastInsertId as number;
 }
 
 export async function addMessage(sessionId: number, role: string, content: string): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "INSERT INTO messages (session_id, role, content, created_at) VALUES ($1, $2, $3, $4)",
-    [sessionId, role, content, Date.now()],
-  );
+  await write("INSERT INTO messages (session_id, role, content, created_at) VALUES ($1, $2, $3, $4)", [
+    sessionId,
+    role,
+    content,
+    Date.now(),
+  ]);
 }
 
 export interface SessionRow {
@@ -210,13 +227,11 @@ export async function sessionMessages(sessionId: number): Promise<{ role: string
 }
 
 export async function setSummary(sessionId: number, summary: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("UPDATE sessions SET summary = $1 WHERE id = $2", [summary, sessionId]);
+  await write("UPDATE sessions SET summary = $1 WHERE id = $2", [summary, sessionId]);
 }
 
 export async function setTitle(sessionId: number, title: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("UPDATE sessions SET title = $1 WHERE id = $2", [title, sessionId]);
+  await write("UPDATE sessions SET title = $1 WHERE id = $2", [title, sessionId]);
 }
 
 // ---- vocabulary / SRS ----
@@ -250,9 +265,8 @@ export async function addVocab(
   item: { term: string; translation: string; example: string },
 ): Promise<boolean> {
   if (!worthLearning(item).ok) return false;
-  const db = await getDb();
   // INSERT OR IGNORE keeps existing SRS progress if the term was already captured.
-  const r = await db.execute(
+  const r = await write(
     `INSERT OR IGNORE INTO vocab (lang, term, translation, example, ease, interval, due, reps, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [lang, item.term.trim(), item.translation.trim(), item.example, newCard.ease, newCard.interval, Date.now(), newCard.reps, Date.now()],
@@ -262,8 +276,7 @@ export async function addVocab(
 
 /** The learner dropping a card. A deck they cannot prune is a deck they stop opening. */
 export async function deleteVocab(id: number): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM vocab WHERE id = $1", [id]);
+  await write("DELETE FROM vocab WHERE id = $1", [id]);
 }
 
 /**
@@ -274,8 +287,7 @@ export async function deleteVocab(id: number): Promise<void> {
  * cannot reach a card carrying weeks of review history.
  */
 export async function deleteVocabTerm(lang: string, term: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM vocab WHERE lang = $1 AND term = $2", [lang, term]);
+  await write("DELETE FROM vocab WHERE lang = $1 AND term = $2", [lang, term]);
 }
 
 /**
@@ -318,14 +330,16 @@ export async function vocabCounts(lang: string, now = Date.now()): Promise<{ tot
 }
 
 export async function reviewVocab(card: VocabRow, grade: Grade): Promise<void> {
-  const db = await getDb();
   const next = schedule({ ease: card.ease, interval: card.interval, reps: card.reps }, grade, Date.now());
-  await db.execute(
-    "UPDATE vocab SET ease = $1, interval = $2, reps = $3, due = $4 WHERE id = $5",
-    [next.ease, next.interval, next.reps, next.due, card.id],
-  );
+  await write("UPDATE vocab SET ease = $1, interval = $2, reps = $3, due = $4 WHERE id = $5", [
+    next.ease,
+    next.interval,
+    next.reps,
+    next.due,
+    card.id,
+  ]);
   // Log the review so weekly stats can count activity (no per-review timestamp on vocab).
-  await db.execute("INSERT INTO review_log (created_at) VALUES ($1)", [Date.now()]);
+  await write("INSERT INTO review_log (created_at) VALUES ($1)", [Date.now()]);
 }
 
 // ---- reading sessions ----
@@ -337,8 +351,7 @@ export async function saveReading(
   text: unknown,
   asked: { length?: string; topic?: string; cefr?: string } = {},
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
+  await write(
     "INSERT INTO reading_sessions (lang, title, text, created_at, length, topic, cefr) VALUES ($1, $2, $3, $4, $5, $6, $7)",
     [lang, title, JSON.stringify(text), Date.now(), asked.length ?? null, asked.topic?.trim() || null, asked.cefr ?? null],
   );
@@ -379,8 +392,7 @@ export async function saveListening(
   answers: unknown,
   accuracy: number,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
+  await write(
     "INSERT INTO listening_sessions (lang, title, piece, answers, accuracy, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
     [lang, title, JSON.stringify(piece), JSON.stringify(answers), accuracy, Date.now()],
   );
@@ -392,8 +404,7 @@ export async function saveLevelSignal(
   lang: string,
   sig: { estimate: string; confidence: string; rationale: string },
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
+  await write(
     "INSERT INTO level_signals (lang, estimate, confidence, rationale, created_at) VALUES ($1, $2, $3, $4, $5)",
     [lang, sig.estimate, sig.confidence, sig.rationale, Date.now()],
   );
@@ -425,8 +436,7 @@ export async function saveMetrics(
   },
   score: number,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
+  await write(
     `INSERT INTO session_metrics (lang, messages, words, unique_words, avg_sentence_len, avg_word_len, corrections, deck_size, score, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [lang, m.messages, m.words, m.uniqueWords, m.avgSentenceLen, m.avgWordLen, m.corrections, m.deckSize, score, Date.now()],
@@ -519,8 +529,7 @@ export async function saveDailySession(
   done: string[],
   recap: unknown | null,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
+  await write(
     `INSERT INTO daily_sessions (date, lang, plan, done, recap, created_at)
      VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT(date) DO UPDATE SET plan = excluded.plan, done = excluded.done, recap = excluded.recap`,
@@ -602,15 +611,14 @@ export async function allMemories(lang: string): Promise<MemoryRow[]> {
  */
 export async function saveMemories(lang: string, writes: MemoryWrite[], sessionId: number | null): Promise<void> {
   if (!writes.length) return;
-  const db = await getDb();
   const plan = planMemory(await allMemories(lang), writes);
 
   for (const w of plan) {
     if (w.replaces != null)
-      await db.execute("DELETE FROM memories WHERE id = $1 AND lang = $2", [w.replaces, lang]);
+      await write("DELETE FROM memories WHERE id = $1 AND lang = $2", [w.replaces, lang]);
     // OR IGNORE, because UNIQUE(lang, fact) is the last word on "told twice": the
     // normalised check in planMemory catches the re-wordings, this catches the rest.
-    await db.execute(
+    await write(
       "INSERT OR IGNORE INTO memories (lang, fact, source_session_id, created_at) VALUES ($1, $2, $3, $4)",
       [lang, w.fact, sessionId, Date.now()],
     );
@@ -619,8 +627,7 @@ export async function saveMemories(lang: string, writes: MemoryWrite[], sessionI
 
 /** The learner striking a line out. Nothing else in the app deletes a memory. */
 export async function deleteMemory(id: number): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM memories WHERE id = $1", [id]);
+  await write("DELETE FROM memories WHERE id = $1", [id]);
 }
 
 // ---- Phase 3: weekly coaching stats ----

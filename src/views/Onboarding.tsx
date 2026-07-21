@@ -6,6 +6,7 @@ import { listModels, type LocalProvider } from "../lib/models";
 import { getProvider } from "../lib/providers";
 import { CEFR_LEVELS, type Cefr } from "../lib/level";
 import { parsePlacement, placementPrompt, scorePlacement, type PlacementQ } from "../lib/placement";
+import { attach, detach, pickFolder, pull } from "../lib/vault";
 
 /** Every CEFR level is selectable — the test only proposes one. */
 const LEVELS: [Cefr, string, string][] = [
@@ -122,6 +123,38 @@ export default function Onboarding({
 }) {
   const packs = listPacks();
   const [step, setStep] = useState(0);
+
+  // ---- coming back rather than starting (step 0) ----
+  //
+  // The reason this lives in setup at all: a learner who reinstalled, or who is
+  // on their second machine, should never be asked their level and their
+  // interests again. Their answers are already in the folder. Offered only on a
+  // genuinely fresh install — on a replay there is local data that restoring
+  // would silently overwrite, and Settings → Data is where that conversation
+  // belongs, with its counts and its confirm.
+  const [restoring, setRestoring] = useState("");
+  const [restoreErr, setRestoreErr] = useState("");
+
+  const restoreFromFolder = async () => {
+    setRestoreErr("");
+    setRestoring("Opening…");
+    try {
+      const picked = await pickFolder();
+      if (!picked) return setRestoring("");
+      setRestoring("Reading the folder…");
+      const { meta, summary } = await attach(picked);
+      if (!meta || !summary) throw new Error("There's no Verba data in that folder yet.");
+      setRestoring("Restoring…");
+      await pull();
+      window.location.reload(); // the whole app is now someone else's — start it fresh
+    } catch (e: any) {
+      // Leave no half-attached folder behind: an aborted restore must not turn
+      // the next launch into a conflict dialog on an empty install.
+      detach();
+      setRestoreErr(String(e?.message ?? e));
+      setRestoring("");
+    }
+  };
 
   // ---- AI (step 0) ----
   const [prov, setProv] = useState<LocalProvider>(settings.provider === "lmstudio" ? "lmstudio" : "ollama");
@@ -339,6 +372,24 @@ export default function Onboarding({
         <button className="btn" style={{ marginTop: 32 }} disabled={!model.trim()} onClick={() => setStep(1)}>
           Continue →
         </button>
+
+        {!settings.onboarded && (
+          <div className="native" style={{ marginTop: 26 }}>
+            <strong>Used Verba before?</strong> If you keep your data in a synced folder — iCloud Drive, Google Drive, a
+            drive you carry — point Verba at it and your words, history and setup come back. Nothing here to answer
+            again.
+            <div style={{ marginTop: 10 }}>
+              <button className="btn sm ghost" onClick={() => void restoreFromFolder()} disabled={!!restoring}>
+                {restoring || "Restore from a folder…"}
+              </button>
+            </div>
+            {restoreErr && (
+              <div className="warn" style={{ marginTop: 10 }}>
+                {restoreErr}
+              </div>
+            )}
+          </div>
+        )}
       </>
     );
   };

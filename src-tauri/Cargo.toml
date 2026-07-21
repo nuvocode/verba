@@ -24,6 +24,10 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-http = "2"
+# Only for the pickers: the learner names a backup file or a sync folder. The
+# reading and writing is ours (src/vault.rs), so the webview never gets a
+# blanket filesystem scope.
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
