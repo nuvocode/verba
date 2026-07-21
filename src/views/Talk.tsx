@@ -274,6 +274,11 @@ export default function Talk({
 
   // ---- live conversation ----
   const goals = talk.scenario?.goals ?? [];
+  // What the coach has said in the scenario, in order. The face reads the count
+  // (the first one is the greeting) and the last line (for the marks a pleased
+  // coach uses). ⌘K asides are left out: they are the coach stepping out of the
+  // roleplay, and a smile belongs to the conversation, not to a footnote.
+  const coachSaid = talk.msgs.filter((m) => m.role === "ai" && !m.isAsk).map((m) => m.text);
 
   return (
     <div className="talk">
@@ -390,12 +395,16 @@ export default function Talk({
 
         <div className="rail">
           {/* The face reacts to what the session is already doing — every one of
-              these is a count or a flag useTalk keeps anyway. See talk/face/. */}
+              these is a count or a flag useTalk keeps anyway. See talk/face/.
+              Goals are deliberately not among them: they tick off by turn count
+              (see the ponytail below), and a coach smiling at a fake signal is
+              worse than one that doesn't smile. */}
           <Face
             typing={talk.input.trim() !== ""}
             corrections={talk.msgs.reduce((n, m) => n + m.corrections.length, 0)}
-            goalsHit={Math.min(talk.userTurns, goals.length)}
-            goalsTotal={goals.length}
+            confidence={talk.confidence}
+            coachTurns={coachSaid.length}
+            coachSaid={coachSaid[coachSaid.length - 1] ?? ""}
           />
 
           {goals.length > 0 && (

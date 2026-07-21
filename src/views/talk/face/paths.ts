@@ -31,15 +31,32 @@ import type { Mouth } from "../../../lib/voice";
  * filled with the terracotta accent; the accent now lives on the glasses, so the
  * mouth is ink, and v1's amplitudes at this width punch a black hole through the
  * lower third of the face. Measured, not copied.
+ *
+ * `rest` carries a 1px upward curve rather than sitting flat. A mouth drawn as a
+ * straight line is not neutral — it reads as withheld, and v1.5 shipped a coach
+ * people described as bored. The curve is the cheapest fix there is: same
+ * skeleton, one control point, and the face is benevolent at rest instead of
+ * blank. `smile` was deepened in the same pass, because a warm rest and the old
+ * smile were within half a pixel of each other and the cue would have vanished.
  */
 export const MOUTHS: Record<Mouth | "smile", string> = {
   closed: "M46 88 q14 0 28 0 q-14 0.9 -28 0 Z",
-  rest: "M46 88 q14 -3 28 0 q-14 2.6 -28 0 Z",
+  rest: "M46 85.6 q14 7.2 28 0 q-14 2 -28 0 Z",
   half: "M46 87.4 q14 5 28 0 q-14 -2.4 -28 0 Z",
   open: "M46 86.6 q14 9.5 28 0 q-14 -4.8 -28 0 Z",
   wide: "M46 86 q14 13.5 28 0 q-14 -6.8 -28 0 Z",
-  smile: "M46 86 q14 7 28 0 q-14 3.5 -28 0 Z",
+  smile: "M46 83.6 q14 10.6 28 0 q-14 7 -28 0 Z",
 };
+
+/**
+ * Where the corners of a mouth frame sit, which is what the eye reads as warmth:
+ * corners above the middle is a smile, level is a line. Parsed from the path
+ * rather than kept beside it, so the two cannot drift apart — `expression.check`
+ * uses it to hold the ordering closed → rest → smile.
+ */
+export function cornerY(d: string): number {
+  return Number(d.split(" ")[1]);
+}
 
 /**
  * How open the mouth is, that is the interior of it, relative to the linework.

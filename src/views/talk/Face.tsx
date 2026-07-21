@@ -1,6 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as voice from "../../lib/voice";
-import { CUE_MS, expressionFor, rose, type Cue, type Mode } from "./face/expression";
+import {
+  CUE_MS,
+  earnedSmile,
+  expressionFor,
+  looksPleased,
+  rose,
+  type Cue,
+  type Mode,
+} from "./face/expression";
 import { EXPRESSIONS } from "./face/paths";
 import { Brows, Eyes, Glasses, Head, MouthPart } from "./face/rig";
 
@@ -26,6 +34,13 @@ const BLINK_MIN = 2500;
 const BLINK_MAX = 5200;
 const BLINK_MS = 120;
 
+/**
+ * How long a smile stays owed while the coach is still talking. Longer than any
+ * single reply takes to speak, short enough that it cannot be paid out by some
+ * later utterance it had nothing to do with.
+ */
+const OWED_MS = 30_000;
+
 const reducedMotion = () =>
   typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -34,9 +49,12 @@ export interface FaceProps {
   typing?: boolean;
   /** Corrections delivered so far this session. Watched for increases, not read. */
   corrections?: number;
-  /** Scenario goals ticked, and how many there are. */
-  goalsHit?: number;
-  goalsTotal?: number;
+  /** The confidence signal shown in the rail. Watched for a full step, not read. */
+  confidence?: number;
+  /** Coach turns spoken this session — the first one is the greeting. */
+  coachTurns?: number;
+  /** What the coach said last. Read only for the marks it uses when it is pleased. */
+  coachSaid?: string;
 }
 
 /**
@@ -46,8 +64,9 @@ export interface FaceProps {
 export default function Face({
   typing = false,
   corrections = 0,
-  goalsHit = 0,
-  goalsTotal = 0,
+  confidence = 0,
+  coachTurns = 0,
+  coachSaid = "",
 }: FaceProps) {
   const [mouth, setMouth] = useState<voice.Mouth>("rest");
   const [blinking, setBlinking] = useState(false);
@@ -61,50 +80,80 @@ export default function Face({
   const shown = still.current ? "neutral" : expressionFor(cue, mode, performance.now());
   const { brow, smiling, tilt } = EXPRESSIONS[shown];
 
+  const fade = useRef(0);
+  /** When a smile was last earned but could not be seen. See the mouth effect. */
+  const owed = useRef(0);
+
+  /** Put a moment on the face and start its clock. */
+  const fire = useCallback((kind: Cue["kind"]) => {
+    setCue({ kind, at: performance.now() });
+    clearTimeout(fade.current);
+    fade.current = window.setTimeout(() => setCue(null), CUE_MS[kind]);
+  }, []);
+
   // The mouth. `subscribe` fires per animation frame while something is speaking,
   // but React is only told when the *frame* changes — hysteresis in mouthFor keeps
   // that down to a handful of renders a second rather than sixty.
+  //
+  // The end of an utterance is also where an owed smile is paid. Speech owns the
+  // mouth — `mouthPath` says so — so a smile cued while the coach is mid-sentence
+  // shows nothing but a brow, and every one of the three smile signals arrives
+  // exactly then, with the turn. Replaying it once the mouth comes back to rest is
+  // what makes it a smile the learner can actually see: the coach finishes its
+  // sentence, then smiles. With speech off no edge ever arrives and the first
+  // firing is the whole of it, which is also right.
   useEffect(() => {
     let state = voice.MOUTH_START;
     return voice.subscribe((level, speaking) => {
       if (!speaking) {
         state = voice.MOUTH_START;
-        return setMouth("rest");
+        setMouth("rest");
+        if (owed.current && performance.now() - owed.current < OWED_MS) {
+          owed.current = 0;
+          fire("smiling");
+        }
+        return;
       }
       const next = voice.mouthFor(level, state, performance.now());
       if (next.mouth !== state.mouth) setMouth(next.mouth);
       state = next;
     });
-  }, []);
+  }, [fire]);
 
-  // The moments. Both signals are counters that only ever climb during a session,
+  // The moments. Every signal here is a counter that only climbs during a session,
   // so a rise is the event — no equality check on the payload, and nothing fires
   // when a session ends and the counts drop back to zero.
   //
-  // The smile waits for the *last* goal rather than each one. Talk.tsx ticks goals
-  // off by turn count (its own comment calls that a ponytail), so per-goal smiling
-  // would have the coach beaming through the opening three turns of every session
-  // regardless of what the learner said. All-goals-met fires once and is as true
-  // as the checkmarks beside it.
-  const seen = useRef({ corrections, goals: goalsHit });
-  const fade = useRef(0);
+  // Three things earn a smile, and none of them is a goal: v1.5 smiled once a
+  // session, at "all goals met", which Talk.tsx derives from a turn count. The
+  // learner never saw it. What replaces it is the opening turn (a coach that
+  // greets you without smiling is a strange coach), the coach's own pleased
+  // emoji, and confidence climbing a full step. Together they land two to four
+  // times in a normal session, spread across it rather than spent at once.
+  //
+  // Warmth outranks correction on the rare turn where both land. The correction is
+  // on screen as text either way; the brow is only its echo, and a coach that
+  // withholds a smile to raise an eyebrow at you is the character v1.5 shipped.
+  const seen = useRef({ corrections, coachTurns });
+  const smiledAt = useRef(confidence);
   useEffect(() => {
     const was = seen.current;
-    seen.current = { corrections, goals: goalsHit };
+    seen.current = { corrections, coachTurns };
     if (still.current) return;
 
-    const done = goalsTotal > 0 && goalsHit >= goalsTotal;
-    const kind: Cue["kind"] | null = rose(was.goals, goalsHit) && done
-      ? "smiling"
-      : rose(was.corrections, corrections)
-        ? "raised"
-        : null;
+    const spoke = rose(was.coachTurns, coachTurns);
+    const warm =
+      (spoke && (coachTurns === 1 || looksPleased(coachSaid))) || earnedSmile(smiledAt.current, confidence);
+    const kind: Cue["kind"] | null = warm ? "smiling" : rose(was.corrections, corrections) ? "raised" : null;
     if (!kind) return;
 
-    setCue({ kind, at: performance.now() });
-    clearTimeout(fade.current);
-    fade.current = window.setTimeout(() => setCue(null), CUE_MS);
-  }, [corrections, goalsHit, goalsTotal]);
+    // A correction cancels an unpaid smile rather than queueing behind it: two
+    // reactions to one turn, arriving a sentence apart, is a face out of sync
+    // with its own conversation.
+    owed.current = kind === "smiling" ? performance.now() : 0;
+    if (kind === "smiling") smiledAt.current = confidence;
+    fire(kind);
+  }, [corrections, confidence, coachTurns, coachSaid, fire]);
 
   useEffect(() => () => clearTimeout(fade.current), []);
 
