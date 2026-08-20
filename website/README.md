@@ -92,11 +92,11 @@ npx wrangler pages deploy website --project-name=verba
 
 ## Keeping it honest
 
-The download links and the version badge are hard-coded to a release tag. When you cut
-a new one, update:
-
-- the `v0.1.0` in the hero eyebrow and the download eyebrow,
-- the six release URLs in the `#download` section.
+The download URLs in `template.html` are built from `{{version}}`, so they follow
+whatever the strings files say. When you cut a new release, set the version in each
+`strings/*.json` — three places per locale: the top-level `version` key, the hero
+eyebrow and the download eyebrow — and re-run `node build.cjs`. A locale that has no
+`version` key falls back to the app's own version from `package.json`.
 
 The screenshots in `assets/` are copies of `docs/screenshots/`. Recapture there, copy
 across, and the OG card (`assets/og.png`) only needs regenerating if the wording on it

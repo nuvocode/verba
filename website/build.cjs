@@ -13,6 +13,13 @@ const ROOT = __dirname;
 const STRINGS_DIR = path.join(ROOT, "strings");
 const TEMPLATE_PATH = path.join(ROOT, "template.html");
 
+// The app's own version, for any locale whose strings file has not been given one.
+// Hardcoding it here means a forgotten locale points at a release two versions old
+// and nobody notices; package.json is bumped for every release by definition.
+// ponytail: still one hand-edit per locale, because the version is inside translated
+// prose ("Download · v0.3.0"). Move those eyebrows to {{version}} if it gets tedious.
+const APP_VERSION = "v" + require("../package.json").version;
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
@@ -98,7 +105,7 @@ function main() {
   // 3. generate one page per language
   for (const lang of langs) {
     const strings = allStrings[lang];
-    const version = strings.version || "v0.1.0";
+    const version = strings.version || APP_VERSION;
     const versionUnderscore = version.replace(/^v/, ""); // "0.1.0"
 
     // pre-build the hreflang block and lang-links block
