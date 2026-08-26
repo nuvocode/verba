@@ -113,7 +113,7 @@ async function init(): Promise<Database> {
     );
     -- What the coach knows about the learner: durable facts, dated, one per row.
     -- Scoped to a language like every other table here — the record belongs to the
-    -- learner as a Spanish learner, and switching language starts a fresh one.
+    -- learner as a learner of that language, and switching language starts a fresh one.
     CREATE TABLE IF NOT EXISTS memories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lang TEXT NOT NULL,

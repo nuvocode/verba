@@ -7,6 +7,7 @@ import {
   type ProviderId,
   type Settings,
 } from "../lib/settings";
+import { langName } from "../lib/langs";
 import { CEFR_LEVELS, type CEFRLevel } from "../lib/model";
 import { deepgramHelp, listenBlocker, resolveTier, type Tier } from "../lib/speech";
 import {
@@ -348,17 +349,7 @@ const linkish = {
   textDecoration: "underline",
 } as const;
 
-const LANG_NAMES: Record<string, string> = {
-  en: "English",
-  es: "Spanish",
-  fr: "French",
-  de: "German",
-  it: "Italian",
-  pt: "Portuguese",
-  ja: "Japanese",
-  tr: "Turkish",
-};
-const langNames = (ls: string[]) => ls.map((l) => LANG_NAMES[l] ?? l).join(", ") || "any language";
+const langNames = (ls: string[]) => ls.map(langName).join(", ") || "any language";
 
 const PROVIDERS: {
   id: ProviderId;

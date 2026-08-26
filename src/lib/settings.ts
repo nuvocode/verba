@@ -9,6 +9,9 @@ import { CEFR_LEVELS, type CEFRLevel, type LearnerProfile } from "./model.ts";
 export const LOCAL_TTS_URL = "http://localhost:8880/v1";
 export const LOCAL_STT_URL = "http://localhost:8000/v1";
 
+/** The language a fresh install starts on — a product default, not display text (#14). */
+export const DEFAULT_TARGET_LANGUAGE = "Spanish";
+
 export type ProviderId = "ollama" | "openai" | "anthropic" | "gemini" | "openrouter" | "lmstudio";
 /** When a correction is shown inline: as it happens, only when severe, or only at reflection. */
 export type CorrectionTiming = "adaptive" | "live" | "delayed";
@@ -128,7 +131,7 @@ export const defaultSettings: Settings = {
   // stay 0/"" here: migrateProfile stamps them on first write, so defaultSettings
   // stays clock-free (a plan can be built without ever asking the clock).
   profile: {
-    targetLanguage: "Spanish",
+    targetLanguage: DEFAULT_TARGET_LANGUAGE,
     nativeLanguage: detectNativeLang(),
     level: "B1",
     interests: [],
@@ -194,7 +197,7 @@ export function migrateProfile<T extends Record<string, unknown>>(raw: T): T {
   return {
     ...rest,
     profile: {
-      targetLanguage: typeof targetLang === "string" ? targetLang : "Spanish",
+      targetLanguage: typeof targetLang === "string" ? targetLang : DEFAULT_TARGET_LANGUAGE,
       nativeLanguage: typeof nativeLang === "string" ? nativeLang : detectNativeLang(),
       level,
       levelEstimate: { value: 0, label: "A1", confidence: "low", sampleSize: 0 },
