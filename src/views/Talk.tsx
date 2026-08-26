@@ -4,6 +4,7 @@ import { levelOf } from "../lib/model";
 import type { ActivityKind } from "../lib/model";
 import type { Day } from "../lib/useDay";
 import type { Talk as TalkState } from "../lib/useTalk";
+import { talkSignals } from "../lib/signals";
 import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
 import Face from "./talk/Face";
 
@@ -61,9 +62,13 @@ export default function Talk({
     null;
 
   // A finished conversation closes out that block even if the learner walks away from the
-  // reflection without pressing anything.
+  // reflection without pressing anything — and hands over what it observed on the way out.
+  // No activity to hang them on means no signals: an invented ActivityId would quietly
+  // cut the evidence loose from the plan that produced it.
+  const closing = (day.plan?.activities ?? []).find((b) => b.kind === closes);
   useEffect(() => {
-    if (talk.reflection && closes && !day.isDone(closes)) void day.complete(closes);
+    if (talk.reflection && closes && !day.isDone(closes))
+      void day.complete(closes, closing ? talkSignals(closing.id, talk.reflection) : []);
   }, [talk.reflection]);
 
   // What the plan hands them next. Computed by skipping `closes` rather than reading

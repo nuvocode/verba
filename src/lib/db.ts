@@ -3,6 +3,7 @@ import { newCard, schedule, type Grade } from "./srs";
 import { worthLearning } from "./vocab";
 import { planMemory, type Memory, type MemoryWrite } from "./prompts";
 import { markDirty } from "./vault";
+import type { Signal, SignalKind } from "./model";
 
 let dbPromise: Promise<Database> | null = null;
 
@@ -122,6 +123,18 @@ async function init(): Promise<Database> {
       created_at INTEGER NOT NULL,
       UNIQUE(lang, fact)           -- the same sentence twice is still one fact
     );
+    -- §1.3 Signals: what a finished activity observed about the learner. Coach
+    -- groups these into weaknesses, so they are scoped to a language like every
+    -- other table here — evidence from one language may not argue about another.
+    CREATE TABLE IF NOT EXISTS signals (
+      id TEXT PRIMARY KEY,           -- SignalId (a uuid, not a rowid)
+      lang TEXT NOT NULL,
+      activity_id TEXT NOT NULL,     -- ActivityId within that day's plan
+      kind TEXT NOT NULL,            -- SignalKind
+      payload TEXT NOT NULL,         -- JSON; only ever read through signalLabel
+      observed_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS signals_lang_time ON signals (lang, observed_at);
   `);
   // Added after the first release: the Coach breaks the composite back out into
   // its components, and that needs avg word length. Existing DBs get it here.
@@ -518,6 +531,59 @@ export async function saveDailySession(
      ON CONFLICT(date) DO UPDATE SET plan = excluded.plan, done = excluded.done, recap = excluded.recap`,
     [date, lang, JSON.stringify(plan), JSON.stringify(done), recap ? JSON.stringify(recap) : null, Date.now()],
   );
+}
+
+/**
+ * Write a batch of signals. Empty is a no-op on purpose: a surface that observed
+ * nothing should not have to say so, and every caller wrapping this in an
+ * `if (signals.length)` would be the same check written six times.
+ *
+ * `payload` is carried through as opaque JSON — this door stores it, it never
+ * looks inside (signals.check.ts holds that line).
+ */
+export async function saveSignals(lang: string, signals: Signal[]): Promise<void> {
+  for (const s of signals) {
+    await write(
+      `INSERT INTO signals (id, lang, activity_id, kind, payload, observed_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [s.id, lang, s.activityId, s.kind, JSON.stringify(s.payload), s.observedAt],
+    );
+  }
+}
+
+interface SignalRow {
+  id: string;
+  activity_id: string;
+  kind: string;
+  payload: string;
+  observed_at: number;
+}
+
+/** Signals for one language, newest first — the evidence Coach reasons over. */
+export async function recentSignals(lang: string, n = 200): Promise<Signal[]> {
+  const db = await getDb();
+  const rows = await db.select<SignalRow[]>(
+    `SELECT id, activity_id, kind, payload, observed_at FROM signals
+     WHERE lang = $1 ORDER BY observed_at DESC LIMIT $2`,
+    [lang, n],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    activityId: r.activity_id,
+    kind: r.kind as SignalKind,
+    observedAt: r.observed_at,
+    // Unparseable JSON reads as no payload rather than throwing: one bad row
+    // must not cost the learner the rest of their evidence. signalLabel says null.
+    payload: parseJson(r.payload),
+  }));
+}
+
+function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 /** How many days the learner has shown up — the "Day 41" on the Today screen. */

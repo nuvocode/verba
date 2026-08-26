@@ -99,6 +99,28 @@ export type Signal = {
   payload: unknown;
 };
 
+/**
+ * A signal on its way to being written. The id and the timestamp are the store's
+ * job: an id must not collide, and `observedAt` is a clock — model.ts has none.
+ */
+export type SignalDraft = Omit<Signal, "id" | "observedAt">;
+
+/**
+ * The one place a payload is read structurally (guarded by signals.check.ts).
+ *
+ * `payload` is `unknown` in the spec and stays that way, but Coach has to be able
+ * to name what a signal was about ("ser vs estar") to group evidence into a
+ * Weakness. So every writer puts a `{ label: string }` in there and every reader
+ * comes through here; anything else counts signals by `kind` alone. Same shape as
+ * levelOf and levelGapNote: loose value, single door.
+ */
+export function signalLabel(s: Signal): string | null {
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const label = (p as { label?: unknown }).label;
+  return typeof label === "string" ? label : null;
+}
+
 // --- §1.4 VocabItem ------------------------------------------------------------
 
 export type VocabItem = {
