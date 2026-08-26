@@ -54,7 +54,7 @@ assert(ja.avgSentenceLen > 1, "…spread across its two sentences");
 const s: Settings = { ...defaultSettings, packId: "ja", profile: { ...defaultSettings.profile, targetLanguage: "Japanese", level: "A1" } };
 const pack = getPack("ja");
 assert(pack, "the bundled Japanese pack must resolve");
-const plan = buildDailyPlan(s, { date: "2026-07-12", dueVocab: 0 });
+const plan = buildDailyPlan(s, { date: "2026-07-12", dayIndex: 1, dueVocab: 0 });
 const carriers: [string, string][] = [
   ["buildSystem", buildSystem(s, BUNDLED_SCENARIOS[0], pack)],
   ["vocabPrompt", vocabPrompt(s, pack)],
@@ -63,7 +63,7 @@ const carriers: [string, string][] = [
   ["placementPrompt", placementPrompt(s, pack)],
   ["weeklyReportPrompt", weeklyReportPrompt(s, { sessions: 1, messages: 1, wordsPracticed: 1, vocabLearned: 1, vocabReviewed: 1, avgLevelScore: 50, focusAreas: [] }, pack)],
   ["drillPrompt", drillPrompt(s, ["particles"], 4, pack)],
-  ["recapPrompt", recapPrompt(s, plan, ["conversation"], pack)],
+  ["recapPrompt", recapPrompt(s, plan, [], ["talk"], pack)],
 ];
 for (const [name, prompt] of carriers)
   assert.match(prompt, /Language notes for Japanese:/, `${name} must fold in the pack's guidance`);

@@ -75,7 +75,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
               role: "user",
               content: weeklyReportPrompt(
                 settings,
-                { ...stats, focusAreas: day.plan?.focus ?? [] },
+                { ...stats, focusAreas: day.focus },
                 getPack(settings.packId),
                 memories,
               ),

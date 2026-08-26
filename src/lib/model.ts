@@ -60,6 +60,11 @@ export type PlannedActivity = {
   estimatedMinutes: number;
   status: "pending" | "active" | "completed" | "skipped";
   dependsOn?: ActivityId; // e.g. Read uses Talk's output
+  // Spec deviation: the shared model has no field for "which scenario a talk/roleplay
+  // opens" nor "the raw drill string handed to the model" — both ride here as optional
+  // learn-layer extras until they earn a place in the shared shape.
+  scenarioId?: string; // talk/roleplay launch this scenario
+  goal?: string; // weak-area drill folded into the activity, handed raw to the model
   readonly producedSignalIds: SignalId[]; // filled in on completion
 };
 

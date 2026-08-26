@@ -1,6 +1,6 @@
 import type { Settings } from "../lib/settings";
 import { levelOf } from "../lib/model";
-import type { BlockKind } from "../lib/learn";
+import type { ActivityKind } from "../lib/model";
 import type { Day } from "../lib/useDay";
 import type { Listening as ListeningState } from "../lib/useListening";
 import QuestionCard from "./QuestionCard";
@@ -23,10 +23,10 @@ export default function Listening({
   settings: Settings;
   listening: ListeningState;
   day: Day;
-  /** Close out the listening block and go wherever the day goes next. */
-  onAdvance: (kind: BlockKind) => void;
+  /** Close out the listening activity and go wherever the day goes next. */
+  onAdvance: (kind: ActivityKind) => void;
 }) {
-  const block = day.plan?.blocks.find((b) => b.kind === "listening");
+  const block = day.plan?.activities.find((b) => b.kind === "listen");
   const start = () => void listening.generate({ interests: day.plan?.theme, goal: block?.goal });
 
   if (!listening.piece)
@@ -55,7 +55,7 @@ export default function Listening({
           You caught <strong>{listening.score.correct}</strong> of {listening.score.total} — that accuracy feeds your
           level signal.
         </p>
-        <button className="btn" onClick={() => onAdvance("listening")}>
+        <button className="btn" onClick={() => onAdvance("listen")}>
           Back to today →
         </button>
       </div>

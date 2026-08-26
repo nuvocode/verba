@@ -103,7 +103,7 @@ export default function Memory({
       setRevealed(false);
       await reviewVocab(card, g).catch((e) => setError(String(e?.message ?? e)));
       if (idx + 1 >= queue.length) {
-        void day.complete("vocab");
+        void day.complete("memory");
         void load();
       }
     },
@@ -122,7 +122,7 @@ export default function Memory({
     if (!card) return;
     setRevealed(false);
     await drop(card.id);
-    if (idx + 1 >= queue.length) void day.complete("vocab");
+    if (idx + 1 >= queue.length) void day.complete("memory");
   }, [queue, idx, drop, day]);
 
   // Review-mode keys. App stands down while this is mounted (onCaptureKeys).

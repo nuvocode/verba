@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Settings } from "../lib/settings";
 import { levelOf } from "../lib/model";
-import type { BlockKind } from "../lib/learn";
+import type { ActivityKind } from "../lib/model";
 import type { Day } from "../lib/useDay";
 import type { Talk as TalkState } from "../lib/useTalk";
 import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
@@ -9,13 +9,13 @@ import Face from "./talk/Face";
 
 // Where the reflection sends them, named by what the plan has next. The wording is the
 // day's, not this screen's — Talk never decides that reading (or anything) comes after.
-const CONTINUE: Record<BlockKind, string> = {
-  conversation: "Continue to the conversation →",
-  reading: "Continue to reading →",
-  scenario: "Continue to the role-play →",
-  vocab: "Continue to your words →",
-  listening: "Continue to listening →",
-  summary: "Wrap up the day →",
+const CONTINUE: Record<ActivityKind, string> = {
+  talk: "Continue to the conversation →",
+  read: "Continue to reading →",
+  roleplay: "Continue to the role-play →",
+  memory: "Continue to your words →",
+  listen: "Continue to listening →",
+  wrapup: "Wrap up the day →",
 };
 
 export default function Talk({
@@ -27,8 +27,8 @@ export default function Talk({
   settings: Settings;
   talk: TalkState;
   day: Day;
-  /** Close out a talking block and go wherever the day goes next — the plan decides. */
-  onAdvance: (kind: BlockKind) => void;
+  /** Close out a talking activity and go wherever the day goes next — the plan decides. */
+  onAdvance: (kind: ActivityKind) => void;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
   const [past, setPast] = useState<SessionRow[]>([]);
@@ -54,7 +54,7 @@ export default function Talk({
   // actually being practised — the plan's role-play names one, the conversation block is
   // "free" — so finishing the role-play can't tick the conversation off in its place. A
   // scenario the plan never asked for still closes whatever talking block is outstanding.
-  const talking = (day.plan?.blocks ?? []).filter((b) => b.kind === "conversation" || b.kind === "scenario");
+  const talking = (day.plan?.activities ?? []).filter((b) => b.kind === "talk" || b.kind === "roleplay");
   const closes =
     talking.find((b) => b.scenarioId === talk.scenario?.id)?.kind ??
     talking.find((b) => !day.isDone(b.kind))?.kind ??
@@ -69,7 +69,7 @@ export default function Talk({
   // What the plan hands them next. Computed by skipping `closes` rather than reading
   // `day.next`, so the button is right on the reflection's first paint — before the effect
   // above has landed in state — and after it.
-  const upNext = (day.plan?.blocks ?? []).find((b) => b.kind !== closes && !day.isDone(b.kind))?.kind ?? null;
+  const upNext = (day.plan?.activities ?? []).find((b) => b.kind !== closes && !day.isDone(b.kind))?.kind ?? null;
 
   // ---- replaying an old conversation ----
   if (!talk.started && open)

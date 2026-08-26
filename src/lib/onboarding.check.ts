@@ -24,15 +24,16 @@ assert.notEqual(defaultSettings.profile.nativeLanguage, "", "there is always a n
 assert.deepEqual(SKIP_DEFAULTS, { level: "A2", dailyMinutes: 20, interests: [] }, "documented skip defaults");
 assert.match(levelPrompt(atLevel("B1")), /self-reported level is B1/, "a set level anchors the estimate");
 
-// ---- every bucket is a real CEFR level the plan can carry ----
+// ---- every bucket builds a valid plan (level no longer flows into the plan —
+//      it is read through levelOf(profile) at prompt time) ----
 for (const cefr of ["A1", "A2", "B1", "B2"])
-  assert.equal(buildDailyPlan(atLevel(cefr), { date: "2026-07-12", dueVocab: 0 }).level, cefr, `${cefr} reaches the plan`);
+  assert(buildDailyPlan(atLevel(cefr), { date: "2026-07-12", dayIndex: 1, dueVocab: 0 }).activities.length >= 4, `${cefr} reaches the plan`);
 
 // ---- interests are optional and steer the theme when present ----
-const plan0 = buildDailyPlan(s({ profile: { ...defaultSettings.profile, interests: [] } }), { date: "2026-07-12", dueVocab: 0 });
-const plan1 = buildDailyPlan(s({ profile: { ...defaultSettings.profile, interests: ["Travel"] } }), { date: "2026-07-12", dueVocab: 0 });
-const plan3 = buildDailyPlan(s({ profile: { ...defaultSettings.profile, interests: ["Travel", "Work", "Books & film"] } }), { date: "2026-07-12", dueVocab: 0 });
-for (const p of [plan0, plan1, plan3]) assert(p.blocks.length >= 4 && p.theme, "a plan builds with 0, 1 or 3 interests");
+const plan0 = buildDailyPlan(s({ profile: { ...defaultSettings.profile, interests: [] } }), { date: "2026-07-12", dayIndex: 1, dueVocab: 0 });
+const plan1 = buildDailyPlan(s({ profile: { ...defaultSettings.profile, interests: ["Travel"] } }), { date: "2026-07-12", dayIndex: 1, dueVocab: 0 });
+const plan3 = buildDailyPlan(s({ profile: { ...defaultSettings.profile, interests: ["Travel", "Work", "Books & film"] } }), { date: "2026-07-12", dayIndex: 1, dueVocab: 0 });
+for (const p of [plan0, plan1, plan3]) assert(p.activities.length >= 4 && p.theme, "a plan builds with 0, 1 or 3 interests");
 assert.equal(plan0.theme, themeForDate("2026-07-12"), "no interests → the full rotation, unchanged");
 assert(
   ["travel and directions", "shopping and money", "food and cooking"].includes(plan1.theme),
