@@ -47,14 +47,7 @@ assert.equal(migrated({ cefr: "gibberish" }).profile.level, "A2");
 // 7: no record → loadSettings returns the default profile
 assert.deepEqual(loadSettings().profile, defaultSettings.profile);
 
-// 8: the coach's estimate is never back-filled by migration
-{
-  const e = migrated({ cefr: "B2", goals: ["Travel"] }).profile.levelEstimate as {
-    sampleSize: number;
-    confidence: string;
-  };
-  assert.equal(e.sampleSize, 0);
-  assert.equal(e.confidence, "low");
-}
+// 8: the profile no longer stores a level estimate — it is derived, not migrated
+assert.ok(!("levelEstimate" in migrated({ cefr: "B2", goals: ["Travel"] }).profile));
 
 console.log("settings.check OK");

@@ -137,7 +137,6 @@ export const defaultSettings: Settings = {
     interests: [],
     goals: [],
     weaknesses: [],
-    levelEstimate: { value: 0, label: "A1", confidence: "low", sampleSize: 0 },
     createdAt: 0,
     streak: 0,
     timezone: "",
@@ -181,11 +180,15 @@ const isCefrLevel = (v: unknown): v is CEFRLevel =>
  * one place the old "unset level" fallback survives: a missing or unrecognised
  * `cefr` reads as "A2", exactly as the deleted `level()` helper did. `goals` were
  * really interests (the chips that steer themes), so they land in `interests` and
- * `goals` starts empty. `levelEstimate` is never back-filled here — it is the
- * coach's observation, and migration has not observed anything. `createdAt` and
+ * `goals` starts empty. The measured level is never back-filled here — it is no
+ * longer stored, and is instead derived from `session_metrics` scores (lib/metrics).
+ * `createdAt` and
  * `timezone` are stamped here (the clock lives at the write, not in the defaults).
  */
 export function migrateProfile<T extends Record<string, unknown>>(raw: T): T {
+  // Stale on-disk `verba.settings` blobs may still carry the old measured-level
+  // key on `profile`; we deliberately leave it (a strip step would break
+  // migrateProfile's idempotence, and an unknown key on a typed object is invisible).
   if ("profile" in raw) return raw; // already nested — idempotent
   const { cefr, targetLang, nativeLang, goals, ...rest } = raw as T & {
     cefr?: unknown;
@@ -200,7 +203,6 @@ export function migrateProfile<T extends Record<string, unknown>>(raw: T): T {
       targetLanguage: typeof targetLang === "string" ? targetLang : DEFAULT_TARGET_LANGUAGE,
       nativeLanguage: typeof nativeLang === "string" ? nativeLang : detectNativeLang(),
       level,
-      levelEstimate: { value: 0, label: "A1", confidence: "low", sampleSize: 0 },
       interests: Array.isArray(goals) ? goals.filter((g): g is string => typeof g === "string") : [],
       goals: [],
       weaknesses: [],

@@ -9,9 +9,10 @@ import {
   isLegacyPlanShape,
   type DayRecap,
 } from "./learn";
-import type { ActivityKind, DailyPlan } from "./model";
+import type { ActivityKind, DailyPlan, LevelEstimate } from "./model";
+import { levelEstimateFrom } from "./metrics";
 import { getPack } from "./packs";
-import { getDailySession, saveDailySession, latestRecap, vocabCounts, dayNumber } from "./db";
+import { getDailySession, saveDailySession, latestRecap, vocabCounts, dayNumber, recentMetricScores } from "./db";
 
 /** Local YYYY-MM-DD — the day key the plan is stored under. */
 export function todayKey(d = new Date()): string {
@@ -21,6 +22,8 @@ export function todayKey(d = new Date()): string {
 export interface Day {
   date: string;
   plan: DailyPlan | null;
+  /** The learner's measured level (invariant 2 pairs this with settings.profile.level). */
+  levelEstimate: LevelEstimate;
   /** The day's weak areas — held here, not on the plan (see K2). */
   focus: string[];
   done: ActivityKind[];
@@ -47,6 +50,7 @@ export interface Day {
 export function useDay(settings: Settings): Day {
   const date = todayKey();
   const [plan, setPlan] = useState<DailyPlan | null>(null);
+  const [levelEstimate, setLevelEstimate] = useState<LevelEstimate>(() => levelEstimateFrom([]));
   const [done, setDone] = useState<ActivityKind[]>([]);
   const [recap, setRecap] = useState<DayRecap | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,6 +58,10 @@ export function useDay(settings: Settings): Day {
   // resume they are re-derived from the latest recap and held here for wrapUp.
   const [focus, setFocus] = useState<string[]>([]);
 
+  // ponytail: the measured estimate only refreshes when this effect re-runs — on
+  // date, target-language, or level change. A Talk session writes new session_metrics
+  // without touching any of those, so the band here lags until the next reload. A live
+  // refresh would need a session counter in the effect key; that is out of scope.
   useEffect(() => {
     let live = true;
     (async () => {
@@ -67,7 +75,9 @@ export function useDay(settings: Settings): Day {
           // A row saved before the shared model ({blocks:[...]}) is treated as absent:
           // the plan is rebuilt, and the stale row stays on disk until it is overwritten.
           if (!isLegacyPlanShape(stored)) {
+            const scores = await recentMetricScores(settings.profile.targetLanguage, 12);
             if (!live) return;
+            setLevelEstimate(levelEstimateFrom(scores));
             setPlan(stored);
             setDone(JSON.parse(row.done));
             setRecap(row.recap ? JSON.parse(row.recap) : null);
@@ -76,12 +86,15 @@ export function useDay(settings: Settings): Day {
           }
         }
         // No plan for today (or the learner switched language, or the row is stale) — build fresh.
-        const [{ due }, dayIndex] = await Promise.all([
+        const [{ due }, dayIndex, scores] = await Promise.all([
           vocabCounts(settings.profile.targetLanguage),
           dayNumber(),
+          recentMetricScores(settings.profile.targetLanguage, 12),
         ]);
+        const levelEstimate = levelEstimateFrom(scores);
         const fresh = buildDailyPlan(settings, { date, dayIndex, dueVocab: due, focus: nextFocus });
         if (!live) return;
+        setLevelEstimate(levelEstimate);
         setPlan(fresh);
         setDone([]);
         setRecap(null);
@@ -89,7 +102,10 @@ export function useDay(settings: Settings): Day {
         await saveDailySession(date, settings.profile.targetLanguage, fresh, [], null);
       } catch {
         // No DB (browser dev, first run) — still give the learner a plan to work from.
-        if (live) setPlan(buildDailyPlan(settings, { date, dayIndex: 1, dueVocab: 0 }));
+        if (live) {
+          setLevelEstimate(levelEstimateFrom([]));
+          setPlan(buildDailyPlan(settings, { date, dayIndex: 1, dueVocab: 0 }));
+        }
       } finally {
         if (live) setLoading(false);
       }
@@ -149,6 +165,7 @@ export function useDay(settings: Settings): Day {
   return {
     date,
     plan,
+    levelEstimate,
     focus,
     done,
     recap,

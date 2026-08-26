@@ -5,7 +5,7 @@ import { getProvider } from "../lib/providers";
 import { weeklyReportPrompt, parseWeeklyReport, type WeeklyReport } from "../lib/coach";
 import { getPack } from "../lib/packs";
 import { CEFR_LEVELS } from "../lib/level";
-import { levelOf } from "../lib/model";
+import { levelOf, levelGapNote, progressionSuggested } from "../lib/model";
 import { estimateLevelV2, metricsFromRow } from "../lib/metrics";
 import { activeDays, recentMemories, recentMetricScores, recentMetrics, weekStats } from "../lib/db";
 
@@ -46,7 +46,6 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
           recentMetrics(settings.profile.targetLanguage, 2),
           recentMetricScores(settings.profile.targetLanguage, 12),
           activeDays(),
-          // ponytail: the measured-level band (from levelEstimate) returns in 11b-3
           recentMemories(settings.profile.targetLanguage).catch(() => []),
         ]);
         if (!live) return;
@@ -95,11 +94,19 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
     };
   }, [settings.profile.targetLanguage, settings.provider, day.plan]);
 
-  const bandIdx = Math.max(0, CEFR_LEVELS.indexOf(levelOf(settings.profile)));
+  const bandIdx = Math.max(0, CEFR_LEVELS.indexOf(day.levelEstimate.label));
   // Position on the A1→C2 rail: the band itself, plus how far the composite has
   // carried them through it.
   const within = cells ? ((cells.score % (100 / 6)) / (100 / 6)) * 100 : 0;
   const pct = ((bandIdx + within / 100) / (CEFR_LEVELS.length - 1)) * 100;
+
+  // Measured vs declared: the ray shows what your writing measures at, the `now`
+  // marker shows the level you set. When they disagree (and it isn't a low-confidence
+  // guess) say so — and, if the measure runs ahead, suggest the next band.
+  const measuredIdx = CEFR_LEVELS.indexOf(day.levelEstimate.label);
+  const declaredIdx = CEFR_LEVELS.indexOf(levelOf(settings.profile));
+  const gapNote = levelGapNote(levelOf(settings.profile), day.levelEstimate);
+  const readyForNextBand = measuredIdx > declaredIdx && progressionSuggested(day.levelEstimate);
 
   const delta = (n: number) => (n > 0 ? <i>+{n}</i> : n < 0 ? <i style={{ color: "var(--warn)" }}>{n}</i> : null);
   const line =
@@ -129,17 +136,33 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
         <div className="eyebrow" style={{ marginBottom: 22 }}>
           Estimated level
         </div>
-        <div className="cefr">
-          <i style={{ width: `${Math.min(100, pct)}%` }} />
-          <b style={{ left: `${Math.min(100, pct)}%` }} />
-        </div>
-        <div className="cefr-scale">
-          {CEFR_LEVELS.map((l) => (
-            <span key={l} className={l === levelOf(settings.profile) ? "now" : ""}>
-              {l}
-            </span>
-          ))}
-        </div>
+        {day.levelEstimate.sampleSize === 0 ? (
+          <div style={{ color: "var(--ink3)", fontSize: 13.5 }}>
+            Not measured yet — a few conversations and this appears.
+          </div>
+        ) : (
+          <>
+            <div className="cefr">
+              <i style={{ width: `${Math.min(100, pct)}%` }} />
+              <b style={{ left: `${Math.min(100, pct)}%` }} />
+            </div>
+            <div className="cefr-scale">
+              {CEFR_LEVELS.map((l) => (
+                <span key={l} className={l === levelOf(settings.profile) ? "now" : ""}>
+                  {l}
+                </span>
+              ))}
+            </div>
+            {gapNote && (
+              <div style={{ color: "var(--ink3)", fontSize: 13.5, marginTop: 12 }}>{gapNote}</div>
+            )}
+            {readyForNextBand && (
+              <div style={{ color: "var(--ink2)", fontSize: 13.5, marginTop: 8 }}>
+                You look ready for the next band.
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {cells ? (

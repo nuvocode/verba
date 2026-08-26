@@ -4,6 +4,10 @@
 // VocabItem deliberately omits srs.strength: it is a derived value recomputed
 // on demand via strength(), so storing it would let the displayed bar drift
 // from the schedule it must reflect.
+//
+// LearnerProfile likewise omits levelEstimate: it is derived from the learner's
+// session_metrics scores (levelEstimateFrom in lib/metrics), so storing it would
+// let the displayed estimate drift from the scores it must reflect.
 
 // --- Scalars ------------------------------------------------------------------
 
@@ -39,7 +43,6 @@ export type LearnerProfile = {
   targetLanguage: LanguageCode; // language being learned
   nativeLanguage: LanguageCode; // language of explanations
   level: CEFRLevel; // operative level — the one every surface reads
-  levelEstimate: LevelEstimate; // coach's observation, may differ from level
   interests: string[]; // feeds theme production
   goals: LearnerGoal[];
   weaknesses: Weakness[]; // written by Coach, read by Plan
@@ -166,6 +169,22 @@ export function levelLabel(value: number): CEFRLevel {
 
 /** Level progress is only suggested once confidence is not low. */
 export const progressionSuggested = (e: LevelEstimate): boolean => e.confidence !== "low";
+
+/**
+ * The sentence that makes two different level values legal on one screen
+ * (invariant 2). `null` when there is nothing to explain: the values agree, or
+ * nothing has been measured yet (that case is the "not yet measured" copy, not a gap).
+ */
+export function levelGapNote(level: CEFRLevel, e: LevelEstimate): string | null {
+  if (e.sampleSize === 0) return null;
+  if (e.label === level) return null;
+  return `You work at ${level}, but your writing measures at ${e.label} right now.`;
+}
+
+/** Under this many sessions the estimate is a guess with a number on it. */
+export const MIN_ESTIMATE_SESSIONS = 3;
+/** At this many it has seen enough of the learner to argue with their self-report. */
+export const CONFIDENT_ESTIMATE_SESSIONS = 8;
 
 export const MIN_WEAKNESS_EVIDENCE = 3;
 

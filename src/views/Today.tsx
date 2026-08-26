@@ -36,7 +36,12 @@ export default function Today({
       </div>
       <h1 className="display">{greeting()}.</h1>
 
-      {/* ponytail: the "not yet measured" banner needs levelEstimate to have a writer — 11b-3 */}
+      {/* invariant 26: nothing measured is claimed before measurement begins. */}
+      {day.levelEstimate.sampleSize === 0 && (
+        <div style={{ color: "var(--ink3)", fontSize: 14, marginBottom: 20 }}>
+          I'll start measuring your level after a few conversations.
+        </div>
+      )}
 
       <div className="lede" style={{ maxWidth: 640, marginBottom: 52 }}>
         <div className="bullet live" />

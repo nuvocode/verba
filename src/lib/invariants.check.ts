@@ -33,7 +33,7 @@ const LEDGER: Row[] = [
   {
     id: 2,
     claim: "Bir ekranda gösterilen tüm seviye değerleri ya aynıdır ya da farkları açıklanmıştır.",
-    pending: "#13 — ekran seviye değerleri tutarlılığı henüz doğrulanmıyor",
+    assertedIn: [{ file: "src/lib/model.check.ts", marker: "invariant 2" }],
   },
   {
     id: 3,
