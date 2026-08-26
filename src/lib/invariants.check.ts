@@ -62,7 +62,7 @@ const LEDGER: Row[] = [
   {
     id: 6,
     claim: "Coach'ta gösterilen her zayıflığın `addressedBy` alanı doludur ve işaret ettiği aktivite ertesi günün planında vardır.",
-    pending: "#15 — Weakness kayıtlarını yazan yok",
+    assertedIn: [{ file: "src/lib/weakness.check.ts", marker: "invariant 6" }],
   },
   {
     id: 7,
@@ -300,6 +300,7 @@ const pendingRows = LEDGER.filter((r): r is Extract<Row, { pending: string }> =>
 const pendingIssues = pendingRows.filter((r) => r.pending.startsWith("#"));
 const future = pendingRows.filter((r) => r.pending.startsWith("M1+")).length;
 const issueRefs = pendingIssues.map((r) => r.pending.match(/^#\d+/)?.[0] ?? "").join(", ");
+const pending = issueRefs ? `${pendingIssues.length} pending (${issueRefs})` : `${pendingIssues.length} pending`;
 
-console.log(`invariants: ${asserted} asserted, ${pendingIssues.length} pending (${issueRefs}), ${future} out of scope (M1+)`);
+console.log(`invariants: ${asserted} asserted, ${pending}, ${future} out of scope (M1+)`);
 console.log("invariants.check OK");

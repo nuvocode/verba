@@ -9,13 +9,15 @@ import {
   isLegacyPlanShape,
   type DayRecap,
 } from "./learn";
-import type { ActivityKind, DailyPlan, LevelEstimate, SignalDraft } from "./model";
+import type { ActivityKind, DailyPlan, LevelEstimate, SignalDraft, Weakness } from "./model";
 import { levelEstimateFrom } from "./metrics";
+import { weaknessesFrom } from "./weakness";
 import { getPack } from "./packs";
 import {
   getDailySession,
   saveDailySession,
   saveSignals,
+  recentSignals,
   latestRecap,
   vocabCounts,
   dayNumber,
@@ -43,6 +45,11 @@ export interface Day {
   levelEstimate: LevelEstimate;
   /** The day's weak areas — held here, not on the plan (see K2). */
   focus: string[];
+  /**
+   * What the signals say the learner is weakest at, strongest first. Derived on every
+   * load, never stored — the evidence is the signals table (see lib/weakness).
+   */
+  weaknesses: Weakness[];
   done: ActivityKind[];
   recap: DayRecap | null;
   loading: boolean;
@@ -78,6 +85,7 @@ export function useDay(settings: Settings): Day {
   // The day's weak areas. Not written to the plan (they stay in PlanContext), so on
   // resume they are re-derived from the latest recap and held here for wrapUp.
   const [focus, setFocus] = useState<string[]>([]);
+  const [weaknesses, setWeaknesses] = useState<Weakness[]>([]);
 
   // ponytail: the measured estimate only refreshes when this effect re-runs — on
   // date, target-language, or level change. A Talk session writes new session_metrics
@@ -91,6 +99,9 @@ export function useDay(settings: Settings): Day {
         const row = await getDailySession(date);
         const prev = await latestRecap(settings.profile.targetLanguage, date);
         const nextFocus = prev?.nextFocus ?? [];
+        // The plan's drills and Coach's "what I'll do about it" have to agree, so both
+        // read the same derivation. A store with no signals in it yet yields none.
+        const declared = weaknessesFrom(await recentSignals(settings.profile.targetLanguage).catch(() => []));
         if (row && row.lang === settings.profile.targetLanguage) {
           const stored = JSON.parse(row.plan);
           // A row saved before the shared model ({blocks:[...]}) is treated as absent:
@@ -103,6 +114,7 @@ export function useDay(settings: Settings): Day {
             setDone(JSON.parse(row.done));
             setRecap(row.recap ? JSON.parse(row.recap) : null);
             setFocus(nextFocus);
+            setWeaknesses(declared);
             return;
           }
         }
@@ -113,19 +125,21 @@ export function useDay(settings: Settings): Day {
           recentMetricScores(settings.profile.targetLanguage, 12),
         ]);
         const levelEstimate = levelEstimateFrom(scores);
-        const fresh = buildDailyPlan(settings, { date, dayIndex, dueVocab: due, focus: nextFocus });
+        const fresh = buildDailyPlan(settings, { date, dayIndex, dueVocab: due, focus: nextFocus, weaknesses: declared });
         if (!live) return;
         setLevelEstimate(levelEstimate);
         setPlan(fresh);
         setDone([]);
         setRecap(null);
         setFocus(nextFocus);
+        setWeaknesses(declared);
         await saveDailySession(date, settings.profile.targetLanguage, fresh, [], null);
       } catch {
         // No DB (browser dev, first run) — still give the learner a plan to work from.
         if (live) {
           setLevelEstimate(levelEstimateFrom([]));
           setPlan(buildDailyPlan(settings, { date, dayIndex: 1, dueVocab: 0 }));
+          setWeaknesses([]);
         }
       } finally {
         if (live) setLoading(false);
@@ -221,6 +235,7 @@ export function useDay(settings: Settings): Day {
     plan,
     levelEstimate,
     focus,
+    weaknesses,
     done,
     recap,
     loading,

@@ -121,6 +121,23 @@ export function signalLabel(s: Signal): string | null {
   return typeof label === "string" ? label : null;
 }
 
+/**
+ * The second — and last — structural payload reader: did this observation go badly?
+ *
+ * A correction is a miss by its nature. Everything else says so in its payload: a
+ * comprehension question answered wrong, a card graded "again". A word merely met
+ * is not a miss, which is why `lexicalItem` needs the grade before it counts.
+ * Kept here beside signalLabel so the two doors stay in one file (signals.check.ts
+ * fails the build if a third one opens elsewhere).
+ */
+export function signalMiss(s: Signal): boolean {
+  if (s.kind === "correction") return true;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return false;
+  const { correct, grade } = p as { correct?: unknown; grade?: unknown };
+  return correct === false || grade === 0;
+}
+
 // --- §1.4 VocabItem ------------------------------------------------------------
 
 export type VocabItem = {

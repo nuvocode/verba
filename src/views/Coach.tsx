@@ -5,7 +5,8 @@ import { getProvider } from "../lib/providers";
 import { weeklyReportPrompt, parseWeeklyReport, type WeeklyReport } from "../lib/coach";
 import { getPack } from "../lib/packs";
 import { CEFR_LEVELS } from "../lib/level";
-import { levelOf, levelGapNote, progressionSuggested } from "../lib/model";
+import { levelOf, levelGapNote, progressionSuggested, MIN_WEAKNESS_EVIDENCE } from "../lib/model";
+import { addressed } from "../lib/weakness";
 import { estimateLevelV2, metricsFromRow } from "../lib/metrics";
 import { activeDays, recentMemories, recentMetricScores, recentMetrics, weekStats } from "../lib/db";
 
@@ -227,20 +228,32 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
         </div>
       )}
 
-      {report && report.focus.length > 0 && (
-        <>
-          <div className="eyebrow" style={{ marginBottom: 18 }}>
-            Where you're weakest — and what I'll do about it
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 48 }}>
-            {report.focus.slice(0, 4).map((f) => (
-              <div className="weak" key={f}>
-                <h3>{f}</h3>
-                <p>Tomorrow's plan opens with this — the warm-up conversation drills it before anything else.</p>
-              </div>
-            ))}
-          </div>
-        </>
+      {/*
+        Only weaknesses the plan actually does something about (invariant 6). The
+        promise in the heading is kept by lib/learn's drill slots, and the sentence
+        under each card names the very activities that carry it — a weakness with
+        nowhere to go would be a promise this screen cannot keep, so it is not shown.
+      */}
+      <div className="eyebrow" style={{ marginBottom: 18 }}>
+        Where you're weakest — and what I'll do about it
+      </div>
+      {addressed(day.weaknesses).length > 0 ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 48 }}>
+          {addressed(day.weaknesses).map((w) => (
+            <div className="weak" key={w.id}>
+              <h3>{w.label}</h3>
+              <p>
+                {w.evidence.length} slips so far. Tomorrow's plan drills it in{" "}
+                {w.addressedBy.map((id) => day.plan?.activities.find((a) => a.id === id)?.title ?? id).join(" and ")}.
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ padding: "4px 0 44px", color: "var(--ink3)", fontSize: 13.5 }}>
+          Nothing has gone wrong often enough to name yet — the same slip has to show up{" "}
+          {MIN_WEAKNESS_EVIDENCE} times before it earns a place in tomorrow's plan.
+        </div>
       )}
 
       {report && report.wins.length > 0 && (
