@@ -8,7 +8,7 @@
 // Run: node --experimental-strip-types src/lib/signals.check.ts
 import assert from "node:assert";
 import { signalLabel, type Signal } from "./model.ts";
-import { talkSignals } from "./signals.ts";
+import { talkSignals, readSignals, listenSignals, memorySignals } from "./signals.ts";
 
 const sig = (payload: unknown): Signal => ({
   id: "s1",
@@ -55,6 +55,57 @@ assert.deepEqual(
   ["ser vs estar", "la cuenta", "turns"],
   "every payload a surface writes must read back through signalLabel",
 );
+
+// --- the other three surfaces: same shape, their own evidence ----------------
+const q = (prompt: string, correct: boolean) => ({ prompt, given: "x", answer: "y", correct });
+
+const read = readSignals("read-1", [{ ...q("who paid?", true), qKind: "mcq" }, { ...q("___ la cuenta", false), qKind: "cloze" }], [
+  "la cuenta",
+]);
+assert.deepEqual(
+  read.map((d) => d.kind),
+  ["comprehension", "comprehension", "lexicalItem"],
+  "a right answer is an observation too — Coach decides later what counts as evidence",
+);
+assert.deepEqual(
+  read.map((d) => signalLabel({ ...d, id: "x", observedAt: 0 })),
+  ["reading comprehension", "reading comprehension", "la cuenta"],
+  "comprehension groups under one stable label; a saved word is named by itself",
+);
+assert.deepEqual(
+  read.slice(0, 2).map((d) => (d.payload as { correct: boolean }).correct),
+  [true, false],
+  "which way each question went has to survive into the payload",
+);
+assert(read.every((d) => d.activityId === "read-1"), "every signal hangs off the activity that produced it");
+
+const listen = listenSignals("listen-1", [q("where were they?", false)]);
+assert.deepEqual(listen.map((d) => d.kind), ["comprehension"], "listening writes comprehension, nothing else");
+assert.equal(signalLabel({ ...listen[0], id: "x", observedAt: 0 }), "listening comprehension", "…under its own label");
+assert.notEqual(
+  signalLabel({ ...listen[0], id: "x", observedAt: 0 }),
+  signalLabel({ ...read[0], id: "x", observedAt: 0 }),
+  "reading and listening must not group into one weakness",
+);
+assert.deepEqual(
+  listen[0].payload,
+  { label: "listening comprehension", correct: false, prompt: "where were they?", given: "x", answer: "y" },
+  "the whole question survives into the payload — 15c reads correct, a Coach screen may want the rest",
+);
+
+const mem = memorySignals("memory-1", [{ term: "la cuenta", grade: 0 }, { term: "el mercado", grade: 2 }]);
+assert.deepEqual(mem.map((d) => d.kind), ["lexicalItem", "lexicalItem"], "a review is an observation about a word");
+assert.deepEqual(
+  mem.map((d) => signalLabel({ ...d, id: "x", observedAt: 0 })),
+  ["la cuenta", "el mercado"],
+  "the card names the signal — a word missed three times is a weakness about that word",
+);
+assert.deepEqual(mem.map((d) => (d.payload as { grade: number }).grade), [0, 2], "how it went rides along");
+
+// Nothing observed, nothing written — no surface should have to guard its own call.
+assert.deepEqual(readSignals("read-1", [], []), [], "a passage with no check and no saved word writes nothing");
+assert.deepEqual(listenSignals("listen-1", []), []);
+assert.deepEqual(memorySignals("memory-1", []), []);
 
 // --- gate: payload is read in exactly one place -------------------------------
 import { readFileSync, readdirSync, statSync } from "node:fs";

@@ -190,6 +190,9 @@ export function useDay(settings: Settings): Day {
     [done, plan, persist, recap, recordSignals],
   );
 
+  // wrapup writes no signals on purpose (#15): it observes nothing about the
+  // learner, it summarises the day. The recap's nextFocus is the coach's own
+  // opinion, and feeding that back as evidence would let a weakness cite itself.
   const wrapUp = useCallback(async () => {
     if (!plan) return;
     let result: DayRecap = {

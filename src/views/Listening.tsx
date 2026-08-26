@@ -1,7 +1,8 @@
 import type { Settings } from "../lib/settings";
 import { levelOf } from "../lib/model";
-import type { ActivityKind } from "../lib/model";
+import type { ActivityKind, SignalDraft } from "../lib/model";
 import type { Day } from "../lib/useDay";
+import { listenSignals } from "../lib/signals";
 import type { Listening as ListeningState } from "../lib/useListening";
 import QuestionCard from "./QuestionCard";
 
@@ -24,7 +25,7 @@ export default function Listening({
   listening: ListeningState;
   day: Day;
   /** Close out the listening activity and go wherever the day goes next. */
-  onAdvance: (kind: ActivityKind) => void;
+  onAdvance: (kind: ActivityKind, signals?: SignalDraft[]) => void;
 }) {
   const block = day.plan?.activities.find((b) => b.kind === "listen");
   const start = () => void listening.generate({ interests: day.plan?.theme, goal: block?.goal });
@@ -55,7 +56,10 @@ export default function Listening({
           You caught <strong>{listening.score.correct}</strong> of {listening.score.total} — that accuracy feeds your
           level signal.
         </p>
-        <button className="btn" onClick={() => onAdvance("listen")}>
+        <button
+          className="btn"
+          onClick={() => onAdvance("listen", block ? listenSignals(block.id, listening.graded) : [])}
+        >
           Back to today →
         </button>
       </div>

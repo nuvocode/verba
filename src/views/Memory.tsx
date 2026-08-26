@@ -3,6 +3,7 @@ import type { Settings } from "../lib/settings";
 import type { Day } from "../lib/useDay";
 import { allVocab, deleteVocab, reviewVocab, type VocabRow } from "../lib/db";
 import { getPack } from "../lib/packs";
+import { memorySignals } from "../lib/signals";
 import { strength, type Grade } from "../lib/srs";
 import { suspect } from "../lib/vocab";
 
@@ -32,6 +33,27 @@ export default function Memory({
   const [revealed, setRevealed] = useState(false);
   const [grades, setGrades] = useState<Grade[]>([]);
   const [error, setError] = useState("");
+  const block = day.plan?.activities.find((a) => a.kind === "memory");
+
+  /**
+   * One signal per card actually graded (§1.3). `grades[i]` pairs with `queue[i]`,
+   * but dropping a card shortens the queue under the grades already taken — a row
+   * with no card left to name is skipped rather than guessed at.
+   */
+  // Memoised on the activity id rather than on `block`, which is a fresh object every
+  // render: an unstable identity here would re-subscribe the review-mode key handler
+  // on every keystroke, since `grade` hangs off it.
+  const activityId = block?.id;
+  const reviewSignals = useCallback(
+    (gs: Grade[]) =>
+      activityId
+        ? memorySignals(
+            activityId,
+            gs.flatMap((grade, i) => (queue[i] ? [{ term: queue[i].term, grade }] : [])),
+          )
+        : [],
+    [activityId, queue],
+  );
 
   // The deck belongs to the language it was met in — switching language must not
   // resurface the last one's cards.
@@ -103,11 +125,12 @@ export default function Memory({
       setRevealed(false);
       await reviewVocab(card, g).catch((e) => setError(String(e?.message ?? e)));
       if (idx + 1 >= queue.length) {
-        void day.complete("memory");
+        // `grades` has not caught up with this grade yet — setGrades is a queued update.
+        void day.complete("memory", reviewSignals([...grades, g]));
         void load();
       }
     },
-    [queue, idx, day, load],
+    [queue, idx, day, load, grades, reviewSignals],
   );
 
   /**
@@ -122,8 +145,9 @@ export default function Memory({
     if (!card) return;
     setRevealed(false);
     await drop(card.id);
-    if (idx + 1 >= queue.length) void day.complete("memory");
-  }, [queue, idx, drop, day]);
+    // The dropped card was never graded, so `grades` is already the whole review.
+    if (idx + 1 >= queue.length) void day.complete("memory", reviewSignals(grades));
+  }, [queue, idx, drop, day, grades, reviewSignals]);
 
   // Review-mode keys. App stands down while this is mounted (onCaptureKeys).
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReadView, Settings } from "../lib/settings";
-import type { ActivityKind } from "../lib/model";
+import type { ActivityKind, SignalDraft } from "../lib/model";
 import type { Day } from "../lib/useDay";
 import type { Ask, Read as ReadState } from "../lib/useRead";
 import { CEFR_LEVELS } from "../lib/level";
@@ -9,6 +9,7 @@ import AskSheet from "./read/AskSheet";
 import Passage from "./read/Passage";
 import Prompter from "./read/Prompter";
 import ReadingCheck from "./read/ReadingCheck";
+import { readSignals } from "../lib/signals";
 
 /**
  * The reading screen: one passage, two ways to work it.
@@ -33,7 +34,7 @@ export default function Read({
   read: ReadState;
   day: Day;
   /** Close out the reading activity and go wherever the day goes next — the plan decides. */
-  onAdvance: (kind: ActivityKind) => void;
+  onAdvance: (kind: ActivityKind, signals?: SignalDraft[]) => void;
   /** The sheet takes the keyboard while it is open — Esc closes it, not the screen. */
   onCaptureKeys: (captured: boolean) => void;
   /** The chosen view and pace are settings: they are meant to outlive the passage. */
@@ -65,7 +66,24 @@ export default function Read({
   // questions (or the model errors) do we advance straight away — a broken check must
   // never trap the reader on a passage they've finished.
   const finish = async () => {
-    if (!(await read.startCheck())) onAdvance("read");
+    if (!(await read.startCheck())) onAdvance("read", signals());
+  };
+
+  /**
+   * What the read observed: every question that was answered, plus the words saved
+   * off the passage. Read here rather than after `finishCheck`, which clears the
+   * check — ReadingCheck calls it and `onDone` in the same tick, so this render's
+   * `read.check` is the finished one and the next render's is null. An unanswered
+   * question (the skip path leaves several) is not an observation.
+   */
+  const signals = (): SignalDraft[] => {
+    if (!block) return [];
+    const c = read.check;
+    const graded = (c?.questions ?? [])
+      .map((q, i) => ({ q, given: c!.answers[i] ?? "", correct: c!.results[i] }))
+      .filter((x) => x.correct !== undefined)
+      .map((x) => ({ prompt: x.q.prompt, given: x.given, answer: x.q.answer, qKind: x.q.kind, correct: x.correct! }));
+    return readSignals(block.id, graded, read.saved);
   };
 
   const setView = (view: ReadView) => onChange({ readView: view });
@@ -83,7 +101,7 @@ export default function Read({
   // The comprehension check takes over the screen once a passage is finished — it is
   // the last step of the read, ahead of the passage itself and the empty state.
   if (read.checking || read.check)
-    return <ReadingCheck read={read} onDone={() => onAdvance("read")} />;
+    return <ReadingCheck read={read} onDone={() => onAdvance("read", signals())} />;
 
   // The sheet is a *sibling* of the empty state, never a child of it: `.fade` animates
   // a transform, and a transformed ancestor is the containing block for everything

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { loadSettings, saveSettings, isLocalProvider, onboardingReset, type Settings } from "./lib/settings";
 import { installed } from "./lib/bundled";
 import { pruneBundled } from "./lib/speech";
-import type { ActivityKind } from "./lib/model";
+import type { ActivityKind, SignalDraft } from "./lib/model";
 import { useDay } from "./lib/useDay";
 import { useTalk } from "./lib/useTalk";
 import { useRead } from "./lib/useRead";
@@ -185,8 +185,8 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
    * Today, where they can see that.
    */
   const advance = useCallback(
-    async (kind: ActivityKind) => {
-      const next = await day.complete(kind);
+    async (kind: ActivityKind, signals?: SignalDraft[]) => {
+      const next = await day.complete(kind, signals);
       if (next) begin(next);
       else go("today");
     },
