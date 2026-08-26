@@ -1,6 +1,6 @@
 import type { Settings } from "./settings.ts";
 import { makePlan, planActivity, levelOf } from "./model.ts";
-import type { ActivityKind, DailyPlan, PlannedActivity } from "./model.ts";
+import type { ActivityKind, DailyPlan, PlannedActivity, Weakness } from "./model.ts";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 
 // Learning engine — turns the app's separate activities into one coherent daily
@@ -20,7 +20,29 @@ export interface PlanContext {
   dayIndex: number; // the learner's nth day (passed in — not counted here)
   dueVocab: number; // cards due for review today
   focus?: string[]; // weak areas from recent summaries / metrics
+  /** Declared weaknesses, strongest first. When present they are the focus, and the plan says so. */
+  weaknesses?: Weakness[];
   theme?: string; // optional override (e.g. an AI suggestion)
+}
+
+/**
+ * Which activities carry the day's drills, in the order the focus list fills them.
+ * Exported because Coach promises the learner that tomorrow drills their weakest
+ * areas, and a promise made on one screen and kept by another has to come from one
+ * rule — this one. Only activities that are always in the plan may appear here:
+ * memory is skipped on a day with nothing due, and a weakness pointing at an
+ * activity that is not there is invariant 6's failure case.
+ */
+export const DRILL_SLOTS = ["talk", "read", "listen"] as const;
+
+/**
+ * What each drill slot works on, index-aligned with DRILL_SLOTS. A short focus list
+ * does not leave the later slots idle: they fall back to the first item, so a single
+ * weak area is drilled three ways rather than once.
+ */
+export function drillGoals(focus: string[]): (string | undefined)[] {
+  const drill = focus[0];
+  return [drill, focus[1] ?? drill, focus[2] ?? drill];
 }
 
 // A short rotation so an offline day still gets a themed plan without any AI.
@@ -54,8 +76,12 @@ export function themeForDate(date: string, interests: string[] = []): string {
 /** Build a personalised daily session. Pure — no I/O, no clock. */
 export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
   const theme = ctx.theme?.trim() || themeForDate(ctx.date, s.profile.interests);
-  const focus = (ctx.focus ?? []).filter(Boolean).slice(0, 3);
-  const drill = focus[0];
+  // Declared weaknesses outrank the recap's parting note: they are what the signals
+  // actually show, and Coach has already told the learner these are what tomorrow drills.
+  const declared = (ctx.weaknesses ?? []).slice(0, DRILL_SLOTS.length);
+  const focus = (declared.length ? declared.map((w) => w.label) : (ctx.focus ?? []).filter(Boolean)).slice(0, 3);
+  const [talkGoal, readGoal, listenGoal] = drillGoals(focus);
+  const drill = talkGoal;
 
   const activities: PlannedActivity[] = [
     planActivity({
@@ -67,7 +93,7 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
         : "Conversation comes first so the day's words are ones you produced yourself.",
       estimatedMinutes: 10,
       scenarioId: "free",
-      goal: drill,
+      goal: talkGoal,
     }),
     planActivity({
       id: "read",
@@ -75,7 +101,7 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
       title: "Reading",
       rationale: `The passage reuses what you just said about ${theme}, so you meet those words again in someone else's sentences.`,
       estimatedMinutes: 5,
-      goal: focus[1] ?? drill,
+      goal: readGoal,
     }),
     planActivity({
       id: "roleplay",
@@ -108,7 +134,7 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
       title: "Listening",
       rationale: "Listening closes the day on input, so the last thing you do is understand rather than produce.",
       estimatedMinutes: 6,
-      goal: focus[2] ?? drill,
+      goal: listenGoal,
     }),
     planActivity({
       id: "wrapup",
@@ -120,12 +146,13 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
   );
 
   // focus is deliberately not written to the plan — it stays in PlanContext and
-  // rides into recapPrompt as a parameter. targetedWeaknesses is filled by #15.
+  // rides into recapPrompt as a parameter. The weaknesses behind it are named here,
+  // by id: the plan has to be able to say which weaknesses it set out to address.
   return makePlan({
     date: ctx.date,
     dayIndex: ctx.dayIndex,
     theme,
-    targetedWeaknesses: [],
+    targetedWeaknesses: declared.map((w) => w.id),
     activities,
   });
 }

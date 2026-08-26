@@ -43,6 +43,7 @@ export const TABLES = [
   "session_metrics",
   "review_log",
   "memories",
+  "signals",
 ] as const;
 
 /**

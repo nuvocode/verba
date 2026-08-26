@@ -9,10 +9,29 @@ import {
   isLegacyPlanShape,
   type DayRecap,
 } from "./learn";
-import type { ActivityKind, DailyPlan, LevelEstimate } from "./model";
+import type { ActivityKind, DailyPlan, LevelEstimate, SignalDraft, Weakness } from "./model";
 import { levelEstimateFrom } from "./metrics";
+import { weaknessesFrom } from "./weakness";
 import { getPack } from "./packs";
-import { getDailySession, saveDailySession, latestRecap, vocabCounts, dayNumber, recentMetricScores } from "./db";
+import {
+  getDailySession,
+  saveDailySession,
+  saveSignals,
+  recentSignals,
+  latestRecap,
+  vocabCounts,
+  dayNumber,
+  recentMetricScores,
+} from "./db";
+
+/**
+ * 128 random bits, hex. Not a v4 UUID: `crypto.randomUUID` is gated on a secure
+ * context, and the packaged app is served over a custom scheme that may not count
+ * as one — a signal id is not worth a feature that silently writes nothing there.
+ * `getRandomValues` has no such gate.
+ */
+const signalId = (): string =>
+  Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 
 /** Local YYYY-MM-DD — the day key the plan is stored under. */
 export function todayKey(d = new Date()): string {
@@ -26,6 +45,11 @@ export interface Day {
   levelEstimate: LevelEstimate;
   /** The day's weak areas — held here, not on the plan (see K2). */
   focus: string[];
+  /**
+   * What the signals say the learner is weakest at, strongest first. Derived on every
+   * load, never stored — the evidence is the signals table (see lib/weakness).
+   */
+  weaknesses: Weakness[];
   done: ActivityKind[];
   recap: DayRecap | null;
   loading: boolean;
@@ -36,8 +60,12 @@ export interface Day {
    * Mark an activity done and answer with what the plan has next — `next` is state, so it is
    * still the activity you just finished for anyone reading it at the same tick. Await this
    * instead. `null` means the day is done and there is nowhere further to send them.
+   *
+   * This is also the one door signals go through (§1.3): a surface hands over what it
+   * observed, the ids and the clock are stamped here, and the plan records which
+   * activity produced them.
    */
-  complete(kind: ActivityKind): Promise<ActivityKind | null>;
+  complete(kind: ActivityKind, signals?: SignalDraft[]): Promise<ActivityKind | null>;
   /** Ask the coach to close out the day. Marks the wrap-up activity done. */
   wrapUp(): Promise<void>;
 }
@@ -57,6 +85,7 @@ export function useDay(settings: Settings): Day {
   // The day's weak areas. Not written to the plan (they stay in PlanContext), so on
   // resume they are re-derived from the latest recap and held here for wrapUp.
   const [focus, setFocus] = useState<string[]>([]);
+  const [weaknesses, setWeaknesses] = useState<Weakness[]>([]);
 
   // ponytail: the measured estimate only refreshes when this effect re-runs — on
   // date, target-language, or level change. A Talk session writes new session_metrics
@@ -70,6 +99,9 @@ export function useDay(settings: Settings): Day {
         const row = await getDailySession(date);
         const prev = await latestRecap(settings.profile.targetLanguage, date);
         const nextFocus = prev?.nextFocus ?? [];
+        // The plan's drills and Coach's "what I'll do about it" have to agree, so both
+        // read the same derivation. A store with no signals in it yet yields none.
+        const declared = weaknessesFrom(await recentSignals(settings.profile.targetLanguage).catch(() => []));
         if (row && row.lang === settings.profile.targetLanguage) {
           const stored = JSON.parse(row.plan);
           // A row saved before the shared model ({blocks:[...]}) is treated as absent:
@@ -82,6 +114,7 @@ export function useDay(settings: Settings): Day {
             setDone(JSON.parse(row.done));
             setRecap(row.recap ? JSON.parse(row.recap) : null);
             setFocus(nextFocus);
+            setWeaknesses(declared);
             return;
           }
         }
@@ -92,19 +125,21 @@ export function useDay(settings: Settings): Day {
           recentMetricScores(settings.profile.targetLanguage, 12),
         ]);
         const levelEstimate = levelEstimateFrom(scores);
-        const fresh = buildDailyPlan(settings, { date, dayIndex, dueVocab: due, focus: nextFocus });
+        const fresh = buildDailyPlan(settings, { date, dayIndex, dueVocab: due, focus: nextFocus, weaknesses: declared });
         if (!live) return;
         setLevelEstimate(levelEstimate);
         setPlan(fresh);
         setDone([]);
         setRecap(null);
         setFocus(nextFocus);
+        setWeaknesses(declared);
         await saveDailySession(date, settings.profile.targetLanguage, fresh, [], null);
       } catch {
         // No DB (browser dev, first run) — still give the learner a plan to work from.
         if (live) {
           setLevelEstimate(levelEstimateFrom([]));
           setPlan(buildDailyPlan(settings, { date, dayIndex: 1, dueVocab: 0 }));
+          setWeaknesses([]);
         }
       } finally {
         if (live) setLoading(false);
@@ -115,11 +150,39 @@ export function useDay(settings: Settings): Day {
     };
   }, [date, settings.profile.targetLanguage, settings.profile.level]);
 
-  const persist = useCallback(
-    async (nextDone: ActivityKind[], nextRecap: DayRecap | null) => {
-      if (!plan) return;
+  /**
+   * Stamp the drafts, write them, and hand back the plan that knows about them.
+   *
+   * Signals are best-effort — a day must not stall because the store is missing
+   * (browser dev, first run). But `producedSignalIds` is only filled in once the
+   * write succeeded: an id on the plan that has no row behind it would leave Coach
+   * chasing evidence that was never written.
+   */
+  const recordSignals = useCallback(
+    async (current: DailyPlan, drafts: SignalDraft[]): Promise<DailyPlan> => {
+      const written = drafts.map((d) => ({ ...d, id: signalId(), observedAt: Date.now() }));
       try {
-        await saveDailySession(date, settings.profile.targetLanguage, plan, nextDone, nextRecap);
+        await saveSignals(settings.profile.targetLanguage, written);
+      } catch {
+        return current;
+      }
+      return {
+        ...current,
+        // producedSignalIds is readonly, so the activity is replaced rather than pushed into.
+        activities: current.activities.map((a) => {
+          const ids = written.filter((w) => w.activityId === a.id).map((w) => w.id);
+          return ids.length ? { ...a, producedSignalIds: [...a.producedSignalIds, ...ids] } : a;
+        }),
+      };
+    },
+    [settings.profile.targetLanguage],
+  );
+
+  const persist = useCallback(
+    async (nextDone: ActivityKind[], nextRecap: DayRecap | null, nextPlan: DailyPlan | null = plan) => {
+      if (!nextPlan) return;
+      try {
+        await saveDailySession(date, settings.profile.targetLanguage, nextPlan, nextDone, nextRecap);
       } catch {
         /* progress is still held in memory if the DB is unavailable */
       }
@@ -128,17 +191,22 @@ export function useDay(settings: Settings): Day {
   );
 
   const complete = useCallback(
-    async (kind: ActivityKind) => {
+    async (kind: ActivityKind, signals: SignalDraft[] = []) => {
       const nextDone = done.includes(kind) ? done : [...done, kind];
       setDone(nextDone);
-      await persist(nextDone, recap);
+      const nextPlan = plan && signals.length ? await recordSignals(plan, signals) : plan;
+      if (nextPlan !== plan) setPlan(nextPlan);
+      await persist(nextDone, recap, nextPlan);
       // Read off the list we just wrote, not the one on screen: the caller is standing at
       // the end of this activity asking where to go, and `done` won't have re-rendered yet.
-      return nextActivity(plan, nextDone);
+      return nextActivity(nextPlan, nextDone);
     },
-    [done, plan, persist, recap],
+    [done, plan, persist, recap, recordSignals],
   );
 
+  // wrapup writes no signals on purpose (#15): it observes nothing about the
+  // learner, it summarises the day. The recap's nextFocus is the coach's own
+  // opinion, and feeding that back as evidence would let a weakness cite itself.
   const wrapUp = useCallback(async () => {
     if (!plan) return;
     let result: DayRecap = {
@@ -167,6 +235,7 @@ export function useDay(settings: Settings): Day {
     plan,
     levelEstimate,
     focus,
+    weaknesses,
     done,
     recap,
     loading,

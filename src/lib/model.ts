@@ -99,6 +99,45 @@ export type Signal = {
   payload: unknown;
 };
 
+/**
+ * A signal on its way to being written. The id and the timestamp are the store's
+ * job: an id must not collide, and `observedAt` is a clock — model.ts has none.
+ */
+export type SignalDraft = Omit<Signal, "id" | "observedAt">;
+
+/**
+ * The one place a payload is read structurally (guarded by signals.check.ts).
+ *
+ * `payload` is `unknown` in the spec and stays that way, but Coach has to be able
+ * to name what a signal was about ("ser vs estar") to group evidence into a
+ * Weakness. So every writer puts a `{ label: string }` in there and every reader
+ * comes through here; anything else counts signals by `kind` alone. Same shape as
+ * levelOf and levelGapNote: loose value, single door.
+ */
+export function signalLabel(s: Signal): string | null {
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const label = (p as { label?: unknown }).label;
+  return typeof label === "string" ? label : null;
+}
+
+/**
+ * The second — and last — structural payload reader: did this observation go badly?
+ *
+ * A correction is a miss by its nature. Everything else says so in its payload: a
+ * comprehension question answered wrong, a card graded "again". A word merely met
+ * is not a miss, which is why `lexicalItem` needs the grade before it counts.
+ * Kept here beside signalLabel so the two doors stay in one file (signals.check.ts
+ * fails the build if a third one opens elsewhere).
+ */
+export function signalMiss(s: Signal): boolean {
+  if (s.kind === "correction") return true;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return false;
+  const { correct, grade } = p as { correct?: unknown; grade?: unknown };
+  return correct === false || grade === 0;
+}
+
 // --- §1.4 VocabItem ------------------------------------------------------------
 
 export type VocabItem = {

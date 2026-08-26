@@ -246,6 +246,23 @@ export function useListening(settings: Settings) {
     total: piece?.chapters.flatMap((c) => c.questions).length ?? 0,
   };
 
+  /**
+   * Every question that was actually answered, flattened across chapters and
+   * carrying its own text. `score` is the two numbers on screen; this is what the
+   * surface needs to write one signal per question (§1.3), and a chapter left
+   * unanswered contributes nothing rather than a row of silent misses.
+   */
+  const graded = (piece?.chapters ?? [])
+    .flatMap((c, ci) =>
+      c.questions.map((q, qi) => ({
+        prompt: q.prompt,
+        given: progress[ci]?.answers[qi] ?? "",
+        answer: q.answer,
+        correct: progress[ci]?.results[qi],
+      })),
+    )
+    .filter((g): g is { prompt: string; given: string; answer: string; correct: boolean } => g.correct !== undefined);
+
   return {
     piece,
     chapter,
@@ -260,6 +277,7 @@ export function useListening(settings: Settings) {
     playing,
     finished,
     score,
+    graded,
     generate,
     play,
     replay: play,

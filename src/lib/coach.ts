@@ -41,7 +41,10 @@ export function weeklyReportPrompt(s: Settings, w: WeekStats, pack?: LanguagePac
     w.avgLevelScore != null ? `- performance this week: ${scoreBand(w.avgLevelScore)} within ${levelOf(s.profile)}` : "",
     w.focusAreas.length ? `- recurring weak areas: ${w.focusAreas.join("; ")}` : "",
     `Describe progress in CEFR terms (e.g. "progressing within ${levelOf(s.profile)}"). Never state a numeric score, points, or percentage.`,
-    `Answer with ONLY a JSON object: { "headline": "one upbeat sentence", "report": "2-4 sentences of substance", "wins": ["short win", ...], "focus": ["short area to drill next", ...] }.`,
+    // No "focus" field: what to drill next is derived from the signals (lib/weakness),
+    // not guessed at by the report — asking for it produced a second, softer answer to
+    // a question the plan already answers with evidence.
+    `Answer with ONLY a JSON object: { "headline": "one upbeat sentence", "report": "2-4 sentences of substance", "wins": ["short win", ...] }.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -51,7 +54,6 @@ export interface WeeklyReport {
   headline: string;
   report: string;
   wins: string[];
-  focus: string[];
 }
 
 export function parseWeeklyReport(raw: string): WeeklyReport {
@@ -60,7 +62,6 @@ export function parseWeeklyReport(raw: string): WeeklyReport {
     headline: str(o.headline),
     report: typeof o.report === "string" ? o.report : raw.trim(),
     wins: arr(o.wins),
-    focus: arr(o.focus),
   };
 }
 
