@@ -38,18 +38,23 @@ function stripComments(text: string): string {
     .replace(/\/\/[^\n]*/g, "");
 }
 
+/** True when this source puts a measured level on screen without the sentence that explains it. */
+function violates(text: string): boolean {
+  const src = stripComments(text);
+  return /levelEstimate\.(label|value)/.test(src) && !src.includes("levelGapNote");
+}
+
+// The gate proves itself before it judges anyone: a typo in the regex above would
+// otherwise leave it reporting green over a screen that never explains its own gap.
+assert(violates("<p>{day.levelEstimate.label}</p>"), "a measured level with no note must be caught");
+assert(!violates("<p>{day.levelEstimate.label}{levelGapNote(l, e)}</p>"), "the note clears the gate");
+assert(!violates("{day.levelEstimate.sampleSize === 0 && <p>not yet</p>}"), "sampleSize alone is invariant 26, not 2");
+assert(!violates("// day.levelEstimate.label in a comment"), "comments are not screens");
+
 const files = walk(SRC).filter((p) => p.endsWith(".tsx"));
 assert(files.length > 0, "the gate walked no .tsx files — a silent green is a lie");
 
-const offenders: string[] = [];
-for (const f of files) {
-  if (isExcluded(f)) continue;
-  const src = stripComments(readFileSync(f, "utf8"));
-  const showsMeasured = /levelEstimate\.(label|value)/.test(src);
-  if (showsMeasured && !src.includes("levelGapNote")) {
-    offenders.push(f);
-  }
-}
+const offenders = files.filter((f) => !isExcluded(f) && violates(readFileSync(f, "utf8")));
 if (offenders.length > 0) {
   assert.fail(
     "views showing a measured level must also mention levelGapNote (invariant 2):\n" + offenders.join("\n"),

@@ -114,7 +114,8 @@ assert.equal(progressionSuggested(est("high")), true);
   assert.ok(gap.includes("A2") && gap.includes("B2"), "the gap note names both levels");
   // The note carries level *names*, not a numeric score — strip the CEFR labels
   // and no digit may remain.
-  assert.ok(!/\d/.test(gap.replace(/A1|A2|B1|B2|C1|C2/g, "")), "the gap note must not carry a numeric score");
+  const stripped = gap.replace(new RegExp(CEFR_LEVELS.join("|"), "g"), "");
+  assert.ok(!/\d/.test(stripped), "the gap note must not carry a numeric score");
 }
 
 // levelEstimateFrom: the mean of scores (not the last), confidence from sample size,

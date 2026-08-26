@@ -21,8 +21,9 @@ export function levelPrompt(s: Settings, pack?: LanguagePack): string {
     packGuidance(pack),
     // ponytail: the old flat level could be "" (onboarding skipped) — that state is
     // gone, the migration maps "" → "A2", so `levelOf(s.profile)` is always set and the
-    // "never reported a level" branch is unreachable until 11b-3 restores the real
-    // "not yet measured" condition (levelEstimate.sampleSize).
+    // "never reported a level" branch below is permanently unreachable. "Not yet
+    // measured" is a different question and lives on levelEstimate.sampleSize (#13),
+    // not here. Delete the dead branch when someone is in this file anyway.
     levelOf(s.profile)
       ? `Use the CEFR scale: ${CEFR_LEVELS.join(", ")}. Their self-reported level is ${levelOf(s.profile)} — adjust only if the evidence is clear.`
       : `Use the CEFR scale: ${CEFR_LEVELS.join(", ")}. They never reported a level — place them purely on what they wrote.`,

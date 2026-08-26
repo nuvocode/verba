@@ -95,9 +95,11 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
   }, [settings.profile.targetLanguage, settings.provider, day.plan]);
 
   const bandIdx = Math.max(0, CEFR_LEVELS.indexOf(day.levelEstimate.label));
-  // Position on the A1→C2 rail: the band itself, plus how far the composite has
-  // carried them through it.
-  const within = cells ? ((cells.score % (100 / 6)) / (100 / 6)) * 100 : 0;
+  // Position on the A1→C2 rail: the band itself, plus how far through it the
+  // estimate sits. Both come from day.levelEstimate — taking the band from the
+  // 12-session mean and the position from the latest session's score would slide
+  // the marker on a number that is nowhere on this screen.
+  const within = ((day.levelEstimate.value % (100 / 6)) / (100 / 6)) * 100;
   const pct = ((bandIdx + within / 100) / (CEFR_LEVELS.length - 1)) * 100;
 
   // Measured vs declared: the ray shows what your writing measures at, the `now`
