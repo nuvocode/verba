@@ -55,7 +55,7 @@ export function useDay(settings: Settings): Day {
       setLoading(true);
       try {
         const row = await getDailySession(date);
-        if (row && row.lang === settings.targetLang) {
+        if (row && row.lang === settings.profile.targetLanguage) {
           if (!live) return;
           setPlan(JSON.parse(row.plan));
           setDone(JSON.parse(row.done));
@@ -64,15 +64,15 @@ export function useDay(settings: Settings): Day {
         }
         // No plan for today (or the learner switched language) — build a fresh one.
         const [{ due }, prev] = await Promise.all([
-          vocabCounts(settings.targetLang),
-          latestRecap(settings.targetLang, date),
+          vocabCounts(settings.profile.targetLanguage),
+          latestRecap(settings.profile.targetLanguage, date),
         ]);
         const fresh = buildDailyPlan(settings, { date, dueVocab: due, focus: prev?.nextFocus ?? [] });
         if (!live) return;
         setPlan(fresh);
         setDone([]);
         setRecap(null);
-        await saveDailySession(date, settings.targetLang, fresh, [], null);
+        await saveDailySession(date, settings.profile.targetLanguage, fresh, [], null);
       } catch {
         // No DB (browser dev, first run) — still give the learner a plan to work from.
         if (live) setPlan(buildDailyPlan(settings, { date, dueVocab: 0 }));
@@ -83,18 +83,18 @@ export function useDay(settings: Settings): Day {
     return () => {
       live = false;
     };
-  }, [date, settings.targetLang, settings.cefr]);
+  }, [date, settings.profile.targetLanguage, settings.profile.level]);
 
   const persist = useCallback(
     async (nextDone: BlockKind[], nextRecap: DayRecap | null) => {
       if (!plan) return;
       try {
-        await saveDailySession(date, settings.targetLang, plan, nextDone, nextRecap);
+        await saveDailySession(date, settings.profile.targetLanguage, plan, nextDone, nextRecap);
       } catch {
         /* progress is still held in memory if the DB is unavailable */
       }
     },
-    [plan, date, settings.targetLang],
+    [plan, date, settings.profile.targetLanguage],
   );
 
   const complete = useCallback(

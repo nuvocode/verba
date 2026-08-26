@@ -4,6 +4,7 @@ import type { BlockKind } from "../lib/learn";
 import type { Day } from "../lib/useDay";
 import type { Ask, Read as ReadState } from "../lib/useRead";
 import { CEFR_LEVELS } from "../lib/level";
+import { levelOf } from "../lib/model";
 import AskSheet from "./read/AskSheet";
 import Passage from "./read/Passage";
 import Prompter from "./read/Prompter";
@@ -95,7 +96,7 @@ export default function Read({
           <h2>{read.busy ? "Writing you a passage…" : "Nothing to read yet."}</h2>
           <p>
             {read.busy
-              ? `A ${settings.cefr} story about ${read.ask.topic || day.plan?.theme || "everyday life"}, in ${settings.targetLang}.`
+              ? `A ${levelOf(settings.profile)} story about ${read.ask.topic || day.plan?.theme || "everyday life"}, in ${settings.profile.targetLanguage}.`
               : "The coach writes a story at your level that reuses the words from your conversations."}
           </p>
           {!read.busy && (

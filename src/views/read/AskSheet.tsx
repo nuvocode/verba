@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Settings } from "../../lib/settings";
+import { levelOf } from "../../lib/model";
 import { LENGTHS, type PassageLength } from "../../lib/reading";
 import type { Ask } from "../../lib/useRead";
 
@@ -14,7 +15,7 @@ const BLURB: Record<PassageLength, string> = {
  * What the passage should be, asked before it is written: how long, and what about.
  * A prompt sheet, not a settings dialog — it opens on the last answer, the topic line
  * has the caret, and Enter takes the defaults. Level is not here on purpose: that is
- * `settings.cefr`, and it is not a per-passage decision.
+ * the profile level (`levelOf(settings.profile)`), and it is not a per-passage decision.
  */
 export default function AskSheet({
   settings,
@@ -89,7 +90,7 @@ export default function AskSheet({
           <span>← → length</span>
           <span>esc cancel</span>
           <span style={{ marginLeft: "auto" }}>
-            {settings.cefr} · {settings.targetLang}
+            {levelOf(settings.profile)} · {settings.profile.targetLanguage}
           </span>
         </div>
       </div>

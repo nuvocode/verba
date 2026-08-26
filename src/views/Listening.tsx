@@ -1,4 +1,5 @@
 import type { Settings } from "../lib/settings";
+import { levelOf } from "../lib/model";
 import type { BlockKind } from "../lib/learn";
 import type { Day } from "../lib/useDay";
 import type { Listening as ListeningState } from "../lib/useListening";
@@ -34,7 +35,7 @@ export default function Listening({
         <h2>{listening.busy ? listening.status || "Writing you a story…" : "Nothing to listen to yet."}</h2>
         <p>
           {listening.busy
-            ? `A short ${settings.cefr} story in ${settings.targetLang}, in chapters — you'll hear each one, then answer what you caught.`
+            ? `A short ${levelOf(settings.profile)} story in ${settings.profile.targetLanguage}, in chapters — you'll hear each one, then answer what you caught.`
             : "The coach writes a short story in chapters. You hear each chapter, then answer a couple of questions about what mattered."}
         </p>
         {!listening.busy && (

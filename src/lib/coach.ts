@@ -1,4 +1,5 @@
-import { level, type Settings } from "./settings.ts";
+import type { Settings } from "./settings.ts";
+import { levelOf } from "./model.ts";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 import { memoryBrief, type Memory } from "./prompts.ts";
 
@@ -19,15 +20,15 @@ export interface WeekStats {
 
 export function weeklyReportPrompt(s: Settings, w: WeekStats, pack?: LanguagePack, memories: Memory[] = []): string {
   return [
-    `You are a ${s.targetLang} learning coach writing a short weekly progress report for a ${level(s)} learner.`,
-    `Write in ${s.nativeLang}. Be specific and encouraging, not generic.`,
+    `You are a ${s.profile.targetLanguage} learning coach writing a short weekly progress report for a ${levelOf(s.profile)} learner.`,
+    `Write in ${s.profile.nativeLanguage}. Be specific and encouraging, not generic.`,
     packGuidance(pack),
     memoryBrief(memories),
     // The one place a fact earns its keep unprompted: a week of numbers means
     // something measured against why they are learning at all. But only that —
     // the report is about the week, not about them.
     memories.length
-      ? `If why they are learning ${s.targetLang} is among those facts, measure the week against it. Leave the rest of them out; the report is about the week's work, not about the learner.`
+      ? `If why they are learning ${s.profile.targetLanguage} is among those facts, measure the week against it. Leave the rest of them out; the report is about the week's work, not about the learner.`
       : "",
     `This week's data:`,
     `- practice sessions: ${w.sessions}`,
@@ -37,9 +38,9 @@ export function weeklyReportPrompt(s: Settings, w: WeekStats, pack?: LanguagePac
     `- vocabulary cards reviewed: ${w.vocabReviewed}`,
     // Verba is CEFR-based, not XP: never expose the raw composite as a number.
     // Feed it only as a qualitative band relative to their CEFR level.
-    w.avgLevelScore != null ? `- performance this week: ${scoreBand(w.avgLevelScore)} within ${level(s)}` : "",
+    w.avgLevelScore != null ? `- performance this week: ${scoreBand(w.avgLevelScore)} within ${levelOf(s.profile)}` : "",
     w.focusAreas.length ? `- recurring weak areas: ${w.focusAreas.join("; ")}` : "",
-    `Describe progress in CEFR terms (e.g. "progressing within ${level(s)}"). Never state a numeric score, points, or percentage.`,
+    `Describe progress in CEFR terms (e.g. "progressing within ${levelOf(s.profile)}"). Never state a numeric score, points, or percentage.`,
     `Answer with ONLY a JSON object: { "headline": "one upbeat sentence", "report": "2-4 sentences of substance", "wins": ["short win", ...], "focus": ["short area to drill next", ...] }.`,
   ]
     .filter(Boolean)
@@ -67,11 +68,11 @@ export function parseWeeklyReport(raw: string): WeeklyReport {
 export function drillPrompt(s: Settings, areas: string[], count = 4, pack?: LanguagePack): string {
   const focus = areas.filter(Boolean);
   return [
-    `Create ${count} short ${s.targetLang} practice drills for a ${level(s)} learner.`,
+    `Create ${count} short ${s.profile.targetLanguage} practice drills for a ${levelOf(s.profile)} learner.`,
     packGuidance(pack),
-    focus.length ? `Target these weak areas: ${focus.join("; ")}.` : `Target common ${level(s)} sticking points.`,
+    focus.length ? `Target these weak areas: ${focus.join("; ")}.` : `Target common ${levelOf(s.profile)} sticking points.`,
     `Each drill is one small task the learner can answer in a sentence or two.`,
-    `Answer with ONLY a JSON object: { "drills": [ { "area": "the skill being drilled", "prompt": "the task in ${s.targetLang}", "hint": "a short hint in ${s.nativeLang}", "example": "a model answer in ${s.targetLang}" } ] }.`,
+    `Answer with ONLY a JSON object: { "drills": [ { "area": "the skill being drilled", "prompt": "the task in ${s.profile.targetLanguage}", "hint": "a short hint in ${s.profile.nativeLanguage}", "example": "a model answer in ${s.profile.targetLanguage}" } ] }.`,
   ]
     .filter(Boolean)
     .join("\n");

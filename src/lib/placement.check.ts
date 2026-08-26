@@ -5,7 +5,7 @@ import assert from "node:assert";
 import { defaultSettings, type Settings } from "./settings.ts";
 import { PLACEMENT_LADDER, parsePlacement, placementPrompt, scorePlacement, type PlacementQ } from "./placement.ts";
 
-const s: Settings = { ...defaultSettings, targetLang: "Spanish", nativeLang: "Turkish" };
+const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "Turkish" } };
 
 // ---- the ask: every level, the learner's languages, JSON only ----
 const p = placementPrompt(s);

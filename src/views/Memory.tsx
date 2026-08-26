@@ -39,11 +39,11 @@ export default function Memory({
 
   const load = useCallback(async () => {
     try {
-      setWords(await allVocab(settings.targetLang));
+      setWords(await allVocab(settings.profile.targetLanguage));
     } catch (e: any) {
       setError(String(e?.message ?? e));
     }
-  }, [settings.targetLang]);
+  }, [settings.profile.targetLanguage]);
 
   useEffect(() => {
     void load();
@@ -235,7 +235,7 @@ export default function Memory({
       <div className="mem-head">
         <div>
           <div className="eyebrow">
-            Memory · {good.length} {good.length === 1 ? "word" : "words"} · {settings.targetLang}
+            Memory · {good.length} {good.length === 1 ? "word" : "words"} · {settings.profile.targetLanguage}
           </div>
           <h1 className="display">Everything you've met, in context.</h1>
         </div>

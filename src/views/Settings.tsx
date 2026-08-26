@@ -7,6 +7,7 @@ import {
   type ProviderId,
   type Settings,
 } from "../lib/settings";
+import { CEFR_LEVELS, type CEFRLevel } from "../lib/model";
 import { deepgramHelp, listenBlocker, resolveTier, type Tier } from "../lib/speech";
 import {
   CATALOG,
@@ -467,13 +468,13 @@ export default function SettingsView({
   useEffect(() => {
     if (tab !== "memory") return;
     let live = true;
-    void allMemories(settings.targetLang)
+    void allMemories(settings.profile.targetLanguage)
       .then((rows) => live && setMemories(rows))
       .catch(() => live && setMemories([])); // no DB (browser dev server) reads as nothing recorded
     return () => {
       live = false;
     };
-  }, [tab, settings.targetLang]);
+  }, [tab, settings.profile.targetLanguage]);
 
   /** Strike a line out. The row goes, and with it whatever it was steering. */
   const forget = async (m: MemoryRow) => {
@@ -728,7 +729,7 @@ export default function SettingsView({
           {packs.map((p) => {
             const origin = packOrigin(p.id);
             return (
-              <button key={p.id} className="srow" onClick={() => onChange({ packId: p.id, targetLang: p.name })}>
+              <button key={p.id} className="srow" onClick={() => onChange({ packId: p.id, profile: { ...settings.profile, targetLanguage: p.name } })}>
                 <div className={`radio ${settings.packId === p.id ? "on" : ""}`} />
                 <div style={{ flex: 1 }}>
                   <div className="name">
@@ -761,7 +762,7 @@ export default function SettingsView({
               on every model call, so the learner is told which ones those are. */}
           {packShadowed && packDocs(settings.packId).length > 0 && (
             <div className="desc" style={{ marginTop: 16 }}>
-              You imported your own <strong>{settings.targetLang}</strong> pack, so it replaces the built-in one — the
+              You imported your own <strong>{settings.profile.targetLanguage}</strong> pack, so it replaces the built-in one — the
               bundled language guide is hidden and the tutor follows your pack's instructions only. Remove the imported
               pack to get the built-in guide back.
             </div>
@@ -810,14 +811,18 @@ export default function SettingsView({
 
           <div className="field" style={{ marginTop: 10 }}>
             <label>I speak</label>
-            <input value={settings.nativeLang} onChange={(e) => onChange({ nativeLang: e.target.value })} />
+            <input value={settings.profile.nativeLanguage} onChange={(e) => onChange({ profile: { ...settings.profile, nativeLanguage: e.target.value } })} />
           </div>
           <div className="field">
             <label>My level</label>
-            <select value={settings.cefr} onChange={(e) => onChange({ cefr: e.target.value })}>
-              <option value="">Not set — placed in your first conversation</option>
-              {["A1", "A2", "B1", "B2", "C1", "C2"].map((l) => (
-                <option key={l}>{l}</option>
+            <select
+              value={settings.profile.level}
+              onChange={(e) => onChange({ profile: { ...settings.profile, level: e.target.value as CEFRLevel } })}
+            >
+              {CEFR_LEVELS.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
               ))}
             </select>
           </div>
@@ -1086,7 +1091,7 @@ export default function SettingsView({
             here stops steering the prompts at once.
           </div>
           <div className="desc" style={{ maxWidth: 480, lineHeight: 1.5, margin: "0 4px 18px" }}>
-            This is your record, kept for <strong>{settings.targetLang}</strong>. The words you're studying live in
+            This is your record, kept for <strong>{settings.profile.targetLanguage}</strong>. The words you're studying live in
             Memory, up in the nav — that's the other one.
           </div>
 
@@ -1095,7 +1100,7 @@ export default function SettingsView({
           ) : memories.length === 0 ? (
             <div className="desc" style={{ padding: "4px", maxWidth: 480, lineHeight: 1.5 }}>
               Nothing recorded yet. Have a conversation and tell the coach something about yourself — what you do, why
-              you're learning {settings.targetLang}, who's in your life. It writes down what's worth keeping when the
+              you're learning {settings.profile.targetLanguage}, who's in your life. It writes down what's worth keeping when the
               session ends.
             </div>
           ) : (

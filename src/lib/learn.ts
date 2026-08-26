@@ -1,4 +1,5 @@
-import { level, type Settings } from "./settings.ts";
+import type { Settings } from "./settings.ts";
+import { levelOf } from "./model.ts";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 
 // Learning engine — turns the app's separate activities into one coherent daily
@@ -68,7 +69,7 @@ export function themeForDate(date: string, interests: string[] = []): string {
 
 /** Build a personalised daily session. Pure — no I/O, no clock. */
 export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
-  const theme = ctx.theme?.trim() || themeForDate(ctx.date, s.goals);
+  const theme = ctx.theme?.trim() || themeForDate(ctx.date, s.profile.interests);
   const focus = (ctx.focus ?? []).filter(Boolean).slice(0, 3);
   const drill = focus[0];
 
@@ -76,7 +77,7 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
     {
       kind: "conversation",
       title: `Conversation — ${theme}`,
-      detail: `Hold a ${s.targetLang} conversation about ${theme}.`,
+      detail: `Hold a ${s.profile.targetLanguage} conversation about ${theme}.`,
       minutes: 10,
       scenarioId: "free",
       goal: drill,
@@ -84,14 +85,14 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
     {
       kind: "reading",
       title: `Reading — ${theme}`,
-      detail: `Read a short level-${level(s)} story about ${theme}.`,
+      detail: `Read a short level-${levelOf(s.profile)} story about ${theme}.`,
       minutes: 5,
       goal: focus[1] ?? drill,
     },
     {
       kind: "scenario",
       title: "Role-play",
-      detail: `Practise a real-world ${s.targetLang} scenario.`,
+      detail: `Practise a real-world ${s.profile.targetLanguage} scenario.`,
       minutes: 5,
       scenarioId: pickScenario(theme),
     },
@@ -111,7 +112,7 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
   blocks.push({
     kind: "listening",
     title: "Listening",
-    detail: `Hear a short ${s.targetLang} story and answer what you caught.`,
+    detail: `Hear a short ${s.profile.targetLanguage} story and answer what you caught.`,
     minutes: 6,
     goal: focus[2] ?? drill,
   });
@@ -126,7 +127,7 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
   return {
     date: ctx.date,
     theme,
-    level: level(s),
+    level: levelOf(s.profile),
     focus,
     blocks,
     totalMinutes: blocks.reduce((n, b) => n + b.minutes, 0),
@@ -154,11 +155,11 @@ function pickScenario(theme: string): string {
 /** Prompt for the end-of-day recap that ties the whole session together. */
 export function recapPrompt(s: Settings, plan: DailyPlan, done: BlockKind[], pack?: LanguagePack): string {
   return [
-    `The learner just finished a daily ${s.targetLang} session themed "${plan.theme}" (level ${plan.level}).`,
+    `The learner just finished a daily ${s.profile.targetLanguage} session themed "${plan.theme}" (level ${plan.level}).`,
     packGuidance(pack),
     `They completed: ${done.join(", ") || "nothing"}.`,
     plan.focus.length ? `They are working on: ${plan.focus.join("; ")}.` : "",
-    `Answer with ONLY a JSON object: { "recap": "2-3 encouraging sentences in ${s.nativeLang} on what they practised", "nextFocus": ["one short thing to work on tomorrow", ...] }.`,
+    `Answer with ONLY a JSON object: { "recap": "2-3 encouraging sentences in ${s.profile.nativeLanguage} on what they practised", "nextFocus": ["one short thing to work on tomorrow", ...] }.`,
   ]
     .filter(Boolean)
     .join("\n");

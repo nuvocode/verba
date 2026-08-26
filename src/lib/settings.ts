@@ -2,6 +2,7 @@ import { detectNativeLang } from "./langs.ts";
 import { markDirty } from "./vault.ts";
 import { migrateSpeech, type Tier } from "./speech.ts";
 import { DEFAULT_WPM } from "./prompter.ts";
+import { CEFR_LEVELS, type CEFRLevel, type LearnerProfile } from "./model.ts";
 
 /** What the documented Docker one-liners listen on — the placeholder, and the value
  *  "Local server" seeds itself with when it has nothing yet. */
@@ -45,9 +46,12 @@ export interface Settings {
    * models that don't reason ignore this either way.
    */
   thinking: boolean;
-  nativeLang: string; // learner's first language — explanations are given in it
-  targetLang: string; // language being practised
-  cefr: string; // self-reported level (A1–C2), "" until the first conversation places them
+  /**
+   * The learner's one shared record — language, level, interests, the coach's
+   * level estimate, streak. The single door every surface reads the level
+   * through is `levelOf(profile)` (lib/model.ts).
+   */
+  profile: LearnerProfile;
   packId: string; // active language pack (see lib/packs) — "" for none
   speak: boolean; // read AI replies / reading text aloud (TTS)
   // The two halves of speech are picked independently: a key means "use it",
@@ -77,7 +81,6 @@ export interface Settings {
   sttTier: Tier;
   onboarded: boolean; // false → the welcome flow runs instead of the app
   dailyMinutes: number; // how long a session should be, from onboarding
-  goals: string[]; // why they're learning — steers scenarios and reading topics; may be empty
   theme: "light" | "dark";
   correctionTiming: CorrectionTiming;
   offline: boolean; // hard-forces local providers; cloud options are disabled
@@ -88,11 +91,9 @@ export interface Settings {
   prompterWpm: number; // the pace they last read out loud at (lib/prompter clamps it)
 }
 
-/** The level to write prompts against. "" (skipped) reads as A2 until the first conversation places them. */
-export const level = (s: Settings) => s.cefr || "A2";
-
-/** What "Skip setup" from step 2 onward leaves behind: level unset, a short session, no interests. */
-export const SKIP_DEFAULTS = { cefr: "", dailyMinutes: 20, goals: [] as string[] };
+/** What "Skip setup" from step 2 onward leaves behind: the A2 fallback (the old
+ *  "unset level" now reads as A2 directly), a short session, no interests. */
+export const SKIP_DEFAULTS = { level: "A2" as CEFRLevel, dailyMinutes: 20, interests: [] as string[] };
 
 /**
  * Replaying onboarding starts the setup over: language, level, rhythm and interests are
@@ -102,10 +103,8 @@ export const SKIP_DEFAULTS = { cefr: "", dailyMinutes: 20, goals: [] as string[]
 export const onboardingReset = (): Partial<Settings> => ({
   onboarded: false,
   packId: defaultSettings.packId,
-  targetLang: defaultSettings.targetLang,
-  cefr: defaultSettings.cefr,
+  profile: { ...defaultSettings.profile, interests: [] },
   dailyMinutes: defaultSettings.dailyMinutes,
-  goals: [],
 });
 
 const KEY = "verba.settings";
@@ -125,9 +124,21 @@ export const defaultSettings: Settings = {
   lmstudioModel: "local-model",
   lmstudioHost: "http://localhost:1234/v1",
   thinking: false,
-  nativeLang: detectNativeLang(),
-  targetLang: "Spanish",
-  cefr: "B1",
+  // One shared record — see the field's doc on the interface. createdAt/timezone
+  // stay 0/"" here: migrateProfile stamps them on first write, so defaultSettings
+  // stays clock-free (a plan can be built without ever asking the clock).
+  profile: {
+    targetLanguage: "Spanish",
+    nativeLanguage: detectNativeLang(),
+    level: "B1",
+    interests: [],
+    goals: [],
+    weaknesses: [],
+    levelEstimate: { value: 0, label: "A1", confidence: "low", sampleSize: 0 },
+    createdAt: 0,
+    streak: 0,
+    timezone: "",
+  },
   packId: "es",
   speak: true,
   elevenLabsKey: "",
@@ -149,7 +160,6 @@ export const defaultSettings: Settings = {
   sttTier: "auto",
   onboarded: false,
   dailyMinutes: 45,
-  goals: [],
   theme: "light",
   correctionTiming: "adaptive",
   offline: true,
@@ -160,11 +170,49 @@ export const defaultSettings: Settings = {
   prompterWpm: DEFAULT_WPM,
 };
 
+const isCefrLevel = (v: unknown): v is CEFRLevel =>
+  typeof v === "string" && (CEFR_LEVELS as readonly string[]).includes(v);
+
+/**
+ * v2 nested the learner's four flat fields into one `profile`. One-way, and the
+ * one place the old "unset level" fallback survives: a missing or unrecognised
+ * `cefr` reads as "A2", exactly as the deleted `level()` helper did. `goals` were
+ * really interests (the chips that steer themes), so they land in `interests` and
+ * `goals` starts empty. `levelEstimate` is never back-filled here — it is the
+ * coach's observation, and migration has not observed anything. `createdAt` and
+ * `timezone` are stamped here (the clock lives at the write, not in the defaults).
+ */
+export function migrateProfile<T extends Record<string, unknown>>(raw: T): T {
+  if ("profile" in raw) return raw; // already nested — idempotent
+  const { cefr, targetLang, nativeLang, goals, ...rest } = raw as T & {
+    cefr?: unknown;
+    targetLang?: unknown;
+    nativeLang?: unknown;
+    goals?: unknown;
+  };
+  const level: CEFRLevel = isCefrLevel(cefr) ? cefr : "A2";
+  return {
+    ...rest,
+    profile: {
+      targetLanguage: typeof targetLang === "string" ? targetLang : "Spanish",
+      nativeLanguage: typeof nativeLang === "string" ? nativeLang : detectNativeLang(),
+      level,
+      levelEstimate: { value: 0, label: "A1", confidence: "low", sampleSize: 0 },
+      interests: Array.isArray(goals) ? goals.filter((g): g is string => typeof g === "string") : [],
+      goals: [],
+      weaknesses: [],
+      createdAt: Date.now(),
+      streak: 0,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    },
+  } as unknown as T;
+}
+
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...defaultSettings };
-    return { ...defaultSettings, ...migrateSpeech(JSON.parse(raw)) };
+    return { ...defaultSettings, ...migrateProfile(migrateSpeech(JSON.parse(raw))) };
   } catch {
     return { ...defaultSettings };
   }

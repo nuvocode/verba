@@ -51,7 +51,7 @@ assert.equal(ja.messages, 1);
 assert(ja.avgSentenceLen > 1, "…spread across its two sentences");
 
 // --- every prompt that names the target language carries the pack ---
-const s: Settings = { ...defaultSettings, packId: "ja", targetLang: "Japanese", cefr: "A1" };
+const s: Settings = { ...defaultSettings, packId: "ja", profile: { ...defaultSettings.profile, targetLanguage: "Japanese", level: "A1" } };
 const pack = getPack("ja");
 assert(pack, "the bundled Japanese pack must resolve");
 const plan = buildDailyPlan(s, { date: "2026-07-12", dueVocab: 0 });

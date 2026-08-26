@@ -5,8 +5,9 @@ import { getProvider } from "../lib/providers";
 import { weeklyReportPrompt, parseWeeklyReport, type WeeklyReport } from "../lib/coach";
 import { getPack } from "../lib/packs";
 import { CEFR_LEVELS } from "../lib/level";
+import { levelOf } from "../lib/model";
 import { estimateLevelV2, metricsFromRow } from "../lib/metrics";
-import { activeDays, latestLevelSignal, recentMemories, recentMetricScores, recentMetrics, weekStats } from "../lib/db";
+import { activeDays, recentMemories, recentMetricScores, recentMetrics, weekStats } from "../lib/db";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -30,7 +31,6 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
   const [cells, setCells] = useState<Cells | null>(null);
   const [days, setDays] = useState<boolean[]>([]);
   const [trend, setTrend] = useState<number[]>([]);
-  const [level, setLevel] = useState<string>(settings.cefr);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
 
@@ -41,19 +41,18 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
       setError("");
       try {
         const since = Date.now() - WEEK_MS;
-        const [stats, rows, scores, active, signal, memories] = await Promise.all([
-          weekStats(settings.targetLang, since),
-          recentMetrics(settings.targetLang, 2),
-          recentMetricScores(settings.targetLang, 12),
+        const [stats, rows, scores, active, memories] = await Promise.all([
+          weekStats(settings.profile.targetLanguage, since),
+          recentMetrics(settings.profile.targetLanguage, 2),
+          recentMetricScores(settings.profile.targetLanguage, 12),
           activeDays(),
-          latestLevelSignal(settings.targetLang).catch(() => null),
-          recentMemories(settings.targetLang).catch(() => []),
+          // ponytail: the measured-level band (from levelEstimate) returns in 11b-3
+          recentMemories(settings.profile.targetLanguage).catch(() => []),
         ]);
         if (!live) return;
 
         setDays(active);
         setTrend(scores);
-        setLevel(signal?.estimate ?? settings.cefr);
 
         if (rows[0]) {
           const now = estimateLevelV2(metricsFromRow(rows[0]));
@@ -94,9 +93,9 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
     return () => {
       live = false;
     };
-  }, [settings.targetLang, settings.provider, day.plan]);
+  }, [settings.profile.targetLanguage, settings.provider, day.plan]);
 
-  const bandIdx = Math.max(0, CEFR_LEVELS.indexOf(level as any));
+  const bandIdx = Math.max(0, CEFR_LEVELS.indexOf(levelOf(settings.profile)));
   // Position on the A1→C2 rail: the band itself, plus how far the composite has
   // carried them through it.
   const within = cells ? ((cells.score % (100 / 6)) / (100 / 6)) * 100 : 0;
@@ -113,7 +112,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
   return (
     <div className="coach fade">
       <div className="eyebrow">
-        Coach · {weekRange()} · {settings.targetLang}
+        Coach · {weekRange()} · {settings.profile.targetLanguage}
       </div>
       <h1 className="display">{report?.headline ?? (busy ? "Reading your week…" : "Quiet, steady progress.")}</h1>
 
@@ -136,7 +135,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
         </div>
         <div className="cefr-scale">
           {CEFR_LEVELS.map((l) => (
-            <span key={l} className={l === level ? "now" : ""}>
+            <span key={l} className={l === levelOf(settings.profile) ? "now" : ""}>
               {l}
             </span>
           ))}

@@ -4,12 +4,12 @@ import { getPack, listPacks, packOrigin, originLabel } from "../lib/packs";
 import { languages } from "../lib/langs";
 import { listModels, type LocalProvider } from "../lib/models";
 import { getProvider } from "../lib/providers";
-import { CEFR_LEVELS, type Cefr } from "../lib/level";
+import { CEFR_LEVELS, type CEFRLevel } from "../lib/model";
 import { parsePlacement, placementPrompt, scorePlacement, type PlacementQ } from "../lib/placement";
 import { attach, detach, pickFolder, pull } from "../lib/vault";
 
 /** Every CEFR level is selectable — the test only proposes one. */
-const LEVELS: [Cefr, string, string][] = [
+const LEVELS: [CEFRLevel, string, string][] = [
   ["A1", "Brand new", "I know a few words at most. Start me from zero, gently."],
   ["A2", "I can get by", "Ordering food, asking directions — but real conversations lose me fast."],
   ["B1", "Conversational", "I can hold a conversation but plateau on nuance, speed, and idiom."],
@@ -39,7 +39,7 @@ const TIMES: [number, string][] = [
   [75, "deep immersion"],
 ];
 
-const GOALS = ["Travel", "Work", "Family & friends", "Books & film"];
+const INTERESTS = ["Travel", "Work", "Family & friends", "Books & film"];
 
 const STEP_LABELS = ["Setup · 1 of 4", "Setup · 2 of 4", "Setup · 3 of 4", "Setup · 4 of 4", "Your plan"];
 
@@ -167,10 +167,10 @@ export default function Onboarding({
   // Nothing is pre-selected on a fresh install — a default target language would be a silent
   // guess. On a replay, the learner's current pack is shown as chosen.
   const [packId, setPackId] = useState(settings.onboarded ? settings.packId : "");
-  const [nativeLang, setNativeLang] = useState(settings.nativeLang);
-  const [cefr, setCefr] = useState(settings.onboarded ? settings.cefr : "");
+  const [nativeLang, setNativeLang] = useState(settings.profile.nativeLanguage);
+  const [cefr, setCefr] = useState<CEFRLevel>(settings.profile.level);
   const [minutes, setMinutes] = useState(settings.dailyMinutes);
-  const [goals, setGoals] = useState<string[]>(settings.goals);
+  const [interests, setInterests] = useState<string[]>(settings.profile.interests);
 
   // ---- level test (step 2) ----
   const [mode, setMode] = useState<LevelMode>("intro");
@@ -182,7 +182,7 @@ export default function Onboarding({
   const host = hosts[prov];
   const model = models[prov];
   const pack = packs.find((p) => p.id === packId);
-  const lang = pack?.name ?? settings.targetLang;
+  const lang = pack?.name ?? settings.profile.targetLanguage;
 
   const patch = (): Partial<Settings> => ({
     provider: prov as ProviderId,
@@ -191,11 +191,14 @@ export default function Onboarding({
     lmstudioHost: hosts.lmstudio,
     lmstudioModel: models.lmstudio,
     packId,
-    targetLang: lang,
-    nativeLang,
-    cefr,
+    profile: {
+      ...settings.profile,
+      targetLanguage: lang,
+      nativeLanguage: nativeLang,
+      level: cefr,
+      interests,
+    },
     dailyMinutes: minutes,
-    goals,
   });
 
   /** The settings the placement test itself must run under — the ones just chosen, not the saved ones. */
@@ -246,9 +249,9 @@ export default function Onboarding({
   };
 
   const skip = () => {
-    setCefr(SKIP_DEFAULTS.cefr);
+    setCefr(SKIP_DEFAULTS.level);
     setMinutes(SKIP_DEFAULTS.dailyMinutes);
-    setGoals(SKIP_DEFAULTS.goals);
+    setInterests(SKIP_DEFAULTS.interests);
     setStep(4);
   };
 
@@ -588,11 +591,11 @@ export default function Onboarding({
           Mostly for <span className="opt">optional</span>
         </div>
         <div className="row" style={{ flexWrap: "wrap", gap: 10, marginBottom: 40 }}>
-          {GOALS.map((g) => (
+          {INTERESTS.map((g) => (
             <button
               key={g}
-              className={`chip ${goals.includes(g) ? "on" : ""}`}
-              onClick={() => setGoals((gs) => (gs.includes(g) ? gs.filter((x) => x !== g) : [...gs, g]))}
+              className={`chip ${interests.includes(g) ? "on" : ""}`}
+              onClick={() => setInterests((gs) => (gs.includes(g) ? gs.filter((x) => x !== g) : [...gs, g]))}
             >
               {g}
             </button>

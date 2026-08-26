@@ -5,7 +5,7 @@ import assert from "node:assert";
 import { defaultSettings, type Settings } from "./settings.ts";
 import { storyPrompt, LENGTHS, DEFAULT_LENGTH } from "./reading.ts";
 
-const s: Settings = { ...defaultSettings, targetLang: "Spanish", nativeLang: "English" };
+const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "English" } };
 
 // --- length: three words the reader can say, three counts the model is given ---
 assert(LENGTHS.short < LENGTHS.medium && LENGTHS.medium < LENGTHS.long, "the three lengths are actually ordered");

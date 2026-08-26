@@ -541,7 +541,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
                 setQuery(e.target.value);
                 setPIdx(0);
               }}
-              placeholder={`Jump anywhere, start anything, or ask about ${settings.targetLang}…`}
+              placeholder={`Jump anywhere, start anything, or ask about ${settings.profile.targetLanguage}…`}
             />
             <div className="list">
               {items.map((item, i) => (

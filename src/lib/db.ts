@@ -156,7 +156,13 @@ async function migrateVocabToPerLanguage(db: Database): Promise<void> {
 
   let lang = "";
   try {
-    lang = JSON.parse(localStorage.getItem("verba.settings") ?? "{}").targetLang ?? "";
+    // Both shapes, because this migration is one-shot and irreversible: it is gated on
+    // the `lang` column being absent, so a run that reads "" orphans the whole deck for
+    // good — the rows survive, but every query is language-scoped and none of them match.
+    // Settings moved targetLang under `profile` (see lib/settings migrateProfile), and
+    // saveSettings can write the new shape before the DB is ever opened.
+    const raw = JSON.parse(localStorage.getItem("verba.settings") ?? "{}");
+    lang = raw.profile?.targetLanguage ?? raw.targetLang ?? "";
   } catch {
     /* no settings to read — the cards land under "" and the learner recaptures them */
   }

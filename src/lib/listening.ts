@@ -1,4 +1,5 @@
-import { level, type Settings } from "./settings.ts";
+import type { Settings } from "./settings.ts";
+import { levelOf } from "./model.ts";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 import { questionInstructions, questionsShape, parseQuestions, type Question } from "./questions.ts";
 
@@ -50,8 +51,8 @@ export interface ListeningOptions {
 
 function base(s: Settings, pack?: LanguagePack): string {
   return [
-    `You write graded listening material for a ${s.targetLang} learner whose native language is ${s.nativeLang}.`,
-    `Target CEFR level: ${level(s)}. Keep vocabulary and grammar appropriate for that level.`,
+    `You write graded listening material for a ${s.profile.targetLanguage} learner whose native language is ${s.profile.nativeLanguage}.`,
+    `Target CEFR level: ${levelOf(s.profile)}. Keep vocabulary and grammar appropriate for that level.`,
     packGuidance(pack),
   ]
     .filter(Boolean)
@@ -64,7 +65,7 @@ export function outlinePrompt(s: Settings, opts: ListeningOptions = {}, pack?: L
     base(s, pack),
     opts.interests ? `Tailor it to the learner's interests: ${opts.interests}.` : `Pick an engaging everyday situation.`,
     `Plan a short ${CHAPTERS}-chapter story with a real arc — a situation, a complication, a resolution — and recurring people, so that paying attention across chapters is rewarded.`,
-    `Answer with ONLY a JSON object: { "title": "a short title in ${s.targetLang}", "premise": "1-2 sentences in ${s.nativeLang} on the arc and who is in it", "beats": [ { "title": "chapter title in ${s.targetLang}", "beat": "one line in ${s.nativeLang} on what happens" } ] }. Give exactly ${CHAPTERS} beats.`,
+    `Answer with ONLY a JSON object: { "title": "a short title in ${s.profile.targetLanguage}", "premise": "1-2 sentences in ${s.profile.nativeLanguage} on the arc and who is in it", "beats": [ { "title": "chapter title in ${s.profile.targetLanguage}", "beat": "one line in ${s.profile.nativeLanguage} on what happens" } ] }. Give exactly ${CHAPTERS} beats.`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -90,8 +91,8 @@ export function chapterPrompt(
     `The whole arc, so this chapter keeps the thread and the same people:\n${arc}`,
     `Write chapter ${index + 1} — "${beat?.title}": ${beat?.beat}. About 5-8 sentences. It is heard, not read, so keep the sentences speakable and clear, and carry the people and what they are doing over from the earlier chapters.`,
     opts.goal ? `Where natural, give practice with: ${opts.goal}.` : "",
-    questionInstructions(s.targetLang, s.nativeLang, QUESTIONS_PER_CHAPTER),
-    `Answer with ONLY a JSON object: { "sentences": [ { "target": "one sentence in ${s.targetLang}", "native": "its translation in ${s.nativeLang}" } ], ${questionsShape(s.targetLang, s.nativeLang)} }. One object per sentence, so the transcript lines up.`,
+    questionInstructions(s.profile.targetLanguage, s.profile.nativeLanguage, QUESTIONS_PER_CHAPTER),
+    `Answer with ONLY a JSON object: { "sentences": [ { "target": "one sentence in ${s.profile.targetLanguage}", "native": "its translation in ${s.profile.nativeLanguage}" } ], ${questionsShape(s.profile.targetLanguage, s.profile.nativeLanguage)} }. One object per sentence, so the transcript lines up.`,
   ]
     .filter(Boolean)
     .join("\n\n");

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Settings } from "../lib/settings";
+import { levelOf } from "../lib/model";
 import type { BlockKind } from "../lib/learn";
 import type { Day } from "../lib/useDay";
 import type { Talk as TalkState } from "../lib/useTalk";
@@ -108,7 +109,7 @@ export default function Talk({
   if (!talk.started)
     return (
       <div className="today fade">
-        <div className="eyebrow">Talk · {settings.targetLang}</div>
+        <div className="eyebrow">Talk · {settings.profile.targetLanguage}</div>
         <h1 className="display" style={{ fontSize: 40, margin: "12px 0 10px" }}>
           What are we practising?
         </h1>
@@ -287,7 +288,7 @@ export default function Talk({
           <div className="stream-scroll" ref={scroll}>
             <div className="stream-inner">
               <div className="eyebrow" style={{ marginBottom: 6 }}>
-                Scenario · {settings.cefr}
+                Scenario · {levelOf(settings.profile)}
               </div>
               <div style={{ fontFamily: "var(--serif)", fontSize: 30, fontWeight: 500, marginBottom: 34 }}>
                 {talk.scenario?.title}
@@ -360,7 +361,7 @@ export default function Talk({
                       void talk.end();
                     }
                   }}
-                  placeholder={`Answer in ${settings.targetLang}…`}
+                  placeholder={`Answer in ${settings.profile.targetLanguage}…`}
                   autoFocus
                 />
                 {talk.listening && (

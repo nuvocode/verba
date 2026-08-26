@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import type { Settings } from "./settings";
+import { levelOf } from "./model";
 import { getProvider } from "./providers";
 import {
   storyPrompt,
@@ -76,7 +77,7 @@ export function useRead(settings: Settings) {
 
   // Nothing to translate when the target and native language are the same — the
   // "native" line is just the sentence again. Bilingual mode has no meaning here.
-  const canBilingual = settings.targetLang.trim().toLowerCase() !== settings.nativeLang.trim().toLowerCase();
+  const canBilingual = settings.profile.targetLanguage.trim().toLowerCase() !== settings.profile.nativeLanguage.trim().toLowerCase();
 
   /**
    * Generate a fresh passage. `goal` folds the day's weak area into the text.
@@ -99,7 +100,7 @@ export function useRead(settings: Settings) {
       try {
         // The passage is set in the learner's own world where it can be — the same
         // facts the coach talks to them about, doing a second job here.
-        const memories = await recentMemories(settings.targetLang).catch(() => []);
+        const memories = await recentMemories(settings.profile.targetLanguage).catch(() => []);
         const raw = await getProvider(settings).chat(
           [
             {
@@ -116,7 +117,7 @@ export function useRead(settings: Settings) {
         const t = parseReading(raw);
         if (!t.sentences.length) throw new Error("The model returned no readable sentences. Try again.");
         setText(t);
-        await saveReading(settings.targetLang, t.title, t, { length, topic, cefr: settings.cefr }).catch(() => {});
+        await saveReading(settings.profile.targetLanguage, t.title, t, { length, topic, cefr: levelOf(settings.profile) }).catch(() => {});
       } catch (e: any) {
         setError(String(e?.message ?? e));
       } finally {
@@ -187,15 +188,15 @@ export function useRead(settings: Settings) {
   const saveWord = useCallback(async () => {
     const p = popover;
     if (!p || !p.lemma || p.gloss === "…") return;
-    await addVocab(settings.targetLang, { term: p.lemma, translation: p.gloss, example: p.sentence }).catch(() => {});
+    await addVocab(settings.profile.targetLanguage, { term: p.lemma, translation: p.gloss, example: p.sentence }).catch(() => {});
     setPopover((cur) => (cur && cur.term === p.term ? { ...cur, saved: true } : cur));
     setSaved((s) => (s.includes(p.term) ? s : [...s, p.term]));
-  }, [popover, settings.targetLang]);
+  }, [popover, settings.profile.targetLanguage]);
 
   /** Load the reading library for the empty state. */
   const loadLibrary = useCallback(async () => {
-    setLibrary(await listReadings(settings.targetLang).catch(() => []));
-  }, [settings.targetLang]);
+    setLibrary(await listReadings(settings.profile.targetLanguage).catch(() => []));
+  }, [settings.profile.targetLanguage]);
 
   /** Clear the current passage — drops back to the empty state, where the library lives. */
   const close = useCallback(() => {
@@ -297,18 +298,18 @@ export function useRead(settings: Settings) {
     const correct = c.results.filter((r) => r === true).length;
     const total = c.questions.length || 1;
     try {
-      const deckSize = (await vocabCounts(settings.targetLang)).total;
+      const deckSize = (await vocabCounts(settings.profile.targetLanguage)).total;
       const m = computeMetrics(text.sentences.map((s) => s.target), {
         corrections: total - correct,
         deckSize,
         locale: pack?.speech.locale,
       });
-      await saveMetrics(settings.targetLang, m, Math.round((correct / total) * 100));
+      await saveMetrics(settings.profile.targetLanguage, m, Math.round((correct / total) * 100));
     } catch {
       /* the signal is best-effort — a finished check still counts */
     }
     setCheck(null);
-  }, [check, text, settings.targetLang, pack]);
+  }, [check, text, settings.profile.targetLanguage, pack]);
 
   /** Leave the check without recording anything — an escape hatch, not the happy path. */
   const skipCheck = useCallback(() => setCheck(null), []);
