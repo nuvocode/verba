@@ -1,8 +1,6 @@
-import { useEffect, useState } from "react";
 import type { Settings } from "../lib/settings";
-import type { BlockKind } from "../lib/learn";
+import type { ActivityKind } from "../lib/model";
 import type { Day } from "../lib/useDay";
-import { dayNumber } from "../lib/db";
 
 function greeting(h = new Date().getHours()): string {
   if (h < 12) return "Good morning";
@@ -20,16 +18,8 @@ export default function Today({
 }: {
   settings: Settings;
   day: Day;
-  onBegin: (kind: BlockKind) => void;
+  onBegin: (kind: ActivityKind) => void;
 }) {
-  const [dayNo, setDayNo] = useState<number | null>(null);
-
-  useEffect(() => {
-    dayNumber()
-      .then(setDayNo)
-      .catch(() => {});
-  }, [day.plan]);
-
   if (!day.plan)
     return (
       <div className="today fade">
@@ -38,38 +28,31 @@ export default function Today({
     );
 
   const { plan } = day;
-  const focus = plan.focus[0];
 
   return (
     <div className="today fade">
       <div className="eyebrow">
-        {dateLine()} · Day {dayNo ?? 1} · {settings.targetLang}
+        {dateLine()} · Day {plan.dayIndex} · {settings.profile.targetLanguage}
       </div>
       <h1 className="display">{greeting()}.</h1>
 
-      {/* Level was skipped in onboarding — say so, once, until the first conversation places them. */}
-      {!settings.cefr && (
-        <div className="lede" style={{ maxWidth: 640, marginBottom: 20 }}>
-          <div className="bullet" />
-          <p style={{ fontSize: 15, color: "var(--ink2)" }}>
-            I'll calibrate your level in our first conversation. Session length is {settings.dailyMinutes} min — change
-            anytime.
-          </p>
+      {/* invariant 26: nothing measured is claimed before measurement begins. */}
+      {day.levelEstimate.sampleSize === 0 && (
+        <div style={{ color: "var(--ink3)", fontSize: 14, marginBottom: 20 }}>
+          I'll start measuring your level after a few conversations.
         </div>
       )}
 
       <div className="lede" style={{ maxWidth: 640, marginBottom: 52 }}>
         <div className="bullet live" />
         <p>
-          {focus
-            ? `Yesterday ${focus.charAt(0).toLowerCase()}${focus.slice(1)} gave you trouble, so today's session drills it in conversation before the reading.`
-            : `Today is themed around ${plan.theme} — conversation first, then a passage that reuses what you just said.`}{" "}
-          About {plan.totalMinutes} minutes in all — press <span className="kbd">↵</span> to begin.
+          Today is themed around {plan.theme} — conversation first, then a passage that reuses what you just said.{" "}
+          About {plan.estimatedMinutes} minutes in all — press <span className="kbd">↵</span> to begin.
         </p>
       </div>
 
       <div className="spine">
-        {plan.blocks.map((b, i) => {
+        {plan.activities.map((b, i) => {
           const done = day.isDone(b.kind);
           const active = day.next === b.kind;
           return (
@@ -82,7 +65,7 @@ export default function Today({
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="title">{b.title}</div>
                 <div className="meta">
-                  {b.detail} · ~{b.minutes} min{b.goal ? ` · targets: ${b.goal}` : ""}
+                  {b.rationale} · ~{b.estimatedMinutes} min
                 </div>
               </div>
               <div className="st">{done ? "✓ done" : active ? "up next ↵" : ""}</div>

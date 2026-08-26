@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import type { ReadView, Settings } from "../../lib/settings";
+import { levelOf } from "../../lib/model";
 import { tokens } from "../../lib/text";
 import { bare, type Read as ReadState } from "../../lib/useRead";
 import ViewToggle from "./ViewToggle";
@@ -57,7 +58,7 @@ export default function Passage({
       <div className="fade">
         <div className="topline">
           <div className="eyebrow">
-            Generated for you · {settings.cefr} · ~{Math.max(1, Math.round(text.sentences.length / 3))} min
+            Generated for you · {levelOf(settings.profile)} · ~{Math.max(1, Math.round(text.sentences.length / 3))} min
           </div>
           <ViewToggle view={view} onView={onView} />
         </div>

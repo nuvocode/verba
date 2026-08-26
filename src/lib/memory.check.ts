@@ -17,7 +17,7 @@ import {
 import { storyPrompt } from "./reading.ts";
 import { weeklyReportPrompt } from "./coach.ts";
 
-const s: Settings = { ...defaultSettings, targetLang: "Spanish", nativeLang: "English" };
+const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "English" } };
 const scenario = { id: "free", title: "Free talk", emoji: "💬", setup: "Talk about anything." };
 
 const JULY = new Date("2026-07-14T09:00:00Z").getTime();

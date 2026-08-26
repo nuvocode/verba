@@ -1,5 +1,6 @@
-import { CEFR_LEVELS, type Cefr } from "./level.ts";
+import type { Cefr } from "./level.ts";
 import { sentenceCount, words } from "./text.ts";
+import { levelLabel, MIN_ESTIMATE_SESSIONS, CONFIDENT_ESTIMATE_SESSIONS, type LevelEstimate } from "./model.ts";
 
 // Level estimation v2 — a measured signal to sit alongside the v1 AI soft
 // estimate. It reads the learner's own messages (never the tutor's) and derives
@@ -107,10 +108,8 @@ export function estimateLevelV2(m: LevelMetrics): LevelEstimateV2 {
 
   const score = Math.round((complexity * 0.4 + coverage * 0.35 + accuracy * 0.25) * 100);
 
-  // 6 bands across 0..100.
-  const idx = Math.min(CEFR_LEVELS.length - 1, Math.floor(score / (100 / CEFR_LEVELS.length)));
   return {
-    estimate: CEFR_LEVELS[idx],
+    estimate: levelLabel(score),
     score,
     components: {
       complexity: Math.round(complexity * 100),
@@ -118,4 +117,19 @@ export function estimateLevelV2(m: LevelMetrics): LevelEstimateV2 {
       accuracy: Math.round(accuracy * 100),
     },
   };
+}
+
+/** The learner's measured level, derived from their session scores. The only producer.
+ * Scores may arrive in any order; the mean is order-independent. If someone later
+ * wants "the latest", note db.recentMetricScores returns oldest-first, so use at(-1),
+ * not [0]. */
+export function levelEstimateFrom(scores: number[]): LevelEstimate {
+  if (scores.length === 0) {
+    return { value: 0, label: "A1", confidence: "low", sampleSize: 0 };
+  }
+  const value = Math.round(scores.reduce((sum, s) => sum + s, 0) / scores.length);
+  const sampleSize = scores.length;
+  const confidence =
+    sampleSize >= CONFIDENT_ESTIMATE_SESSIONS ? "high" : sampleSize >= MIN_ESTIMATE_SESSIONS ? "medium" : "low";
+  return { value, label: levelLabel(value), confidence, sampleSize };
 }

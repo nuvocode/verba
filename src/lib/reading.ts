@@ -1,4 +1,5 @@
-import { level, type Settings } from "./settings.ts";
+import type { Settings } from "./settings.ts";
+import { levelOf } from "./model.ts";
 import type { LanguagePack } from "./packs/schema";
 import { memoryBrief, memoryStance, packGuidance, type Memory } from "./prompts.ts";
 import { questionInstructions, questionsShape, parseQuestions, type Question } from "./questions.ts";
@@ -61,8 +62,8 @@ const jsonShape =
 
 function base(s: Settings, pack?: LanguagePack): string {
   return [
-    `You generate graded reading material for a ${s.targetLang} learner whose native language is ${s.nativeLang}.`,
-    `Target CEFR level: ${level(s)}. Keep vocabulary and grammar appropriate for that level.`,
+    `You generate graded reading material for a ${s.profile.targetLanguage} learner whose native language is ${s.profile.nativeLanguage}.`,
+    `Target CEFR level: ${levelOf(s.profile)}. Keep vocabulary and grammar appropriate for that level.`,
     packGuidance(pack),
   ]
     .filter(Boolean)
@@ -89,7 +90,7 @@ export function storyPrompt(s: Settings, opts: StoryOptions = {}, pack?: Languag
         : `Pick an engaging everyday topic.`,
     opts.goal ? `Where natural, give practice with: ${opts.goal}.` : "",
     lengthLine(n),
-    jsonShape.replace(/TARGET/g, s.targetLang).replace(/NATIVE/g, s.nativeLang),
+    jsonShape.replace(/TARGET/g, s.profile.targetLanguage).replace(/NATIVE/g, s.profile.nativeLanguage),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -136,16 +137,16 @@ export function continueReadingPrompt(s: Settings, text: ReadingText, pack?: Lan
     `Continue this text naturally with about 6 more sentences. Do not repeat what came before.`,
     `Text so far: ${soFar}`,
     `Keep the same title: "${text.title}".`,
-    jsonShape.replace(/TARGET/g, s.targetLang).replace(/NATIVE/g, s.nativeLang),
+    jsonShape.replace(/TARGET/g, s.profile.targetLanguage).replace(/NATIVE/g, s.profile.nativeLanguage),
   ].join("\n\n");
 }
 
 /** On-demand explanation of a single word the learner tapped while reading. */
 export function explainWordPrompt(s: Settings, word: string, sentence: string): string {
   return [
-    `The learner is reading ${s.targetLang} and tapped the word "${word}".`,
+    `The learner is reading ${s.profile.targetLanguage} and tapped the word "${word}".`,
     `In this sentence: "${sentence}".`,
-    `Answer with ONLY a JSON object: { "word": "${word}", "meaning": "its meaning in ${s.nativeLang}", "lemma": "dictionary form in ${s.targetLang}", "note": "one short usage note in ${s.nativeLang}" }.`,
+    `Answer with ONLY a JSON object: { "word": "${word}", "meaning": "its meaning in ${s.profile.nativeLanguage}", "lemma": "dictionary form in ${s.profile.targetLanguage}", "note": "one short usage note in ${s.profile.nativeLanguage}" }.`,
   ].join("\n");
 }
 
@@ -167,8 +168,8 @@ export function comprehensionPrompt(s: Settings, text: ReadingText, pack?: Langu
     base(s, pack),
     `The learner has just finished reading this passage:`,
     passage,
-    questionInstructions(s.targetLang, s.nativeLang, 3),
-    `Answer with ONLY a JSON object: { ${questionsShape(s.targetLang, s.nativeLang)} }.`,
+    questionInstructions(s.profile.targetLanguage, s.profile.nativeLanguage, 3),
+    `Answer with ONLY a JSON object: { ${questionsShape(s.profile.targetLanguage, s.profile.nativeLanguage)} }.`,
   ].join("\n\n");
 }
 

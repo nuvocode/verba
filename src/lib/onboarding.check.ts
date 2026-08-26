@@ -2,39 +2,36 @@
 // unset-level fallback, interest-steered themes, and the pack order learners see.
 // Run: node --experimental-strip-types src/lib/onboarding.check.ts
 import assert from "node:assert";
-import { defaultSettings, level, SKIP_DEFAULTS, type Settings } from "./settings.ts";
+import { defaultSettings, SKIP_DEFAULTS, type Settings } from "./settings.ts";
 import { buildDailyPlan, themeForDate } from "./learn.ts";
-import { levelPrompt } from "./level.ts";
 import { BUNDLED_PACKS } from "./packs/bundled.ts";
 import { COMMUNITY_PACKS } from "./packs/community.ts";
 import { validatePack } from "./packs/schema.ts";
 import { langName } from "./langs.ts";
+import type { CEFRLevel } from "./model.ts";
 
 const s = (patch: Partial<Settings> = {}): Settings => ({ ...defaultSettings, ...patch });
+const atLevel = (lvl: string): Settings =>
+  s({ profile: { ...defaultSettings.profile, level: lvl as CEFRLevel } });
 
 // ---- native language comes from the OS locale, never a hardcoded default ----
 assert.equal(langName("tr-TR"), "Turkish", "tr-TR resolves to Turkish");
 assert.equal(langName("ja"), "Japanese", "a bare code resolves too");
-assert.notEqual(defaultSettings.nativeLang, "", "there is always a native language");
+assert.notEqual(defaultSettings.profile.nativeLanguage, "", "there is always a native language");
 
-// ---- skip from step 2: level unset, 20 min, no interests ----
-assert.deepEqual(SKIP_DEFAULTS, { cefr: "", dailyMinutes: 20, goals: [] }, "documented skip defaults");
-assert.equal(level(s({ cefr: "" })), "A2", "an unset level reads as A2 in prompts, never as an empty string");
-assert.equal(level(s({ cefr: "B2" })), "B2", "a chosen level is used as-is");
-assert.match(levelPrompt(s({ cefr: "" })), /never reported a level/, "unset level → the talk is the placement");
-assert.match(levelPrompt(s({ cefr: "B1" })), /self-reported level is B1/, "a set level anchors the estimate");
-for (const p of [buildDailyPlan(s({ cefr: "" }), { date: "2026-07-12", dueVocab: 0 })])
-  assert(!/level-\s|level-$/.test(JSON.stringify(p)), "no empty level leaks into the plan copy");
+// ---- skip from step 2: the A2 fallback, 20 min, no interests ----
+assert.deepEqual(SKIP_DEFAULTS, { level: "A2", dailyMinutes: 20, interests: [] }, "documented skip defaults");
 
-// ---- all four buckets are real CEFR levels the plan can carry ----
+// ---- every bucket builds a valid plan (level no longer flows into the plan —
+//      it is read through levelOf(profile) at prompt time) ----
 for (const cefr of ["A1", "A2", "B1", "B2"])
-  assert.equal(buildDailyPlan(s({ cefr }), { date: "2026-07-12", dueVocab: 0 }).level, cefr, `${cefr} reaches the plan`);
+  assert(buildDailyPlan(atLevel(cefr), { date: "2026-07-12", dayIndex: 1, dueVocab: 0 }).activities.length >= 4, `${cefr} reaches the plan`);
 
 // ---- interests are optional and steer the theme when present ----
-const plan0 = buildDailyPlan(s({ goals: [] }), { date: "2026-07-12", dueVocab: 0 });
-const plan1 = buildDailyPlan(s({ goals: ["Travel"] }), { date: "2026-07-12", dueVocab: 0 });
-const plan3 = buildDailyPlan(s({ goals: ["Travel", "Work", "Books & film"] }), { date: "2026-07-12", dueVocab: 0 });
-for (const p of [plan0, plan1, plan3]) assert(p.blocks.length >= 4 && p.theme, "a plan builds with 0, 1 or 3 interests");
+const plan0 = buildDailyPlan(s({ profile: { ...defaultSettings.profile, interests: [] } }), { date: "2026-07-12", dayIndex: 1, dueVocab: 0 });
+const plan1 = buildDailyPlan(s({ profile: { ...defaultSettings.profile, interests: ["Travel"] } }), { date: "2026-07-12", dayIndex: 1, dueVocab: 0 });
+const plan3 = buildDailyPlan(s({ profile: { ...defaultSettings.profile, interests: ["Travel", "Work", "Books & film"] } }), { date: "2026-07-12", dayIndex: 1, dueVocab: 0 });
+for (const p of [plan0, plan1, plan3]) assert(p.activities.length >= 4 && p.theme, "a plan builds with 0, 1 or 3 interests");
 assert.equal(plan0.theme, themeForDate("2026-07-12"), "no interests → the full rotation, unchanged");
 assert(
   ["travel and directions", "shopping and money", "food and cooking"].includes(plan1.theme),

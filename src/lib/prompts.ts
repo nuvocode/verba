@@ -1,4 +1,5 @@
-import { level, type Settings } from "./settings.ts";
+import type { Settings } from "./settings.ts";
+import { levelOf } from "./model.ts";
 import type { Scenario } from "./scenarios";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 import { worthLearning } from "./vocab.ts";
@@ -17,8 +18,8 @@ export { packGuidance } from "./packs/schema.ts";
 /** System prompt for a normal conversational turn. Model must return the turn JSON. */
 export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack, memories: Memory[] = []): string {
   return [
-    `You are Verba, a warm and encouraging ${s.targetLang} conversation tutor.`,
-    `The learner's native language is ${s.nativeLang}. Their self-reported level is ${level(s)}.`,
+    `You are Verba, a warm and encouraging ${s.profile.targetLanguage} conversation tutor.`,
+    `The learner's native language is ${s.profile.nativeLanguage}. Their self-reported level is ${levelOf(s.profile)}.`,
     `Scenario: ${scenario.setup}`,
     scenario.goals?.length ? `Help the learner practise these goals: ${scenario.goals.join("; ")}.` : "",
     packGuidance(pack),
@@ -27,13 +28,13 @@ export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack
       ? `${memoryStance} The scenario is what you talk about. Never read the list back, and never tell the learner you keep notes on them.`
       : "",
     ``,
-    `Hold a natural conversation in ${s.targetLang}. Match your vocabulary and sentence length to a ${level(s)} learner. Always keep the conversation going by ending your reply with a question or prompt.`,
+    `Hold a natural conversation in ${s.profile.targetLanguage}. Match your vocabulary and sentence length to a ${levelOf(s.profile)} learner. Always keep the conversation going by ending your reply with a question or prompt.`,
     ``,
     `You MUST answer with ONLY a valid JSON object, no prose outside it, in this exact shape:`,
     `{`,
-    `  "reply": "your natural conversational reply in ${s.targetLang} (1-3 sentences)",`,
-    `  "corrections": [ { "original": "the learner's exact wording that was wrong", "fixed": "the corrected version", "note": "a short explanation written in ${s.nativeLang}", "severity": "minor or severe" } ],`,
-    `  "suggestions": [ "a short example reply the learner could send next, in ${s.targetLang}", "another option" ]`,
+    `  "reply": "your natural conversational reply in ${s.profile.targetLanguage} (1-3 sentences)",`,
+    `  "corrections": [ { "original": "the learner's exact wording that was wrong", "fixed": "the corrected version", "note": "a short explanation written in ${s.profile.nativeLanguage}", "severity": "minor or severe" } ],`,
+    `  "suggestions": [ "a short example reply the learner could send next, in ${s.profile.targetLanguage}", "another option" ]`,
     `}`,
     ``,
     `Rules:`,
@@ -161,16 +162,16 @@ export function parseTurn(raw: string): TurnResult {
 /** Prompt to pull useful vocabulary out of a finished/ongoing conversation. */
 export function vocabPrompt(s: Settings, pack?: LanguagePack): string {
   return [
-    `From the conversation so far, pick at most 5 ${s.targetLang} words or short phrases that a ${level(s)} learner should study.`,
+    `From the conversation so far, pick at most 5 ${s.profile.targetLanguage} words or short phrases that a ${levelOf(s.profile)} learner should study.`,
     packGuidance(pack),
-    `Answer with ONLY a JSON object: { "items": [ { "term": "the ${s.targetLang} word/phrase in its dictionary form", "translation": "its meaning in ${s.nativeLang}", "example": "a short example sentence in ${s.targetLang} that uses the term" } ] }.`,
+    `Answer with ONLY a JSON object: { "items": [ { "term": "the ${s.profile.targetLanguage} word/phrase in its dictionary form", "translation": "its meaning in ${s.profile.nativeLanguage}", "example": "a short example sentence in ${s.profile.targetLanguage} that uses the term" } ] }.`,
     `Prefer words that actually appeared in the conversation. Skip trivial words (the, a, is).`,
     // Fewer, better cards. The deck used to take eight a session and fill with things
     // the learner already used correctly, or with details of what was said rather
     // than with language — and a deck like that stops being worth opening.
     `Pick fewer than 5 — or none at all — rather than padding the list. Skip anything the learner already used correctly.`,
     `Never pick a proper name, a number, a time, a date, or a price: those are details of the conversation, not vocabulary.`,
-    `Every "translation" must be a real meaning in ${s.nativeLang}. Never leave it empty and never repeat the term back.`,
+    `Every "translation" must be a real meaning in ${s.profile.nativeLanguage}. Never leave it empty and never repeat the term back.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -198,9 +199,9 @@ export function parseVocab(raw: string): { term: string; translation: string; ex
 /** Prompt for an end-of-session summary. */
 export function summaryPrompt(s: Settings, pack?: LanguagePack): string {
   return [
-    `Summarise this ${s.targetLang} practice session for the learner.`,
+    `Summarise this ${s.profile.targetLanguage} practice session for the learner.`,
     packGuidance(pack),
-    `Answer with ONLY a JSON object: { "summary": "2-3 sentences on what was practised, written in ${s.nativeLang}", "strengths": ["short point", ...], "focus": ["short thing to work on next", ...] }.`,
+    `Answer with ONLY a JSON object: { "summary": "2-3 sentences on what was practised, written in ${s.profile.nativeLanguage}", "strengths": ["short point", ...], "focus": ["short thing to work on next", ...] }.`,
     `Base "strengths" and "focus" on the learner's actual messages. Keep each point under 12 words.`,
   ]
     .filter(Boolean)
@@ -226,9 +227,9 @@ export function titlePrompt(s: Settings, stage: "opening" | "settled" = "opening
     stage === "opening"
       ? `Name this conversation, going on what it opened with.`
       : `The conversation has found its subject. Re-name it for what it actually turned out to be about — do not keep the earlier guess unless it still fits.`,
-    `Answer with ONLY a JSON object: { "title": "the name, written in ${s.nativeLang}" }.`,
+    `Answer with ONLY a JSON object: { "title": "the name, written in ${s.profile.nativeLanguage}" }.`,
     `The title is a label in a list, not a sentence: 2-5 words, no final punctuation, no quotes.`,
-    `Name the subject, not the exercise — "Cooking and eating out", "Booking a late check-in". Never "${s.targetLang} practice" or the scenario's name.`,
+    `Name the subject, not the exercise — "Cooking and eating out", "Booking a late check-in". Never "${s.profile.targetLanguage} practice" or the scenario's name.`,
   ].join("\n");
 }
 
@@ -325,10 +326,10 @@ export function memoryPrompt(s: Settings, known: Memory[]): string {
       ? [`Already recorded:`, ...known.map((m) => `${m.id}. ${m.fact}`)].join("\n")
       : `Nothing is recorded yet.`,
     ``,
-    `From this conversation, record only what is durable: who they are, what they do, why they are learning ${s.targetLang}, the people and places that recur in their life, what they have said they like and dislike.`,
+    `From this conversation, record only what is durable: who they are, what they do, why they are learning ${s.profile.targetLanguage}, the people and places that recur in their life, what they have said they like and dislike.`,
     `Not what happened today, not what they practised, not how well they did — that is measured elsewhere.`,
     ``,
-    `Answer with ONLY a JSON object: { "facts": [ { "fact": "one short fact, written in ${s.nativeLang}", "replaces": null } ] }.`,
+    `Answer with ONLY a JSON object: { "facts": [ { "fact": "one short fact, written in ${s.profile.nativeLanguage}", "replaces": null } ] }.`,
     `Rules:`,
     `- Never say the same thing twice. If a fact is already recorded above, leave it out entirely.`,
     `- If this conversation changed a recorded fact — they moved city, changed job, took up something new — write the fact as it now stands and set "replaces" to that fact's number. The old one is dropped, not kept beside it.`,

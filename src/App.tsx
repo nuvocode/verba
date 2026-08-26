@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { loadSettings, saveSettings, isLocalProvider, onboardingReset, type Settings } from "./lib/settings";
 import { installed } from "./lib/bundled";
 import { pruneBundled } from "./lib/speech";
-import type { BlockKind } from "./lib/learn";
+import type { ActivityKind } from "./lib/model";
 import { useDay } from "./lib/useDay";
 import { useTalk } from "./lib/useTalk";
 import { useRead } from "./lib/useRead";
@@ -140,34 +140,39 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  /** Launch a block from the day's plan — each kind knows which space it opens. */
+  /** Launch an activity from the day's plan — each kind knows which space it opens. */
   const begin = useCallback(
-    (kind: BlockKind) => {
-      const block = day.plan?.blocks.find((b) => b.kind === kind);
+    (kind: ActivityKind) => {
+      const activity = day.plan?.activities.find((a) => a.kind === kind);
       setPaletteOpen(false);
       switch (kind) {
-        case "conversation":
-        case "scenario":
+        case "talk":
+        case "roleplay":
           go("talk");
-          if (!talk.started || talk.reflection) void talk.start(talk.scenarioById(block?.scenarioId), block?.goal);
+          if (!talk.started || talk.reflection) void talk.start(talk.scenarioById(activity?.scenarioId), activity?.goal);
           break;
-        case "reading":
+        case "read":
           go("read");
-          if (!read.text && !read.busy) void read.generate({ interests: day.plan?.theme, goal: block?.goal });
+          if (!read.text && !read.busy) void read.generate({ interests: day.plan?.theme, goal: activity?.goal });
           break;
-        case "listening":
+        case "listen":
           go("listening");
           if (!listening.piece && !listening.busy)
-            void listening.generate({ interests: day.plan?.theme, goal: block?.goal });
+            void listening.generate({ interests: day.plan?.theme, goal: activity?.goal });
           break;
-        case "vocab":
+        case "memory":
           go("memory");
           setReviewSignal((n) => n + 1);
           break;
-        case "summary":
+        case "wrapup":
           go("coach");
           void day.wrapUp();
           break;
+        default: {
+          // Compile-time exhaustiveness: a new ActivityKind without a case fails here.
+          const _exhaustive: never = kind;
+          void _exhaustive;
+        }
       }
     },
     [day, talk, read, listening, go],
@@ -180,7 +185,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
    * Today, where they can see that.
    */
   const advance = useCallback(
-    async (kind: BlockKind) => {
+    async (kind: ActivityKind) => {
       const next = await day.complete(kind);
       if (next) begin(next);
       else go("today");
@@ -203,7 +208,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         kbd: "↵",
         run: () => day.next && begin(day.next),
       },
-      { label: "Resurface the words that are due", kbd: "R", run: () => begin("vocab") },
+      { label: "Resurface the words that are due", kbd: "R", run: () => begin("memory") },
       {
         label: "Generate a new reading passage",
         run: () => {
@@ -423,7 +428,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         </div>
         <div className="spacer" />
         <div className="dots" title="Today's session">
-          {(day.plan?.blocks ?? []).map((b) => (
+          {(day.plan?.activities ?? []).map((b) => (
             <div
               key={b.kind}
               className={`dot ${day.isDone(b.kind) ? "done" : ""}`}
@@ -541,7 +546,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
                 setQuery(e.target.value);
                 setPIdx(0);
               }}
-              placeholder={`Jump anywhere, start anything, or ask about ${settings.targetLang}…`}
+              placeholder={`Jump anywhere, start anything, or ask about ${settings.profile.targetLanguage}…`}
             />
             <div className="list">
               {items.map((item, i) => (

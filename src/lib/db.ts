@@ -113,7 +113,7 @@ async function init(): Promise<Database> {
     );
     -- What the coach knows about the learner: durable facts, dated, one per row.
     -- Scoped to a language like every other table here — the record belongs to the
-    -- learner as a Spanish learner, and switching language starts a fresh one.
+    -- learner as a learner of that language, and switching language starts a fresh one.
     CREATE TABLE IF NOT EXISTS memories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lang TEXT NOT NULL,
@@ -156,7 +156,13 @@ async function migrateVocabToPerLanguage(db: Database): Promise<void> {
 
   let lang = "";
   try {
-    lang = JSON.parse(localStorage.getItem("verba.settings") ?? "{}").targetLang ?? "";
+    // Both shapes, because this migration is one-shot and irreversible: it is gated on
+    // the `lang` column being absent, so a run that reads "" orphans the whole deck for
+    // good — the rows survive, but every query is language-scoped and none of them match.
+    // Settings moved targetLang under `profile` (see lib/settings migrateProfile), and
+    // saveSettings can write the new shape before the DB is ever opened.
+    const raw = JSON.parse(localStorage.getItem("verba.settings") ?? "{}");
+    lang = raw.profile?.targetLanguage ?? raw.targetLang ?? "";
   } catch {
     /* no settings to read — the cards land under "" and the learner recaptures them */
   }
@@ -396,29 +402,6 @@ export async function saveListening(
     "INSERT INTO listening_sessions (lang, title, piece, answers, accuracy, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
     [lang, title, JSON.stringify(piece), JSON.stringify(answers), accuracy, Date.now()],
   );
-}
-
-// ---- level signals ----
-
-export async function saveLevelSignal(
-  lang: string,
-  sig: { estimate: string; confidence: string; rationale: string },
-): Promise<void> {
-  await write(
-    "INSERT INTO level_signals (lang, estimate, confidence, rationale, created_at) VALUES ($1, $2, $3, $4, $5)",
-    [lang, sig.estimate, sig.confidence, sig.rationale, Date.now()],
-  );
-}
-
-export async function latestLevelSignal(
-  lang: string,
-): Promise<{ estimate: string; confidence: string; rationale: string; created_at: number } | null> {
-  const db = await getDb();
-  const rows = await db.select<{ estimate: string; confidence: string; rationale: string; created_at: number }[]>(
-    "SELECT estimate, confidence, rationale, created_at FROM level_signals WHERE lang = $1 ORDER BY created_at DESC LIMIT 1",
-    [lang],
-  );
-  return rows[0] ?? null;
 }
 
 // ---- Phase 3: level metrics v2 ----

@@ -18,13 +18,13 @@ export const PLACEMENT_LADDER: Cefr[] = ["A1", "A1", "A2", "B1", "B1", "B2", "C1
 
 export function placementPrompt(s: Settings, pack?: LanguagePack): string {
   return [
-    `Write a ${PLACEMENT_LADDER.length}-question multiple-choice placement test in ${s.targetLang}.`,
+    `Write a ${PLACEMENT_LADDER.length}-question multiple-choice placement test in ${s.profile.targetLanguage}.`,
     // Without the pack the model picks its own script and register — a Japanese
     // A1 question came back in unspaced kanji, which is not an A1 question.
     packGuidance(pack),
     `The questions must follow this CEFR ladder, in order: ${PLACEMENT_LADDER.join(", ")}.`,
     `Each question tests grammar, vocabulary or idiom at exactly its level, has exactly 3 options, and exactly one correct option.`,
-    `Write the questions and options in ${s.targetLang}; any instruction word goes in ${s.nativeLang}.`,
+    `Write the questions and options in ${s.profile.targetLanguage}; any instruction word goes in ${s.profile.nativeLanguage}.`,
     `Vary which option is correct — do not always use the first.`,
     `Answer with ONLY a JSON object: { "questions": [ { "level": "A1", "prompt": "…", "options": ["…","…","…"], "answer": 0 } ] }`,
   ]

@@ -12,7 +12,7 @@ import {
   QUESTIONS_PER_CHAPTER,
 } from "./listening.ts";
 
-const s: Settings = { ...defaultSettings, targetLang: "Spanish", nativeLang: "English", cefr: "B1" };
+const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "English", level: "B1" } };
 
 // --- pass 1: the outline asks for an arc and recurring people, not one flat block ---
 const outline = outlinePrompt(s, { interests: "cooking" });

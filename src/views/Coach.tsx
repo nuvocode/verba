@@ -5,8 +5,9 @@ import { getProvider } from "../lib/providers";
 import { weeklyReportPrompt, parseWeeklyReport, type WeeklyReport } from "../lib/coach";
 import { getPack } from "../lib/packs";
 import { CEFR_LEVELS } from "../lib/level";
+import { levelOf, levelGapNote, progressionSuggested } from "../lib/model";
 import { estimateLevelV2, metricsFromRow } from "../lib/metrics";
-import { activeDays, latestLevelSignal, recentMemories, recentMetricScores, recentMetrics, weekStats } from "../lib/db";
+import { activeDays, recentMemories, recentMetricScores, recentMetrics, weekStats } from "../lib/db";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -30,7 +31,6 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
   const [cells, setCells] = useState<Cells | null>(null);
   const [days, setDays] = useState<boolean[]>([]);
   const [trend, setTrend] = useState<number[]>([]);
-  const [level, setLevel] = useState<string>(settings.cefr);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
 
@@ -41,19 +41,17 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
       setError("");
       try {
         const since = Date.now() - WEEK_MS;
-        const [stats, rows, scores, active, signal, memories] = await Promise.all([
-          weekStats(settings.targetLang, since),
-          recentMetrics(settings.targetLang, 2),
-          recentMetricScores(settings.targetLang, 12),
+        const [stats, rows, scores, active, memories] = await Promise.all([
+          weekStats(settings.profile.targetLanguage, since),
+          recentMetrics(settings.profile.targetLanguage, 2),
+          recentMetricScores(settings.profile.targetLanguage, 12),
           activeDays(),
-          latestLevelSignal(settings.targetLang).catch(() => null),
-          recentMemories(settings.targetLang).catch(() => []),
+          recentMemories(settings.profile.targetLanguage).catch(() => []),
         ]);
         if (!live) return;
 
         setDays(active);
         setTrend(scores);
-        setLevel(signal?.estimate ?? settings.cefr);
 
         if (rows[0]) {
           const now = estimateLevelV2(metricsFromRow(rows[0]));
@@ -76,7 +74,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
               role: "user",
               content: weeklyReportPrompt(
                 settings,
-                { ...stats, focusAreas: day.plan?.focus ?? [] },
+                { ...stats, focusAreas: day.focus },
                 getPack(settings.packId),
                 memories,
               ),
@@ -94,13 +92,23 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
     return () => {
       live = false;
     };
-  }, [settings.targetLang, settings.provider, day.plan]);
+  }, [settings.profile.targetLanguage, settings.provider, day.plan]);
 
-  const bandIdx = Math.max(0, CEFR_LEVELS.indexOf(level as any));
-  // Position on the A1→C2 rail: the band itself, plus how far the composite has
-  // carried them through it.
-  const within = cells ? ((cells.score % (100 / 6)) / (100 / 6)) * 100 : 0;
+  const bandIdx = Math.max(0, CEFR_LEVELS.indexOf(day.levelEstimate.label));
+  // Position on the A1→C2 rail: the band itself, plus how far through it the
+  // estimate sits. Both come from day.levelEstimate — taking the band from the
+  // 12-session mean and the position from the latest session's score would slide
+  // the marker on a number that is nowhere on this screen.
+  const within = ((day.levelEstimate.value % (100 / 6)) / (100 / 6)) * 100;
   const pct = ((bandIdx + within / 100) / (CEFR_LEVELS.length - 1)) * 100;
+
+  // Measured vs declared: the ray shows what your writing measures at, the `now`
+  // marker shows the level you set. When they disagree (and it isn't a low-confidence
+  // guess) say so — and, if the measure runs ahead, suggest the next band.
+  const measuredIdx = CEFR_LEVELS.indexOf(day.levelEstimate.label);
+  const declaredIdx = CEFR_LEVELS.indexOf(levelOf(settings.profile));
+  const gapNote = levelGapNote(levelOf(settings.profile), day.levelEstimate);
+  const readyForNextBand = measuredIdx > declaredIdx && progressionSuggested(day.levelEstimate);
 
   const delta = (n: number) => (n > 0 ? <i>+{n}</i> : n < 0 ? <i style={{ color: "var(--warn)" }}>{n}</i> : null);
   const line =
@@ -113,7 +121,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
   return (
     <div className="coach fade">
       <div className="eyebrow">
-        Coach · {weekRange()} · {settings.targetLang}
+        Coach · {weekRange()} · {settings.profile.targetLanguage}
       </div>
       <h1 className="display">{report?.headline ?? (busy ? "Reading your week…" : "Quiet, steady progress.")}</h1>
 
@@ -130,17 +138,33 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
         <div className="eyebrow" style={{ marginBottom: 22 }}>
           Estimated level
         </div>
-        <div className="cefr">
-          <i style={{ width: `${Math.min(100, pct)}%` }} />
-          <b style={{ left: `${Math.min(100, pct)}%` }} />
-        </div>
-        <div className="cefr-scale">
-          {CEFR_LEVELS.map((l) => (
-            <span key={l} className={l === level ? "now" : ""}>
-              {l}
-            </span>
-          ))}
-        </div>
+        {day.levelEstimate.sampleSize === 0 ? (
+          <div style={{ color: "var(--ink3)", fontSize: 13.5 }}>
+            Not measured yet — a few conversations and this appears.
+          </div>
+        ) : (
+          <>
+            <div className="cefr">
+              <i style={{ width: `${Math.min(100, pct)}%` }} />
+              <b style={{ left: `${Math.min(100, pct)}%` }} />
+            </div>
+            <div className="cefr-scale">
+              {CEFR_LEVELS.map((l) => (
+                <span key={l} className={l === levelOf(settings.profile) ? "now" : ""}>
+                  {l}
+                </span>
+              ))}
+            </div>
+            {gapNote && (
+              <div style={{ color: "var(--ink3)", fontSize: 13.5, marginTop: 12 }}>{gapNote}</div>
+            )}
+            {readyForNextBand && (
+              <div style={{ color: "var(--ink2)", fontSize: 13.5, marginTop: 8 }}>
+                You look ready for the next band.
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {cells ? (

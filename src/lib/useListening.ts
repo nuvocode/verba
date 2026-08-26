@@ -83,7 +83,7 @@ export function useListening(settings: Settings) {
         const interests =
           opts.interests ||
           // Set the story in the learner's own world where nothing else was asked for.
-          (await recentMemories(settings.targetLang).catch(() => [])).map((m) => m.fact).slice(0, 3).join("; ") ||
+          (await recentMemories(settings.profile.targetLanguage).catch(() => [])).map((m) => m.fact).slice(0, 3).join("; ") ||
           undefined;
         const outline = parseOutline(await provider.chat([{ role: "user", content: outlinePrompt(settings, { ...opts, interests }, pack) }], { json: true }));
         if (!outline.beats.length) throw new Error("The model returned no chapters. Try again.");
@@ -215,7 +215,7 @@ export function useListening(settings: Settings) {
     const answers = piece.chapters.map((c, ci) =>
       c.questions.map((_, qi) => ({ given: progress[ci]?.answers[qi] ?? "", correct: progress[ci]?.results[qi] ?? false })),
     );
-    await saveListening(settings.targetLang, piece.title, piece, answers, accuracy).catch(() => {});
+    await saveListening(settings.profile.targetLanguage, piece.title, piece, answers, accuracy).catch(() => {});
 
     // Comprehension accuracy is a genuine level signal, so it rides the same
     // session_metrics row the Coach already reads — words = what they listened to,
@@ -223,15 +223,15 @@ export function useListening(settings: Settings) {
     // ponytail: reuses the production metrics row rather than a dedicated listening
     // signal; give it its own component in metrics.ts if the Coach needs to tell them apart.
     try {
-      const deckSize = (await vocabCounts(settings.targetLang)).total;
+      const deckSize = (await vocabCounts(settings.profile.targetLanguage)).total;
       const heard = piece.chapters.flatMap((c) => c.lines.map((l) => l.target));
       const m = computeMetrics(heard, { corrections: total - correct, deckSize, locale: pack?.speech.locale });
-      await saveMetrics(settings.targetLang, m, Math.round(accuracy * 100));
+      await saveMetrics(settings.profile.targetLanguage, m, Math.round(accuracy * 100));
     } catch {
       /* the signal is best-effort — a finished session still counts */
     }
     setFinished(true);
-  }, [piece, progress, settings.targetLang, pack, stop]);
+  }, [piece, progress, settings.profile.targetLanguage, pack, stop]);
 
   /** Move to the next chapter, or finish the piece if this was the last one. */
   const next = useCallback(() => {

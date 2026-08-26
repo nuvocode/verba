@@ -1,42 +1,11 @@
-import type { Settings } from "./settings";
-import { packGuidance, type LanguagePack } from "./packs/schema.ts";
-
-// Level estimation v1 — self-reported CEFR (Settings) plus a soft AI signal
-// read off the learner's actual messages after a session. Deliberately framed
-// as a hint, never an assessment.
-
-export const CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
-export type Cefr = (typeof CEFR_LEVELS)[number];
-
-export interface LevelSignal {
-  estimate: Cefr;
-  confidence: "low" | "medium" | "high";
-  rationale: string; // one short sentence in the native language
-}
-
-/** Ask the model to estimate the learner's level from the conversation so far. */
-export function levelPrompt(s: Settings, pack?: LanguagePack): string {
-  return [
-    `Estimate the learner's ${s.targetLang} level from their own messages in this conversation (ignore your own).`,
-    packGuidance(pack),
-    s.cefr
-      ? `Use the CEFR scale: ${CEFR_LEVELS.join(", ")}. Their self-reported level is ${s.cefr} — adjust only if the evidence is clear.`
-      : // Onboarding was skipped — this conversation IS the placement, so judge on the evidence alone.
-        `Use the CEFR scale: ${CEFR_LEVELS.join(", ")}. They never reported a level — place them purely on what they wrote.`,
-    `Answer with ONLY a JSON object: { "estimate": "one of ${CEFR_LEVELS.join("/")}", "confidence": "low|medium|high", "rationale": "one short sentence in ${s.nativeLang}" }.`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-export function parseLevel(raw: string): LevelSignal | null {
-  const o = extractJson(raw);
-  if (!o) return null;
-  const estimate = String(o.estimate ?? "").toUpperCase();
-  if (!CEFR_LEVELS.includes(estimate as Cefr)) return null;
-  const confidence = ["low", "medium", "high"].includes(o.confidence) ? o.confidence : "low";
-  return { estimate: estimate as Cefr, confidence, rationale: String(o.rationale ?? "") };
-}
+// The CEFR scale's door for callers that predate lib/model, plus extractJson —
+// the scraper every prompt parser uses to get JSON out of a chatty model.
+//
+// Level estimation v1 (a paid per-session round-trip asking the model to guess a
+// band) lived here and is gone: lib/metrics levelEstimateFrom measures the same
+// thing from session_metrics for free. The level_signals table keeps its old rows.
+import { CEFR_LEVELS, type CEFRLevel as Cefr } from "./model.ts";
+export { CEFR_LEVELS, type Cefr };
 
 export function extractJson(raw: string): any {
   if (!raw) return null;

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import type { ReadView, Settings } from "../lib/settings";
-import type { BlockKind } from "../lib/learn";
+import type { ActivityKind } from "../lib/model";
 import type { Day } from "../lib/useDay";
 import type { Ask, Read as ReadState } from "../lib/useRead";
 import { CEFR_LEVELS } from "../lib/level";
+import { levelOf } from "../lib/model";
 import AskSheet from "./read/AskSheet";
 import Passage from "./read/Passage";
 import Prompter from "./read/Prompter";
@@ -31,14 +32,14 @@ export default function Read({
   settings: Settings;
   read: ReadState;
   day: Day;
-  /** Close out the reading block and go wherever the day goes next — the plan decides. */
-  onAdvance: (kind: BlockKind) => void;
+  /** Close out the reading activity and go wherever the day goes next — the plan decides. */
+  onAdvance: (kind: ActivityKind) => void;
   /** The sheet takes the keyboard while it is open — Esc closes it, not the screen. */
   onCaptureKeys: (captured: boolean) => void;
   /** The chosen view and pace are settings: they are meant to outlive the passage. */
   onChange: (patch: Partial<Settings>) => void;
 }) {
-  const block = day.plan?.blocks.find((b) => b.kind === "reading");
+  const block = day.plan?.activities.find((b) => b.kind === "read");
   const [asking, setAsking] = useState(false);
   // null = show every level. Only levels actually present in the library get a chip.
   const [levelFilter, setLevelFilter] = useState<string | null>(null);
@@ -64,7 +65,7 @@ export default function Read({
   // questions (or the model errors) do we advance straight away — a broken check must
   // never trap the reader on a passage they've finished.
   const finish = async () => {
-    if (!(await read.startCheck())) onAdvance("reading");
+    if (!(await read.startCheck())) onAdvance("read");
   };
 
   const setView = (view: ReadView) => onChange({ readView: view });
@@ -82,7 +83,7 @@ export default function Read({
   // The comprehension check takes over the screen once a passage is finished — it is
   // the last step of the read, ahead of the passage itself and the empty state.
   if (read.checking || read.check)
-    return <ReadingCheck read={read} onDone={() => onAdvance("reading")} />;
+    return <ReadingCheck read={read} onDone={() => onAdvance("read")} />;
 
   // The sheet is a *sibling* of the empty state, never a child of it: `.fade` animates
   // a transform, and a transformed ancestor is the containing block for everything
@@ -95,7 +96,7 @@ export default function Read({
           <h2>{read.busy ? "Writing you a passage…" : "Nothing to read yet."}</h2>
           <p>
             {read.busy
-              ? `A ${settings.cefr} story about ${read.ask.topic || day.plan?.theme || "everyday life"}, in ${settings.targetLang}.`
+              ? `A ${levelOf(settings.profile)} story about ${read.ask.topic || day.plan?.theme || "everyday life"}, in ${settings.profile.targetLanguage}.`
               : "The coach writes a story at your level that reuses the words from your conversations."}
           </p>
           {!read.busy && (

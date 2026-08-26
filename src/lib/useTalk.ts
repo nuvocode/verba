@@ -20,7 +20,6 @@ import {
 } from "./prompts";
 import { BUNDLED_SCENARIOS, listScenarios, type Scenario } from "./scenarios";
 import { getPack } from "./packs";
-import { levelPrompt, parseLevel } from "./level";
 import { computeMetrics, estimateLevelV2 } from "./metrics";
 import { getSpeech, listenBlocker } from "./speech";
 import {
@@ -30,7 +29,6 @@ import {
   deleteVocabTerm,
   setSummary,
   setTitle,
-  saveLevelSignal,
   saveMemories,
   saveMetrics,
   recentMemories,
@@ -83,7 +81,7 @@ function live(publish: (text: string) => void): (chunk: string) => void {
  * One conversation with the coach. Lives above the router so switching to Read
  * or opening ⌘K mid-sentence doesn't throw the session away.
  */
-export function useTalk(settings: Settings, onSettings?: (patch: Partial<Settings>) => void) {
+export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settings>) => void) {
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [msgs, setMsgs] = useState<TalkMsg[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -178,7 +176,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // What earlier conversations left behind. It rides in the system prompt, so
       // every call made off this history — the turns, the wrap-up, the vocabulary
       // capture — is talking to a coach that has read it.
-      const memories = await recentMemories(settings.targetLang).catch(() => []);
+      const memories = await recentMemories(settings.profile.targetLanguage).catch(() => []);
       const system =
         buildSystem(settings, sc, pack, memories) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
       history.current = [{ role: "system", content: system }];
@@ -328,7 +326,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // review history that a stray tap has no business erasing. `addVocab` is also
       // where the capture gate lives, so anything that isn't vocabulary never counts.
       for (const it of parseVocab(vocabRaw)) {
-        const added = await addVocab(settings.targetLang, it).catch(() => false);
+        const added = await addVocab(settings.profile.targetLanguage, it).catch(() => false);
         if (added) words.push({ term: it.term, translation: it.translation });
       }
 
@@ -343,12 +341,12 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // wrap-up: a coach that fails to take a note is a coach that took no note, not
       // a conversation that failed.
       try {
-        const known = await recentMemories(settings.targetLang);
+        const known = await recentMemories(settings.profile.targetLanguage);
         const memRaw = await provider.chat(
           [...history.current, { role: "user", content: memoryPrompt(settings, known) }],
           { json: true },
         );
-        await saveMemories(settings.targetLang, parseMemory(memRaw), sessionId.current);
+        await saveMemories(settings.profile.targetLanguage, parseMemory(memRaw), sessionId.current);
       } catch {
         /* memory is best-effort */
       }
@@ -356,30 +354,15 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // Measured level signal (v2) — from the learner's own messages only, cut
       // into words and sentences by the target language's own rules.
       try {
-        const deckSize = (await vocabCounts(settings.targetLang)).total;
+        const deckSize = (await vocabCounts(settings.profile.targetLanguage)).total;
         const m = computeMetrics(userTexts, {
           corrections: corrections.length,
           deckSize,
           locale: pack?.speech.locale,
         });
-        await saveMetrics(settings.targetLang, m, estimateLevelV2(m).score);
+        await saveMetrics(settings.profile.targetLanguage, m, estimateLevelV2(m).score);
       } catch {
         /* metrics are best-effort */
-      }
-      // Soft AI level signal (v1).
-      try {
-        const lvlRaw = await provider.chat(
-          [...history.current, { role: "user", content: levelPrompt(settings, pack) }],
-          { json: true },
-        );
-        const lvl = parseLevel(lvlRaw);
-        if (lvl) {
-          await saveLevelSignal(settings.targetLang, lvl);
-          // Onboarding was skipped, so this conversation is the placement — commit the level.
-          if (!settings.cefr) onSettings?.({ cefr: lvl.estimate });
-        }
-      } catch {
-        /* level signal is best-effort */
       }
     } catch (e: any) {
       setError(String(e?.message ?? e));
@@ -399,10 +382,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
    */
   const dropWord = useCallback(
     async (term: string) => {
-      await deleteVocabTerm(settings.targetLang, term).catch(() => {});
+      await deleteVocabTerm(settings.profile.targetLanguage, term).catch(() => {});
       setReflection((r) => (r ? { ...r, words: r.words.filter((w) => w.term !== term) } : r));
     },
-    [settings.targetLang],
+    [settings.profile.targetLanguage],
   );
 
   /** ⌘K → "ask the coach": a side question, answered in the learner's own language. */
@@ -417,10 +400,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       try {
         const ctx: ChatMessage[] = history.current.length
           ? [...history.current]
-          : [{ role: "system", content: `You are a warm, precise ${settings.targetLang} tutor.` }];
+          : [{ role: "system", content: `You are a warm, precise ${settings.profile.targetLanguage} tutor.` }];
         ctx.push({
           role: "user",
-          content: `Step out of the roleplay for one message. Answer this question about ${settings.targetLang} in ${settings.nativeLang}, clearly and briefly, as plain prose (no JSON): ${q}`,
+          content: `Step out of the roleplay for one message. Answer this question about ${settings.profile.targetLanguage} in ${settings.profile.nativeLanguage}, clearly and briefly, as plain prose (no JSON): ${q}`,
         });
         // Not streamed: an aside is short prose, and the live bubble is labelled
         // and laid out as a scenario turn — it would carry the wrong voice here.

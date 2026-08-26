@@ -39,11 +39,11 @@ export default function Memory({
 
   const load = useCallback(async () => {
     try {
-      setWords(await allVocab(settings.targetLang));
+      setWords(await allVocab(settings.profile.targetLanguage));
     } catch (e: any) {
       setError(String(e?.message ?? e));
     }
-  }, [settings.targetLang]);
+  }, [settings.profile.targetLanguage]);
 
   useEffect(() => {
     void load();
@@ -103,7 +103,7 @@ export default function Memory({
       setRevealed(false);
       await reviewVocab(card, g).catch((e) => setError(String(e?.message ?? e)));
       if (idx + 1 >= queue.length) {
-        void day.complete("vocab");
+        void day.complete("memory");
         void load();
       }
     },
@@ -122,7 +122,7 @@ export default function Memory({
     if (!card) return;
     setRevealed(false);
     await drop(card.id);
-    if (idx + 1 >= queue.length) void day.complete("vocab");
+    if (idx + 1 >= queue.length) void day.complete("memory");
   }, [queue, idx, drop, day]);
 
   // Review-mode keys. App stands down while this is mounted (onCaptureKeys).
@@ -235,7 +235,7 @@ export default function Memory({
       <div className="mem-head">
         <div>
           <div className="eyebrow">
-            Memory · {good.length} {good.length === 1 ? "word" : "words"} · {settings.targetLang}
+            Memory · {good.length} {good.length === 1 ? "word" : "words"} · {settings.profile.targetLanguage}
           </div>
           <h1 className="display">Everything you've met, in context.</h1>
         </div>
