@@ -9,7 +9,8 @@ glossed with furigana in parentheses at A1–A2 and used normally from B1.
 
 **Maintained by:** core team (Official pack).
 
-Only `pack.ts` is required; this folder has no long-form docs yet. Particles,
-pitch accent and the politeness levels are the obvious first chapters — see
+Start with [Particles and sentence shape](./grammar.md) for the roles of `は`,
+`が`, `を`, `に`, and `で`, plus a practical way to build a sentence. Pitch
+accent and the politeness levels remain useful future chapters — see
 [`../es/`](../es/) for the reference layout and
 [CONTRIBUTING.md](../../../../../CONTRIBUTING.md) for the rules.
