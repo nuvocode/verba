@@ -7,7 +7,6 @@ import { BUNDLED_PACKS } from "./packs/bundled.ts";
 import { parseDoc, DOC_KEYS, PROMPT_DOC_BUDGET } from "./packs/doc.ts";
 import { validateScenario, BUNDLED_SCENARIOS, SCENARIO_FORMAT_VERSION } from "./scenarios.ts";
 import { parseReading } from "./reading.ts";
-import { parseLevel } from "./level.ts";
 
 // --- language pack validation ---
 for (const p of BUNDLED_PACKS) assert(validatePack(p).ok, `bundled pack ${p.id} should validate`);
@@ -85,10 +84,5 @@ const r = parseReading(fenced);
 assert(r.title === "Un día", "title parsed through code fence");
 assert(r.sentences.length === 1 && r.sentences[0].native === "Merhaba.", "sentence pair aligned");
 assert(parseReading("garbage").sentences.length === 0, "garbage yields no sentences, not a throw");
-
-// --- level parse: normalises case, rejects out-of-scale ---
-const lvl = parseLevel('{"estimate":"b2","confidence":"high","rationale":"iyi"}');
-assert(lvl && lvl.estimate === "B2" && lvl.confidence === "high", "level normalised to B2");
-assert(parseLevel('{"estimate":"Z9"}') === null, "out-of-scale estimate rejected");
 
 console.log("phase2.check: all assertions passed ✅");

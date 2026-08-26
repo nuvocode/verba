@@ -4,7 +4,6 @@
 import assert from "node:assert";
 import { defaultSettings, SKIP_DEFAULTS, type Settings } from "./settings.ts";
 import { buildDailyPlan, themeForDate } from "./learn.ts";
-import { levelPrompt } from "./level.ts";
 import { BUNDLED_PACKS } from "./packs/bundled.ts";
 import { COMMUNITY_PACKS } from "./packs/community.ts";
 import { validatePack } from "./packs/schema.ts";
@@ -22,7 +21,6 @@ assert.notEqual(defaultSettings.profile.nativeLanguage, "", "there is always a n
 
 // ---- skip from step 2: the A2 fallback, 20 min, no interests ----
 assert.deepEqual(SKIP_DEFAULTS, { level: "A2", dailyMinutes: 20, interests: [] }, "documented skip defaults");
-assert.match(levelPrompt(atLevel("B1")), /self-reported level is B1/, "a set level anchors the estimate");
 
 // ---- every bucket builds a valid plan (level no longer flows into the plan —
 //      it is read through levelOf(profile) at prompt time) ----

@@ -20,7 +20,6 @@ import {
 } from "./prompts";
 import { BUNDLED_SCENARIOS, listScenarios, type Scenario } from "./scenarios";
 import { getPack } from "./packs";
-import { levelPrompt, parseLevel } from "./level";
 import { computeMetrics, estimateLevelV2 } from "./metrics";
 import { getSpeech, listenBlocker } from "./speech";
 import {
@@ -30,7 +29,6 @@ import {
   deleteVocabTerm,
   setSummary,
   setTitle,
-  saveLevelSignal,
   saveMemories,
   saveMetrics,
   recentMemories,
@@ -365,21 +363,6 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         await saveMetrics(settings.profile.targetLanguage, m, estimateLevelV2(m).score);
       } catch {
         /* metrics are best-effort */
-      }
-      // Soft AI level signal (v1).
-      try {
-        const lvlRaw = await provider.chat(
-          [...history.current, { role: "user", content: levelPrompt(settings, pack) }],
-          { json: true },
-        );
-        const lvl = parseLevel(lvlRaw);
-        if (lvl) {
-          await saveLevelSignal(settings.profile.targetLanguage, lvl);
-          // The estimate is a signal, not a level (#13): persisting it here keeps it
-          // available without collapsing it into profile.level. Display lands in 11b-3.
-        }
-      } catch {
-        /* level signal is best-effort */
       }
     } catch (e: any) {
       setError(String(e?.message ?? e));

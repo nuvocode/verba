@@ -8,7 +8,6 @@ import { bareWord } from "./reading.ts";
 import { computeMetrics } from "./metrics.ts";
 import { getPack } from "./packs/index.ts";
 import { vocabPrompt, summaryPrompt, buildSystem } from "./prompts.ts";
-import { levelPrompt } from "./level.ts";
 import { placementPrompt } from "./placement.ts";
 import { weeklyReportPrompt, drillPrompt } from "./coach.ts";
 import { recapPrompt, buildDailyPlan } from "./learn.ts";
@@ -59,7 +58,6 @@ const carriers: [string, string][] = [
   ["buildSystem", buildSystem(s, BUNDLED_SCENARIOS[0], pack)],
   ["vocabPrompt", vocabPrompt(s, pack)],
   ["summaryPrompt", summaryPrompt(s, pack)],
-  ["levelPrompt", levelPrompt(s, pack)],
   ["placementPrompt", placementPrompt(s, pack)],
   ["weeklyReportPrompt", weeklyReportPrompt(s, { sessions: 1, messages: 1, wordsPracticed: 1, vocabLearned: 1, vocabReviewed: 1, avgLevelScore: 50, focusAreas: [] }, pack)],
   ["drillPrompt", drillPrompt(s, ["particles"], 4, pack)],

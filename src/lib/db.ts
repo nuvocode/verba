@@ -404,29 +404,6 @@ export async function saveListening(
   );
 }
 
-// ---- level signals ----
-
-export async function saveLevelSignal(
-  lang: string,
-  sig: { estimate: string; confidence: string; rationale: string },
-): Promise<void> {
-  await write(
-    "INSERT INTO level_signals (lang, estimate, confidence, rationale, created_at) VALUES ($1, $2, $3, $4, $5)",
-    [lang, sig.estimate, sig.confidence, sig.rationale, Date.now()],
-  );
-}
-
-export async function latestLevelSignal(
-  lang: string,
-): Promise<{ estimate: string; confidence: string; rationale: string; created_at: number } | null> {
-  const db = await getDb();
-  const rows = await db.select<{ estimate: string; confidence: string; rationale: string; created_at: number }[]>(
-    "SELECT estimate, confidence, rationale, created_at FROM level_signals WHERE lang = $1 ORDER BY created_at DESC LIMIT 1",
-    [lang],
-  );
-  return rows[0] ?? null;
-}
-
 // ---- Phase 3: level metrics v2 ----
 
 export async function saveMetrics(
