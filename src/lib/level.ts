@@ -5,8 +5,8 @@ import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 // read off the learner's actual messages after a session. Deliberately framed
 // as a hint, never an assessment.
 
-export const CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
-export type Cefr = (typeof CEFR_LEVELS)[number];
+import { CEFR_LEVELS, type CEFRLevel as Cefr } from "./model.ts";
+export { CEFR_LEVELS, type Cefr };
 
 export interface LevelSignal {
   estimate: Cefr;
