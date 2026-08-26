@@ -82,6 +82,7 @@ assert.match(vocabPrompt(s, pack), /Never leave it empty/, "a card with no meani
 assert.match(vocabPrompt(s, pack), /Never pick a proper name, a number, a time/, "story details are not vocabulary");
 
 // --- no language-name literals outside their three homes (#14) ---
+// invariant 1
 // When the gate is green, every language name a learner sees comes from exactly
 // one of three places: the active pack's `name`, `profile.targetLanguage`, or
 // `langName` (lib/langs.ts). That is the single source this gate guards. It does

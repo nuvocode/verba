@@ -25,6 +25,7 @@ assert.deepEqual(
 );
 
 // #16: plan minutes equal the sum of the activity minutes
+// invariant 4
 assert.equal(
   five.estimatedMinutes,
   five.activities.reduce((n, a) => n + a.estimatedMinutes, 0),
@@ -32,6 +33,7 @@ assert.equal(
 );
 
 // #17: every activity carries a non-empty rationale
+// invariant 5
 for (const a of five.activities) assert(a.rationale.trim().length > 0, `${a.kind} must have a rationale`);
 
 // focus folds into the first activity's rationale

@@ -22,6 +22,7 @@ const activity = (id: string, estimatedMinutes: number): PlannedActivity =>
   });
 
 // #16: plan minutes equal the sum of the activity minutes
+// invariant 4
 const plan: DailyPlan = makePlan({
   date: "2026-08-26",
   dayIndex: 41,
@@ -43,6 +44,7 @@ const emptyPlan = makePlan({
 assert.equal(emptyPlan.estimatedMinutes, 0);
 
 // #17: empty or whitespace-only rationale is rejected
+// invariant 5
 assert.throws(() =>
   planActivity({ id: "x", kind: "read", title: "T", rationale: "", estimatedMinutes: 5 }),
 );
@@ -73,6 +75,7 @@ for (let i = 1; i < samples.length; i++) {
 }
 
 // levelOf returns the profile's level verbatim
+// invariant 3
 const profile: LearnerProfile = {
   targetLanguage: "Spanish",
   nativeLanguage: "Turkish",

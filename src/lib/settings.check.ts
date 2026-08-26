@@ -19,6 +19,7 @@ const migrated = (old: Record<string, unknown>) =>
   migrateProfile(old) as unknown as { profile: Record<string, unknown> };
 
 // 1-3: the old flat `cefr` becomes profile.level; "" and junk read as "A2"
+// invariant 3
 assert.equal(migrated({ cefr: "B2" }).profile.level, "B2");
 assert.equal(migrated({ cefr: "" }).profile.level, "A2");
 assert.equal(migrated({ cefr: "gibberish" }).profile.level, "A2");

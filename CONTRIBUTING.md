@@ -97,11 +97,9 @@ the in-tree documents of the language whose id it shadows.
    core-team languages). Forget this and step 4 fails; nothing ships half-wired.
 4. **Self-check** —
    ```
-   node --experimental-strip-types src/lib/phase2.check.ts   # pack + doc validation, prompt budget
-   node --experimental-strip-types src/lib/phase3.check.ts   # registry gate + folder/import parity
-   node --experimental-strip-types src/lib/onboarding.check.ts
-   npx tsc --noEmit
+   npm run check
    ```
+   Runs `tsc --noEmit` plus every `*.check.ts` under `src/`, each in its own process.
 5. **PR** — one maintainer reviews code/schema, one contributor fluent in the
    language reviews content. Both approve → merge, and it ships as
    **[Community]**.
