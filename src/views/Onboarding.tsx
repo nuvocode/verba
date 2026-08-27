@@ -222,10 +222,11 @@ export default function Onboarding({
     setProbing(true);
     void listModels(prov, host).then((list) => {
       if (!live) return;
-      setFound(list);
+      setFound(list?.map((m) => m.id) ?? null);
       setProbing(false);
       // Adopt the first served model only if the current one isn't there — never overwrite a real choice.
-      if (list?.length && !list.includes(models[prov])) setModels((m) => ({ ...m, [prov]: list[0] }));
+      if (list?.length && !list.some((m) => m.id === models[prov]))
+        setModels((m) => ({ ...m, [prov]: list[0].id }));
     });
     return () => {
       live = false;

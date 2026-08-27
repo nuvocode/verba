@@ -86,6 +86,27 @@ export function importPack(jsonText: string): LanguagePack {
   return pack;
 }
 
+/**
+ * What stops working when the active language has no pack — §7 row 9.
+ *
+ * A missing pack is not a failure to start: a backup restored onto a machine
+ * that never had the imported pack, or a pack the learner removed, leaves
+ * `packId` pointing at nothing. The app keeps running, and the honest thing is
+ * to name the one part that is quietly worse rather than to say nothing (and
+ * leave corrections mysteriously vaguer) or to refuse to open.
+ *
+ * Returns null when the pack is there, so the caller renders nothing.
+ */
+export function missingPackNote(
+  packId: string,
+  targetLanguage: string,
+  installed: string[] = listPacks().map((p) => p.id),
+): string | null {
+  if (!packId || installed.includes(packId)) return null;
+  const lang = targetLanguage.trim() || "this language";
+  return `No language pack is installed for ${lang}. Everything still runs — conversation, reading, listening and review — but the coach writes without ${lang}'s pronunciation and grammar notes, so its corrections stay more general than they should be.`;
+}
+
 export function removeImportedPack(id: string): void {
   localStorage.setItem(KEY, JSON.stringify(imported().filter((p) => p.id !== id)));
 }

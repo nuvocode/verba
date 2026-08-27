@@ -37,7 +37,7 @@ const TABLE: Row[] = [
     id: 2,
     state: "Model yanıt vermiyor",
     answer: "Ana ekranda uyarı + sına düğmesi + model değiştir yolu",
-    pending: "#41 — Advanced owns the test-connection button the warning has to link to",
+    pending: "#26 — the test button exists (Advanced); Today still has to raise the warning that links to it",
   },
   {
     id: 3,
@@ -79,7 +79,7 @@ const TABLE: Row[] = [
     id: 9,
     state: "Dil paketi eksik/bozuk",
     answer: "Hangi özelliğin çalışmayacağı yazılır, uygulama açık kalır",
-    pending: "#41 — the installed-packs list and its broken-pack row",
+    assertedIn: [{ file: "src/lib/lang.check.ts", marker: "state 9" }],
   },
 ];
 

@@ -4,10 +4,10 @@
 // up a voice never means walking past a dictation key. Nothing is hidden; it is
 // one radio away.
 import { useEffect, useState } from "react";
-import { LOCAL_STT_URL, LOCAL_TTS_URL, type Settings } from "../../lib/settings";
+import type { Settings } from "../../lib/settings";
 import { langName } from "../../lib/langs";
-import { cloudGate, type Gate } from "../../lib/rules";
-import { deepgramHelp, listenBlocker, resolveTier, type Tier } from "../../lib/speech";
+import { AT } from "../../lib/rules";
+import { listenBlocker, resolveTier, type Tier } from "../../lib/speech";
 import {
   CATALOG,
   catalogModel,
@@ -20,50 +20,10 @@ import {
   type Installed,
   type ModelState,
 } from "../../lib/bundled";
-import { reachable } from "../../lib/models";
 import { listPacks } from "../../lib/packs";
-import { Because, linkish, ToggleRow, type SectionProps } from "./parts";
+import { linkish, ToggleRow, type SectionProps } from "./parts";
 
 const langNames = (ls: string[]) => ls.map(langName).join(", ") || "any language";
-
-/**
- * Is the speech server the learner typed actually there? Same shape as the model
- * probe in Onboarding: a `live` flag so a stale answer can't overwrite a fresh one.
- * An unreachable server is reported, never enforced — settings still save.
- *
- * This only ever mounts inside the Speech panel, so opening Settings on any other
- * tab probes nothing.
- */
-function ServerStatus({ name, url }: { name: string; url: string }) {
-  const [state, setState] = useState<"probing" | "up" | "down">("probing");
-  const [retry, setRetry] = useState(0);
-
-  useEffect(() => {
-    let live = true;
-    setState("probing");
-    // The URL changes on every keystroke; wait for the typing to stop rather than
-    // firing a request per character.
-    const t = setTimeout(() => {
-      void reachable(url).then((ok) => live && setState(ok ? "up" : "down"));
-    }, 400);
-    return () => {
-      live = false;
-      clearTimeout(t);
-    };
-  }, [url, retry]);
-
-  if (!url.trim()) return <div className="desc">Empty — this half stays on your system voice.</div>;
-  if (state === "probing") return <div className="desc">{name} · checking…</div>;
-  if (state === "up") return <div className="desc" style={{ color: "var(--good)" }}>{name} · reachable</div>;
-  return (
-    <div className="desc" style={{ color: "var(--sev)" }}>
-      {name} · no answer at {url} — start the server, or leave it: speech falls back to your system voice.{" "}
-      <button className="model" style={linkish} onClick={() => setRetry((n) => n + 1)}>
-        retry
-      </button>
-    </div>
-  );
-}
 
 /**
  * One model, one row. Nothing here downloads without a click — these are hundreds
@@ -266,82 +226,6 @@ function BundledModels(props: {
   );
 }
 
-/** The five answers to "where does this half get its speech". Order is the tier order. */
-const SOURCES: [Tier, string][] = [
-  ["auto", "Automatic"],
-  ["bundled", "Bundled"],
-  ["local", "Local server"],
-  ["cloud", "Cloud"],
-  ["native", "System"],
-];
-
-/**
- * The source picker for one half. Selecting a source pins the half to it, and the
- * panel below then shows that source's config and nothing else — the whole point of
- * this screen is that a learner setting up a voice never has to look at a Deepgram
- * key. Automatic carries its own resolution in its label, so "what happens if I
- * leave this alone" is answered without picking anything.
- *
- * Cloud in offline mode is shown disabled rather than hidden: a missing option reads
- * as a missing feature, a disabled one reads as a switch you flipped.
- */
-function SourceSelect({
-  value,
-  onPick,
-  now,
-  gate,
-  dim,
-}: {
-  value: Tier;
-  onPick: (t: Tier) => void;
-  now: string; // what Automatic currently resolves to
-  /** Non-null when the cloud row is closed — it then says so, in place (#42). */
-  gate: Gate | null;
-  dim?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "8px 20px",
-        padding: "12px 4px 14px",
-        borderBottom: "1px solid var(--line2)",
-        opacity: dim ? 0.55 : 1,
-      }}
-    >
-      {SOURCES.map(([id, label]) => {
-        const off = !!gate && id === "cloud";
-        return (
-          <button
-            key={id}
-            className={`model ${off ? "off" : ""}`}
-            // Closed, not dead: `disabled` would take the row out of the tab
-            // order and swallow the click that explains it. Picking it goes
-            // through the same door as everything else and is refused there.
-            aria-disabled={off}
-            aria-pressed={value === id}
-            onClick={() => onPick(id)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 7,
-              background: "none",
-              border: "none",
-              padding: 0,
-              cursor: off ? "default" : "pointer",
-            }}
-          >
-            <span className={`radio ${value === id ? "on" : ""}`} />
-            {id === "auto" ? `Automatic — currently ${now}` : label}
-            {off && gate && <Because gate={gate} link={false} />}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 export default function Speech({ settings, onChange }: SectionProps) {
   // Bundled models on disk. Lives here, not in BundledModels, because the cloud
   // dictation field needs to know whether dictation already works offline.
@@ -360,7 +244,6 @@ export default function Speech({ settings, onChange }: SectionProps) {
   }, []);
 
   const micBlocked = listenBlocker(settings);
-  const whisperReady = CATALOG.some((m) => m.half === "stt" && installed[m.id]);
 
   // Which half has its bundled catalog open from the Automatic hint. Automatic shows
   // a one-line summary, not the catalog: a learner who hasn't chosen a source has no
@@ -400,28 +283,6 @@ export default function Speech({ settings, onChange }: SectionProps) {
             ? "nothing — this system has no speech recognition"
             : "system recognition — basic, works everywhere";
 
-  /** The same thing in three words, for Automatic's own label. */
-  const shortTts = (t: Exclude<Tier, "auto">) =>
-    t === "bundled" ? bundledVoice() : t === "local" ? "local server" : t === "cloud" ? "ElevenLabs" : "system voice";
-  const shortStt = (t: Exclude<Tier, "auto">) =>
-    t === "bundled"
-      ? bundledWhisper()
-      : t === "local"
-        ? "local server"
-        : t === "cloud"
-          ? "Deepgram"
-          : micBlocked
-            ? "nothing"
-            : "system recognition";
-
-  // Picking "Local server" *is* the switch that used to sit above these fields, so it
-  // fills in the URL the documented one-liner listens on rather than handing over an
-  // empty box. A URL already typed is never overwritten.
-  const pickTts = (t: Tier) =>
-    onChange({ ttsTier: t, ...(t === "local" && !settings.localTtsUrl ? { localTtsUrl: LOCAL_TTS_URL } : {}) });
-  const pickStt = (t: Tier) =>
-    onChange({ sttTier: t, ...(t === "local" && !settings.localSttUrl ? { localSttUrl: LOCAL_STT_URL } : {}) });
-
   const bundledProps = {
     settings,
     onChange,
@@ -438,8 +299,23 @@ export default function Speech({ settings, onChange }: SectionProps) {
     </div>
   );
 
-  /** Automatic's config: what is installed, and a way in — not the whole catalog. */
-  const autoHint = (half: "tts" | "stt") => {
+  /**
+   * Which engine is doing this, and where to change it. The choice itself moved
+   * to Advanced (§5.4): a learner picking a voice is picking a voice, and the
+   * machinery under it is a different question on a different page.
+   */
+  const engineLine = () => (
+    <div className="desc" style={{ padding: "0 4px 6px", maxWidth: 480, lineHeight: 1.5 }}>
+      Choose a different engine under{" "}
+      <a href={AT.advanced} style={{ color: "inherit" }}>
+        Advanced
+      </a>
+      .
+    </div>
+  );
+
+  /** What is on this machine, and the way to more of it. The catalogue itself is a click away. */
+  const browse = (half: "tts" | "stt") => {
     const n = CATALOG.filter((m) => m.half === half && installed[m.id]).length;
     const noun = half === "tts" ? "voice" : "dictation model";
     return (
@@ -451,12 +327,6 @@ export default function Speech({ settings, onChange }: SectionProps) {
       </div>
     );
   };
-
-  const nothingToSetUp = (what: string) => (
-    <div className="desc" style={{ padding: "14px 4px 4px" }}>
-      Uses the OS {what}. Nothing to set up.
-    </div>
-  );
 
   return (
         <>
@@ -471,110 +341,15 @@ export default function Speech({ settings, onChange }: SectionProps) {
           />
 
           {statusLine(usingTts(ttsNow))}
-          <SourceSelect
-            value={settings.ttsTier}
-            onPick={pickTts}
-            now={shortTts(resolveTier({ ...settings, ttsTier: "auto" }, "tts"))}
-            gate={cloudGate(settings)}
-            dim={!settings.speak}
-          />
-
-          {settings.ttsTier === "auto" && autoHint("tts")}
-          {settings.ttsTier === "bundled" && (
-            <div style={{ padding: "4px 0" }}>
-              <BundledModels half="tts" {...bundledProps} />
-            </div>
-          )}
-          {settings.ttsTier === "local" && (
-            <div style={{ paddingTop: 14 }}>
-              <div className="field">
-                <label>Server</label>
-                <input
-                  placeholder={LOCAL_TTS_URL}
-                  value={settings.localTtsUrl}
-                  onChange={(e) => onChange({ localTtsUrl: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label>Model</label>
-                <input value={settings.localTtsModel} onChange={(e) => onChange({ localTtsModel: e.target.value })} />
-              </div>
-              <div className="field">
-                <label>Voice</label>
-                <input
-                  placeholder="af_heart"
-                  value={settings.localTtsVoice}
-                  onChange={(e) => onChange({ localTtsVoice: e.target.value })}
-                />
-              </div>
-              <ServerStatus name="Kokoro server" url={settings.localTtsUrl} />
-            </div>
-          )}
-          {settings.ttsTier === "cloud" && (
-            <div className="field" style={{ marginTop: 14 }}>
-              <label>
-                ElevenLabs key {cloudGate(settings) && <Because gate={cloudGate(settings)!} />}
-              </label>
-              <input
-                type="password"
-                disabled={settings.offline}
-                placeholder="Empty → your system voices"
-                value={settings.elevenLabsKey}
-                onChange={(e) => onChange({ elevenLabsKey: e.target.value })}
-              />
-            </div>
-          )}
-          {settings.ttsTier === "native" && nothingToSetUp("voice")}
+          {engineLine()}
+          {browse("tts")}
 
           <div className="sec" style={{ marginTop: 44 }}>Dictation</div>
           <div className="desc" style={{ maxWidth: 460, lineHeight: 1.5, marginBottom: 4 }}>How Verba listens.</div>
 
           {statusLine(usingStt(sttNow))}
-          <SourceSelect
-            value={settings.sttTier}
-            onPick={pickStt}
-            now={shortStt(resolveTier({ ...settings, sttTier: "auto" }, "stt"))}
-            gate={cloudGate(settings)}
-          />
-
-          {settings.sttTier === "auto" && autoHint("stt")}
-          {settings.sttTier === "bundled" && (
-            <div style={{ padding: "4px 0" }}>
-              <BundledModels half="stt" {...bundledProps} />
-            </div>
-          )}
-          {settings.sttTier === "local" && (
-            <div style={{ paddingTop: 14 }}>
-              <div className="field">
-                <label>Server</label>
-                <input
-                  placeholder={LOCAL_STT_URL}
-                  value={settings.localSttUrl}
-                  onChange={(e) => onChange({ localSttUrl: e.target.value })}
-                />
-              </div>
-              <div className="field">
-                <label>Model</label>
-                <input value={settings.localSttModel} onChange={(e) => onChange({ localSttModel: e.target.value })} />
-              </div>
-              <ServerStatus name="speaches server" url={settings.localSttUrl} />
-            </div>
-          )}
-          {settings.sttTier === "cloud" && (
-            <div className="field" style={{ marginTop: 14 }}>
-              <label>
-                Deepgram key {cloudGate(settings) && <Because gate={cloudGate(settings)!} />}
-              </label>
-              <input
-                type="password"
-                disabled={settings.offline}
-                placeholder={deepgramHelp(settings, whisperReady)}
-                value={settings.deepgramKey}
-                onChange={(e) => onChange({ deepgramKey: e.target.value })}
-              />
-            </div>
-          )}
-          {settings.sttTier === "native" && nothingToSetUp("speech recognition")}
+          {engineLine()}
+          {browse("stt")}
 
           <div className="desc" style={{ margin: "18px 4px 14px" }}>
             {micBlocked || "Microphone ready — click ◉ in Talk to speak, click again to send."}

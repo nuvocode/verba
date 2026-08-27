@@ -6,7 +6,8 @@
 // disagree with it. Spec: docs/plans/2-verba-ana-ekran-ve-ayarlar-spec.md §3
 // (the value model), §5.2 (instant apply, consequence, undo), §6, §7 (the state
 // table). Issues #33, #35, #42, #43.
-import { isLocalProvider, type ProviderId, type Settings } from "./settings.ts";
+import { defaultSettings, isLocalProvider, type ProviderId, type Settings } from "./settings.ts";
+import { isRemoteModel } from "./models.ts";
 
 /**
  * Where a fix lives, as an in-app hash the shell already routes.
@@ -96,11 +97,23 @@ function resolveOffline(before: Settings, next: Settings, patch: Partial<Setting
     if (!isLocalProvider(next.provider)) next.provider = LOCAL_FALLBACK;
     if (next.ttsTier === "cloud") next.ttsTier = "auto";
     if (next.sttTier === "cloud") next.sttTier = "auto";
+    // A model that only *reaches* Ollama locally. Left alone it would keep
+    // sending every turn to Ollama's servers under a lock that says nothing
+    // leaves this machine — the one contradiction §5.5 will not have on screen.
+    // The fallback is a guess and may not be pulled here; a wrong model is a
+    // visible problem with a fix one list away, and a broken promise is not.
+    if (isRemoteModel(next.ollamaModel)) next.ollamaModel = defaultSettings.ollamaModel;
     return undefined;
   }
 
   const cloudPick =
-    !isLocalProvider(next.provider) || next.ttsTier === "cloud" || next.sttTier === "cloud";
+    !isLocalProvider(next.provider) ||
+    next.ttsTier === "cloud" ||
+    next.sttTier === "cloud" ||
+    // The list hides these while the lock is on, but the "any other model" field
+    // still takes anything typed into it — so the rule, not the list, is what
+    // actually closes the door.
+    isRemoteModel(next.ollamaModel);
   if (!cloudPick) return undefined;
   return {
     reason: "This one works over the network, and you've asked Verba to stay on this machine.",
@@ -122,7 +135,9 @@ function consequenceOf(before: Settings, after: Settings): string | undefined {
     return `Explanations and corrections will be written in ${after.profile.nativeLanguage}.`;
   if (after.offline !== before.offline)
     return after.offline
-      ? "Only this machine from now on. Anything that needed the network was switched off."
+      ? after.ollamaModel !== before.ollamaModel
+        ? `Only this machine from now on. ${before.ollamaModel} runs on Ollama's servers, so the model is now ${after.ollamaModel} — check it is one you have pulled.`
+        : "Only this machine from now on. Anything that needed the network was switched off."
       : "Network options can be chosen again. Nothing has been sent anywhere yet.";
   if (after.dailyMinutes !== before.dailyMinutes)
     return `Days are built to about ${after.dailyMinutes} minutes from now on.`;
