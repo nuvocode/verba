@@ -63,6 +63,7 @@ export default function SettingsView({
   onChange,
   notice,
   onDismissNotice,
+  onLevelTest,
   appVersion,
 }: {
   settings: Settings;
@@ -70,6 +71,8 @@ export default function SettingsView({
   /** What the last change did, or why it did not happen (lib/rules). */
   notice: Applied | null;
   onDismissNotice: () => void;
+  /** Hand the learner to the setup placement test and take the answer back (§5.3). */
+  onLevelTest: () => void;
   /** Stamped into every backup and snapshot, so a file says which Verba wrote it. */
   appVersion: string;
 }) {
@@ -166,7 +169,7 @@ export default function SettingsView({
         </div>
       )}
 
-      {tab === "learning" && <Learning {...section} />}
+      {tab === "learning" && <Learning {...section} onLevelTest={onLevelTest} />}
       {tab === "speech" && <Speech {...section} />}
       {tab === "privacy" && <Privacy {...section} appVersion={appVersion} />}
       {tab === "about" && <AboutMe {...section} />}

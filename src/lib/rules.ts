@@ -113,7 +113,11 @@ function consequenceOf(before: Settings, after: Settings): string | undefined {
   if (after.profile.targetLanguage !== before.profile.targetLanguage)
     return `Now learning ${after.profile.targetLanguage}. Your words, your streak and what the coach knows about you are kept per language — nothing from ${before.profile.targetLanguage} was deleted.`;
   if (after.profile.level !== before.profile.level)
-    return `Level is ${after.profile.level}. Today's plan was rebuilt to match.`;
+    // Not "today's plan was rebuilt": the plan is level-independent by
+    // construction — lib/learn never reads the level, so rebuilding it would
+    // produce the same day back. What the level actually steers is every piece of
+    // material generated from here on, and that is what the sentence says.
+    return `Level is ${after.profile.level}. Everything written from here on — passages, corrections, role-plays — is pitched there.`;
   if (after.profile.nativeLanguage !== before.profile.nativeLanguage)
     return `Explanations and corrections will be written in ${after.profile.nativeLanguage}.`;
   if (after.offline !== before.offline)

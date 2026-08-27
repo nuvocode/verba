@@ -2,6 +2,7 @@ import { detectNativeLang } from "./langs.ts";
 import { markDirty } from "./vault.ts";
 import { migrateSpeech, type Tier } from "./speech.ts";
 import { DEFAULT_WPM } from "./prompter.ts";
+import { snapTime } from "./choices.ts";
 import { CEFR_LEVELS, type CEFRLevel, type LearnerProfile } from "./model.ts";
 
 /** What the documented Docker one-liners listen on — the placeholder, and the value
@@ -221,7 +222,11 @@ export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...defaultSettings };
-    return { ...defaultSettings, ...migrateProfile(migrateSpeech(JSON.parse(raw))) };
+    const s = { ...defaultSettings, ...migrateProfile(migrateSpeech(JSON.parse(raw))) };
+    // A record written before the three named session lengths were the only way to
+    // answer — the picker has no row for 63 minutes, and inventing one would put a
+    // raw number back in the main flow (§5.3).
+    return { ...s, dailyMinutes: snapTime(s.dailyMinutes) };
   } catch {
     return { ...defaultSettings };
   }

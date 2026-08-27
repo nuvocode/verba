@@ -586,11 +586,38 @@ function parseJson(raw: string): unknown {
   }
 }
 
-/** How many days the learner has shown up — the "Day 41" on the Today screen. */
-export async function dayNumber(): Promise<number> {
+/**
+ * How many days the learner has shown up in this language — the "Day 41" on the
+ * Today screen.
+ *
+ * Scoped to the language like every other table here (§3): the streak belongs to
+ * the learner as a learner of *that* language, so switching does not inherit a
+ * number that was never earned there, and switching back finds the old one intact.
+ */
+export async function dayNumber(lang: string): Promise<number> {
   const db = await getDb();
-  const rows = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM daily_sessions");
+  const rows = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM daily_sessions WHERE lang = $1", [lang]);
   return rows[0]?.n ?? 1;
+}
+
+/**
+ * Days shown up and words saved, per language, in two queries rather than two per
+ * language. This is what a language row in Settings shows: the proof that
+ * switching language deletes nothing, which a sentence promising it cannot give.
+ */
+export async function progressByLang(): Promise<Record<string, { days: number; words: number }>> {
+  const db = await getDb();
+  const out: Record<string, { days: number; words: number }> = {};
+  const at = (lang: string) => (out[lang] ??= { days: 0, words: 0 });
+  for (const r of await db.select<{ lang: string; n: number }[]>(
+    "SELECT lang, COUNT(*) AS n FROM daily_sessions GROUP BY lang",
+  ))
+    at(r.lang).days = r.n;
+  for (const r of await db.select<{ lang: string; n: number }[]>(
+    "SELECT lang, COUNT(*) AS n FROM vocab GROUP BY lang",
+  ))
+    at(r.lang).words = r.n;
+  return out;
 }
 
 /** The most recent day's recap — its nextFocus seeds the next plan's weak-area drills. */
