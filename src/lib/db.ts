@@ -608,7 +608,7 @@ export async function latestRecap(lang: string, before: string): Promise<{ recap
   }
 }
 
-// ---- long-term memory (Settings → User Memory) ----
+// ---- long-term memory (Settings → About me) ----
 
 export interface MemoryRow extends Memory {
   lang: string;

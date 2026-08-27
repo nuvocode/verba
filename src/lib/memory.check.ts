@@ -1,4 +1,4 @@
-// Runnable self-check for long-term memory (Settings → User Memory): what a model's
+// Runnable self-check for long-term memory (Settings → About me): what a model's
 // answer is allowed to write, what gets deduped, what supersedes what, and that the
 // facts actually reach the prompts that were supposed to receive them.
 // Run: node --experimental-strip-types src/lib/memory.check.ts

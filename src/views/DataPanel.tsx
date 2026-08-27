@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { AT } from "../lib/rules";
+import { cloudGate } from "../lib/rules";
+import { Because } from "./settings/parts";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { collect, parseBackup, restore, suggestedFilename, summarize, type Backup, type Summary } from "../lib/backup";
@@ -19,7 +20,7 @@ import {
 } from "../lib/vault";
 
 /**
- * Settings → Data: the panel where the learner's history stops being trapped
+ * Settings → Privacy and data: the panel where the learner's history stops being trapped
  * inside one machine.
  *
  * Two features, one file, because they are the same file format seen twice: an
@@ -307,7 +308,7 @@ export default function DataPanel({
         <>
           <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "8px 4px 16px" }}>
             {offline
-              ? "Offline mode is on, so Verba never contacts GitHub — not even to ask whether a new version exists. Turn it off under Settings → Offline to check for updates."
+              ? "Offline mode is on, so Verba never contacts GitHub — not even to ask whether a new version exists. Turn it off under Settings → Privacy and data to check for updates."
               : "Verba checks once when it starts, and whenever you ask. Updates are downloaded from GitHub and verified against a signature before anything is replaced."}
           </div>
 
@@ -340,12 +341,9 @@ export default function DataPanel({
               </button>
             )}
             {/* The one setting that closed this, and the way back to it (#42). */}
-            {offline && (
+            {cloudGate({ offline }) && (
               <span className="model">
-                · Off while Verba stays on this machine —{" "}
-                <a href={AT.privacy} style={{ color: "inherit" }}>
-                  Offline lock
-                </a>
+                <Because gate={cloudGate({ offline })!} />
               </span>
             )}
             {progress && (

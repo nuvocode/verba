@@ -203,7 +203,7 @@ export function elevenLabs(apiKey: string, voiceId = "21m00Tcm4TlvDq8ikWAM"): Tt
     // Per-pack voice ids are the upgrade — add `speech.elevenVoiceId` to the pack
     // schema when someone asks for it.
     async speak(text, opts = {}) {
-      if (!apiKey) throw new Error("ElevenLabs API key is not set (Settings → Speech).");
+      if (!apiKey) throw new Error("ElevenLabs API key is not set (Settings → Speech and listening).");
       if (!text.trim()) return;
       const lang = baseLang(opts.locale);
       const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
@@ -396,7 +396,7 @@ export function deepgram(apiKey: string): Stt {
     canListen: hasMic(),
 
     async listen(locale) {
-      if (!apiKey) throw new Error("Deepgram API key is not set (Settings → Speech).");
+      if (!apiKey) throw new Error("Deepgram API key is not set (Settings → Speech and listening).");
       const clip = await record((r) => (rec = r));
       rec = null;
       if (!clip.size) return "";
@@ -530,9 +530,9 @@ export function listenBlocker(s: SpeechSettings): string {
   if (webSpeech().canListen) return "";
   if (ownStt(s)) return hasMic() ? "" : "No microphone is available to this app.";
   if (s.offline)
-    return "Dictation needs a bundled Whisper model (Settings → Speech) — or Deepgram, a cloud service, with Offline mode off.";
+    return "Dictation needs a bundled Whisper model (Settings → Speech and listening) — or Deepgram, a cloud service, with Offline mode off.";
   if (!s.deepgramKey)
-    return "Dictation needs a bundled Whisper model or a Deepgram API key (Settings → Speech) — this webview has no built-in speech recognition.";
+    return "Dictation needs a bundled Whisper model or a Deepgram API key (Settings → Speech and listening) — this webview has no built-in speech recognition.";
   if (!hasMic()) return "No microphone is available to this app.";
   return "";
 }
