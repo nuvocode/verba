@@ -43,6 +43,10 @@ sha2 = "0.10"
 tar = "0.4"
 bzip2 = "0.4"
 thiserror = "2"
+# One number: how much memory this machine has, so a model list can say which
+# rows will not fit in it. `system` only — the disk, network and process halves
+# of this crate are not wanted and not compiled.
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 # Desktop only by nature — the updater has nothing to replace on a phone — but
 # declared plainly, because Verba has no mobile build for a cfg gate to protect
 # and gating the crate forces the module and both commands to be gated too.

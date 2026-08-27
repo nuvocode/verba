@@ -79,6 +79,25 @@ for (const [name, prompt] of [
 assert.match(vocabPrompt(s, pack), /Never leave it empty/, "a card with no meaning may not be proposed");
 assert.match(vocabPrompt(s, pack), /Never pick a proper name, a number, a time/, "story details are not vocabulary");
 
+// --- state 9: a missing pack degrades one thing, and says which ---
+// §7 row 9 — "Hangi özelliğin çalışmayacağı yazılır, uygulama açık kalır". The
+// second half is why this is a sentence and not a refusal: a `packId` pointing
+// at nothing (a backup restored onto a machine that never had the imported pack,
+// or one the learner removed) must not stop Verba opening.
+import { missingPackNote } from "./packs/index.ts";
+
+assert.equal(missingPackNote("ja", "Japanese", ["ja", "es"]), null, "an installed pack says nothing");
+assert.equal(missingPackNote("", "Japanese", ["ja"]), null, "no pack chosen is not a broken pack");
+
+const note = missingPackNote("nl", "Dutch", ["ja", "es"]);
+assert(note, "a pack that is not installed must be reported");
+assert.match(note!, /Dutch/, "…naming the language the learner is on");
+assert.match(note!, /Everything still runs/, "…saying the app keeps working");
+assert.match(note!, /pronunciation and grammar notes/, "…and which single thing is worse for it");
+
+// The language is never left blank in the middle of the sentence.
+assert.match(missingPackNote("nl", "  ", ["ja"])!, /this language/, "an empty name still reads as English");
+
 // --- no language-name literals outside their three homes (#14) ---
 // invariant 1
 // When the gate is green, every language name a learner sees comes from exactly

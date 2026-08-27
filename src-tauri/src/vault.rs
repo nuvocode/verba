@@ -149,3 +149,18 @@ pub fn file_write(path: String, contents: String) -> Result<(), Error> {
 pub fn file_read(path: String) -> Result<String, Error> {
     Ok(fs::read_to_string(path)?)
 }
+
+/// How much memory this machine has, in bytes.
+///
+/// Here rather than in a module of its own because it is one number with one
+/// caller: the model list in Settings → Advanced, which says which models will
+/// not fit. Anything smarter — memory free right now, VRAM, what the GPU can
+/// hold — is a different question needing a different answer per platform, and
+/// "this model is larger than all the RAM you own" is the only claim worth
+/// making without one.
+#[tauri::command]
+pub fn machine_ram() -> u64 {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    sys.total_memory()
+}

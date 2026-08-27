@@ -28,6 +28,7 @@ pub fn run() {
             vault::vault_check,
             vault::file_read,
             vault::file_write,
+            vault::machine_ram,
             update::can_update,
             update::fetch_update,
             update::install_update,

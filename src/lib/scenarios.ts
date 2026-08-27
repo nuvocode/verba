@@ -95,6 +95,32 @@ function imported(): Scenario[] {
   }
 }
 
+/**
+ * Where a scenario came from. The same distinction packs make (lib/packs/registry),
+ * and for the same reason: §5.7 says the installed list names each one's origin,
+ * because "you pasted this in yourself and nobody reviewed it" is the whole
+ * difference between the two.
+ */
+export type ScenarioOrigin = "bundled" | "imported";
+
+export interface RegisteredScenario {
+  scenario: Scenario;
+  origin: ScenarioOrigin;
+}
+
+/** Every scenario with its provenance. An import shadows a bundled one of the same id. */
+export function scenarioRegistry(): RegisteredScenario[] {
+  const byId = new Map<string, RegisteredScenario>();
+  for (const scenario of BUNDLED_SCENARIOS) byId.set(scenario.id, { scenario, origin: "bundled" });
+  for (const scenario of imported()) byId.set(scenario.id, { scenario, origin: "imported" });
+  return [...byId.values()];
+}
+
+/** Drop one imported scenario. A bundled id is not removable and is left alone. */
+export function removeImportedScenario(id: string): void {
+  localStorage.setItem(KEY, JSON.stringify(imported().filter((s) => s.id !== id)));
+}
+
 export function listScenarios(): Scenario[] {
   const byId = new Map<string, Scenario>();
   for (const s of BUNDLED_SCENARIOS) byId.set(s.id, s);
