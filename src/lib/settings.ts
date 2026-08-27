@@ -78,6 +78,12 @@ export interface Settings {
   bundledTtsModel: string; // "" → no bundled voice; the tier is skipped
   bundledTtsVoice: number; // sherpa speaker id inside that model (Kokoro has many)
   bundledSttModel: string; // "" → likewise
+  /**
+   * Which microphone to record from — "" is whatever the system calls default.
+   * A device id, not a name: names are not stable and are not even readable until
+   * the page has held the microphone once.
+   */
+  micDeviceId: string;
   // Where each half gets its speech — the "source" the Speech panel asks for.
   // "auto" walks bundled → local → cloud → OS, which is what almost everyone wants;
   // anything else pins that half, and the panel then shows only that source's config.
@@ -162,6 +168,7 @@ export const defaultSettings: Settings = {
   bundledTtsModel: "",
   bundledTtsVoice: 0,
   bundledSttModel: "",
+  micDeviceId: "",
   ttsTier: "auto",
   sttTier: "auto",
   onboarded: false,

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadSettings, saveSettings, isLocalProvider, onboardingReset, type Settings } from "./lib/settings";
 import { applyPatch, type Applied } from "./lib/rules";
-import { installed } from "./lib/bundled";
-import { pruneBundled } from "./lib/speech";
+import { catalogModel, installed } from "./lib/bundled";
+import { prunedNote, pruneBundled } from "./lib/speech";
 import type { ActivityKind, SignalDraft } from "./lib/model";
 import { useDay } from "./lib/useDay";
 import { useTalk } from "./lib/useTalk";
@@ -136,6 +136,12 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         if (!Object.keys(patch).length) return s;
         const next = { ...s, ...patch };
         saveSettings(next);
+        // §7 row 3: the falling back is half the answer. A voice that was cleared
+        // without a word is a voice that appears to have stopped working on its
+        // own — so this rides the same notice every other wide change uses, and
+        // its link lands on the panel that can download the model again.
+        const note = prunedNote(s, patch, (id) => catalogModel(id)?.label ?? id);
+        if (note) setNotice({ next, consequence: note });
         return next;
       });
     });

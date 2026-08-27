@@ -4,7 +4,18 @@
 // which is exactly the macOS-webview situation this code exists to survive.
 // Run: node --experimental-strip-types src/lib/speech.check.ts
 import assert from "node:assert";
-import { deepgramHelp, getSpeech, listenBlocker, migrateSpeech, pruneBundled, resolveTier } from "./speech.ts";
+import {
+  deepgramHelp,
+  getSpeech,
+  listenBlocker,
+  micRoute,
+  micTrouble,
+  migrateSpeech,
+  pruneBundled,
+  prunedNote,
+  resolveTier,
+  tierName,
+} from "./speech.ts";
 
 // --- the original bug: an ElevenLabs key must not decide dictation ---
 // The old single-radio design made these mutually exclusive, so picking
@@ -182,5 +193,75 @@ assert.equal(resolveTier(halfOn, "stt"), "local", "…while the half that had on
 // Blank state, and anything already migrated, passes through untouched.
 assert.equal(resolveTier(migrateSpeech({}), "tts"), "native", "a fresh install is Automatic → the OS");
 assert.deepEqual(migrateSpeech({ ttsTier: "cloud" }), { ttsTier: "cloud" }, "migrating twice changes nothing");
+
+// ---- state 3: a chosen voice whose files went away says so ----
+//
+// §7 row 3. pruneBundled clears the id; without a sentence the learner sees a
+// setting that forgot itself and a coach that changed voice for no reason.
+const label = (id: string) => (id === "kokoro" ? "Kokoro" : id === "whisper-base" ? "Whisper base" : id);
+
+const lostVoice = { bundledTtsModel: "kokoro", bundledSttModel: "" };
+const clearTts = pruneBundled(lostVoice, new Set());
+assert.deepEqual(clearTts, { bundledTtsModel: "" }, "the missing model is what gets cleared");
+
+const said = prunedNote(lostVoice, clearTts, label);
+assert.match(said, /Kokoro/, "state 3: the note names the voice that went");
+assert.match(said, /your system voice/, "state 3: …and what is speaking instead");
+assert.match(said, /Download it again/, "state 3: …and the way to get it back");
+
+// The replacement is read off the same walk the adapter does, not guessed: with a
+// local server configured, that is what speaks, and the note has to say so.
+const withServer = { ...lostVoice, localTtsUrl: "http://localhost:8880/v1" };
+assert.match(
+  prunedNote(withServer, pruneBundled(withServer, new Set()), label),
+  /your local server/,
+  "state 3: the note names the tier that actually took over",
+);
+
+// Both halves gone is one sentence pair, and the plural has to follow.
+const lostBoth = { bundledTtsModel: "kokoro", bundledSttModel: "whisper-base" };
+const clearBoth = prunedNote(lostBoth, pruneBundled(lostBoth, new Set()), label);
+assert.match(clearBoth, /speaking with/, "state 3: the speaking half is named");
+assert.match(clearBoth, /listening with/, "state 3: …and so is the listening half");
+assert.match(clearBoth, /Download them again/, "state 3: two losses take the plural");
+
+// The dictation half names no model — §5.4 keeps that name in Advanced, and a note
+// is still the main flow.
+assert(!/Whisper/.test(clearBoth), "state 3: the dictation model's name stays out of this page");
+
+// Nothing lost, nothing said. A note on every start-up is a note nobody reads.
+assert.equal(prunedNote(lostVoice, {}, label), "", "state 3: an untouched setup says nothing");
+assert.equal(prunedNote({}, pruneBundled({}, new Set()), label), "", "…and neither does one that never chose");
+
+// ---- state 4: the microphone's refusals name the way out ----
+//
+// §7 row 4: "Konuşma bölümü nedeni yazar, izne giden yolu gösterir." Four failures,
+// four different next moves — flattening them into one apology is what this replaces.
+const denied = micTrouble(Object.assign(new Error("Permission denied"), { name: "NotAllowedError" }));
+assert.match(denied, /not allowed/i, "state 4: a refusal says it was refused");
+assert.match(denied, /Privacy/i, "state 4: …and names where the switch is");
+
+assert.match(
+  micTrouble(Object.assign(new Error("x"), { name: "NotFoundError" })),
+  /Plug one in/,
+  "state 4: no device is a different problem with a different answer",
+);
+assert.match(
+  micTrouble(Object.assign(new Error("x"), { name: "NotReadableError" })),
+  /Another app/,
+  "state 4: a mic held by something else is a third",
+);
+// Anything unrecognised arrives whole rather than being flattened into a guess.
+assert.match(micTrouble(new Error("something new")), /something new/, "state 4: an unknown failure is quoted, not invented");
+
+// The route is per platform, because "check your privacy settings" helps nobody.
+assert.match(micRoute("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"), /System Settings/, "state 4: macOS route");
+assert.match(micRoute("Mozilla/5.0 (Windows NT 10.0; Win64; x64)"), /Privacy & security/, "state 4: Windows route");
+assert.match(micRoute("Mozilla/5.0 (X11; Linux x86_64)"), /privacy settings/, "state 4: and a fallback that is still a route");
+
+// ---- what a tier is called, once ----
+assert.equal(tierName("native", "tts"), "your system voice");
+assert.equal(tierName("native", "stt"), "your system's speech recognition");
+assert.notEqual(tierName("cloud", "tts"), tierName("cloud", "stt"), "the two halves use different cloud services");
 
 console.log("speech.check: ok");

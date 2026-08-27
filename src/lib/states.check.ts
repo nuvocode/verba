@@ -43,13 +43,13 @@ const TABLE: Row[] = [
     id: 3,
     state: "Seçili ses indirilmemiş",
     answer: "Otomatik olarak paketli sese düşülür, bu söylenir",
-    pending: "#36 — the fallback happens; nothing yet asserts the learner is told",
+    assertedIn: [{ file: "src/lib/speech.check.ts", marker: "state 3" }],
   },
   {
     id: 4,
     state: "Mikrofon izni yok",
     answer: "Konuşma bölümü nedeni yazar, izne giden yolu gösterir",
-    pending: "#37 — the microphone panel and its permission route",
+    assertedIn: [{ file: "src/lib/speech.check.ts", marker: "state 4" }],
   },
   {
     id: 5,
