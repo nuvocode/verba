@@ -113,16 +113,100 @@ jobs:
 
       # `--clobber` so re-running a build replaces its own artifact instead of
       # failing on a name that is already there.
+      #
+      # The macOS rename is not cosmetic. Tauri names the updater bundle
+      # `Verba.app.tar.gz` with no architecture in it, so both macOS legs of this
+      # matrix produce the same filename — and `--clobber` would let whichever
+      # finishes second quietly overwrite the other, leaving one of the two Macs
+      # downloading a build for the wrong chip.
       - name: Attach artifacts to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
           PATHS: ${{ steps.build.outputs.artifactPaths }}
+          TARGET: ${{ matrix.target }}
         run: |
+          arch="${TARGET%%-*}"
           echo "$PATHS" | tr -d '[]"' | tr ',' '\n' | while read -r p; do
             p=$(echo "$p" | xargs)
             [ -f "$p" ] || continue
-            echo "uploading $p"
+
+            base=$(basename "$p")
+            case "$base" in
+              *.app.tar.gz|*.app.tar.gz.sig)
+                if [ -z "$arch" ]; then
+                  echo "a macOS updater bundle built without --target: cannot tell the two Macs apart" >&2
+                  exit 1
+                fi
+                renamed="${base/.app.tar.gz/_${arch}.app.tar.gz}"
+                cp "$p" "$(dirname "$p")/$renamed"
+                p="$(dirname "$p")/$renamed"
+                ;;
+            esac
+
+            echo "uploading $(basename "$p")"
             gh release upload "$TAG" "$p" --clobber --repo "$GITHUB_REPOSITORY"
+          done
+        shell: bash
+
+  # Separate job, after the whole matrix: a manifest that names four platforms
+  # cannot be written by a job that knows about one. It also means a partial
+  # matrix publishes nothing — `needs` skips this job if any leg failed — which
+  # is the right failure. An update offered to a platform whose bundle never
+  # uploaded is worse than no update at all.
+  manifest:
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Write the manifest and publish it to the `updates` tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          gh release view "$TAG" --json body,assets --repo "$GITHUB_REPOSITORY" > release.json
+
+          # No .sig among the assets means nothing was signed and there is
+          # nothing to point at — gh fails here, and the job stops.
+          mkdir sigs
+          gh release download "$TAG" --pattern "*.sig" --dir sigs --repo "$GITHUB_REPOSITORY"
+
+          node scripts/manifest.mjs "$TAG" release.json sigs > manifest.json
+          cat manifest.json
+
+          # One release, pinned to a tag that never moves, holding both channel
+          # manifests. `--latest=false` keeps it out of the way of the real
+          # releases people download by hand.
+          gh release view updates --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create updates \
+              --title "Update manifests" \
+              --notes "Machine-written. \`stable.json\` and \`beta.json\` are what installed copies of Verba check for updates. Not a download." \
+              --latest=false \
+              --repo "$GITHUB_REPOSITORY"
+
+          # A beta tag moves the beta channel only. A stable tag moves both —
+          # which is also what gives a beta tester the fallback: beta.json always
+          # holds the most recent thing built, whichever channel produced it.
+          case "$TAG" in
+            *-beta.*) channels="beta" ;;
+            *) channels="beta stable" ;;
+          esac
+
+          for channel in $channels; do
+            cp manifest.json "$channel.json"
+            gh release upload updates "$channel.json" --clobber --repo "$GITHUB_REPOSITORY"
+            echo "published $channel.json"
           done
         shell: bash
