@@ -8,6 +8,7 @@ import {
   type Settings,
 } from "../lib/settings";
 import { langName } from "../lib/langs";
+import { cloudGate, type Applied, type Gate } from "../lib/rules";
 import { CEFR_LEVELS, type CEFRLevel } from "../lib/model";
 import { deepgramHelp, listenBlocker, resolveTier, type Tier } from "../lib/speech";
 import {
@@ -293,13 +294,14 @@ function SourceSelect({
   value,
   onPick,
   now,
-  offline,
+  gate,
   dim,
 }: {
   value: Tier;
   onPick: (t: Tier) => void;
   now: string; // what Automatic currently resolves to
-  offline: boolean;
+  /** Non-null when the cloud row is closed — it then says so, in place (#42). */
+  gate: Gate | null;
   dim?: boolean;
 }) {
   return (
@@ -314,12 +316,15 @@ function SourceSelect({
       }}
     >
       {SOURCES.map(([id, label]) => {
-        const off = offline && id === "cloud";
+        const off = !!gate && id === "cloud";
         return (
           <button
             key={id}
             className={`model ${off ? "off" : ""}`}
-            disabled={off}
+            // Closed, not dead: `disabled` would take the row out of the tab
+            // order and swallow the click that explains it. Picking it goes
+            // through the same door as everything else and is refused there.
+            aria-disabled={off}
             aria-pressed={value === id}
             onClick={() => onPick(id)}
             style={{
@@ -334,11 +339,35 @@ function SourceSelect({
           >
             <span className={`radio ${value === id ? "on" : ""}`} />
             {id === "auto" ? `Automatic — currently ${now}` : label}
-            {off && <span>· disabled offline</span>}
+            {off && gate && <Because gate={gate} link={false} />}
           </button>
         );
       })}
     </div>
+  );
+}
+
+/**
+ * The reason a closed control owes the learner (#42), rendered the one way.
+ * A closed control stays on screen and says which setting closed it — a missing
+ * option reads as a missing feature, a closed one reads as a switch you flipped.
+ */
+function Because({ gate, link = true }: { gate: Gate; link?: boolean }) {
+  return (
+    <span style={{ color: "var(--ink3)" }}>
+      {" · "}
+      {gate.why} —{" "}
+      {link ? (
+        <a href={gate.exit.href} style={{ color: "inherit" }}>
+          {gate.exit.label}
+        </a>
+      ) : (
+        // Inside a control: an anchor here would fire the control's own click as
+        // well. The row itself is the way through — picking it raises the
+        // refusal, and the refusal carries the link.
+        gate.exit.label
+      )}
+    </span>
   );
 }
 
@@ -437,10 +466,15 @@ const TIMINGS: [CorrectionTiming, string, string][] = [
 export default function SettingsView({
   settings,
   onChange,
+  notice,
+  onDismissNotice,
   appVersion,
 }: {
   settings: Settings;
   onChange: (patch: Partial<Settings>) => void;
+  /** What the last change did, or why it did not happen (lib/rules). */
+  notice: Applied | null;
+  onDismissNotice: () => void;
   /** Stamped into every backup and snapshot, so a file says which Verba wrote it. */
   appVersion: string;
 }) {
@@ -718,6 +752,42 @@ export default function SettingsView({
       )}
       {err && <div className="err">{err}</div>}
 
+      {/* A change that was refused, and the two doors out of it. Nothing was
+          written; the learner picks which language they meant to move (#35). */}
+      {notice?.refused && (
+        <div className="err">
+          {notice.refused.reason}
+          <div style={{ marginTop: 8, display: "flex", gap: 16 }}>
+            {notice.refused.exits.map((e) => (
+              <a key={e.label} href={e.href} onClick={onDismissNotice} style={{ color: "inherit" }}>
+                {e.label}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* A change that reached past its own row says what it did, and stays
+          undoable while the sentence is on screen (#33). */}
+      {notice?.consequence && (
+        <div className="err" style={{ borderColor: "var(--line)", color: "var(--ink2)" }}>
+          {notice.consequence}
+          {notice.undo && (
+            <div style={{ marginTop: 8 }}>
+              <button
+                style={{ ...linkish, padding: 0 }}
+                onClick={() => {
+                  onChange(notice.undo!);
+                  onDismissNotice();
+                }}
+              >
+                Undo
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {tab === "language" && (
         <>
           <div className="sec">Language</div>
@@ -841,14 +911,9 @@ export default function SettingsView({
             "Never leave this machine",
             "Forces local providers only. Cloud options are disabled and no learner data ever leaves your device.",
             settings.offline,
-            () => {
-              const offline = !settings.offline;
-              // Switching offline on while a cloud provider is active would silently break
-              // every call — fall back to the local default instead of failing later.
-              const patch: Partial<Settings> = { offline };
-              if (offline && !isLocalProvider(settings.provider)) patch.provider = "ollama";
-              onChange(patch);
-            },
+            // Everything the lock drags with it — the provider, the cloud voices —
+            // and the sentence it writes are lib/rules' business, not this row's.
+            () => onChange({ offline: !settings.offline }),
           )}
         </>
       )}
@@ -858,18 +923,19 @@ export default function SettingsView({
           <div className="sec">AI Provider</div>
           {PROVIDERS.map((p) => {
             const local = isLocalProvider(p.id);
-            const disabled = settings.offline && !local;
+            const gate = local ? null : cloudGate(settings);
             return (
               <button
                 key={p.id}
-                className={`srow ${disabled ? "off" : ""}`}
-                disabled={disabled}
+                className={`srow ${gate ? "off" : ""}`}
+                aria-disabled={!!gate}
                 onClick={() => onChange({ provider: p.id })}
               >
                 <div className={`radio ${settings.provider === p.id ? "on" : ""}`} />
                 <div style={{ flex: 1 }}>
                   <div className="name">
                     {p.name} <span>{local ? "● local" : "☁ cloud"}</span>
+                    {gate && <Because gate={gate} link={false} />}
                   </div>
                   <div className="desc">{p.desc}</div>
                 </div>
@@ -945,7 +1011,7 @@ export default function SettingsView({
             value={settings.ttsTier}
             onPick={pickTts}
             now={shortTts(resolveTier({ ...settings, ttsTier: "auto" }, "tts"))}
-            offline={settings.offline}
+            gate={cloudGate(settings)}
             dim={!settings.speak}
           />
 
@@ -983,7 +1049,7 @@ export default function SettingsView({
           {settings.ttsTier === "cloud" && (
             <div className="field" style={{ marginTop: 14 }}>
               <label>
-                ElevenLabs key {settings.offline && <span>· disabled offline</span>}
+                ElevenLabs key {cloudGate(settings) && <Because gate={cloudGate(settings)!} />}
               </label>
               <input
                 type="password"
@@ -1004,7 +1070,7 @@ export default function SettingsView({
             value={settings.sttTier}
             onPick={pickStt}
             now={shortStt(resolveTier({ ...settings, sttTier: "auto" }, "stt"))}
-            offline={settings.offline}
+            gate={cloudGate(settings)}
           />
 
           {settings.sttTier === "auto" && autoHint("stt")}
@@ -1033,7 +1099,7 @@ export default function SettingsView({
           {settings.sttTier === "cloud" && (
             <div className="field" style={{ marginTop: 14 }}>
               <label>
-                Deepgram key {settings.offline && <span>· disabled offline</span>}
+                Deepgram key {cloudGate(settings) && <Because gate={cloudGate(settings)!} />}
               </label>
               <input
                 type="password"

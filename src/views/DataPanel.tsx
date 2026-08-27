@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AT } from "../lib/rules";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { collect, parseBackup, restore, suggestedFilename, summarize, type Backup, type Summary } from "../lib/backup";
@@ -338,7 +339,15 @@ export default function DataPanel({
                 Install {found.version}
               </button>
             )}
-            {offline && <span className="model">· disabled offline</span>}
+            {/* The one setting that closed this, and the way back to it (#42). */}
+            {offline && (
+              <span className="model">
+                · Off while Verba stays on this machine —{" "}
+                <a href={AT.privacy} style={{ color: "inherit" }}>
+                  Offline lock
+                </a>
+              </span>
+            )}
             {progress && (
               <span className="model">
                 {progress.step === "installing"
