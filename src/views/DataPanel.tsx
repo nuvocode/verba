@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { cloudGate } from "../lib/rules";
-import { Because } from "./settings/parts";
+import { Because, ToggleRow } from "./settings/parts";
 import { invoke } from "@tauri-apps/api/core";
+import { appConfigDir, appDataDir, join } from "@tauri-apps/api/path";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { collect, parseBackup, restore, suggestedFilename, summarize, type Backup, type Summary } from "../lib/backup";
+import { collect, parseBackup, restore, suggestedFilename, summarize, wipe, type Backup, type Summary } from "../lib/backup";
 import { canUpdate, check, install, pending as pendingUpdate, type Available, type Progress } from "../lib/update";
 import {
   attach,
@@ -14,6 +16,7 @@ import {
   push,
   resolve,
   state,
+  statusLine,
   sync,
   vaultDir,
   type Meta,
@@ -36,6 +39,13 @@ import {
 const when = (t: number) => (t ? new Date(t).toLocaleString() : "never");
 
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+/** `2026-08-27-1432` — sortable, and readable by whoever finds the file later. */
+const stamp = () => new Date().toISOString().slice(0, 16).replace("T", "-").replace(":", "");
+
+/** What the delete confirmation makes the learner type. Not "yes": a word you can
+ *  hit by reflex is not a confirmation. */
+const DELETE_PHRASE = "delete everything";
 
 /** "12 conversations · 340 words · 8 passages" — the line a decision is actually made from. */
 function counts(s: Summary): string {
@@ -67,6 +77,24 @@ export default function DataPanel({
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+
+  // ---- where the data actually is ----
+
+  /**
+   * Two folders, because Tauri has two: the database and the safety copies sit
+   * in the config dir (that is where tauri-plugin-sql resolves `sqlite:verba.db`),
+   * and downloaded voices sit in the data dir. On macOS and Windows they are the
+   * same path and only one line is shown; on Linux they are not, and claiming
+   * otherwise would be exactly the "described, not shown" this section exists to
+   * stop being.
+   */
+  const [folder, setFolder] = useState<{ app: string; models: string }>({ app: "", models: "" });
+
+  useEffect(() => {
+    Promise.all([appConfigDir(), appDataDir()])
+      .then(([app, data]) => setFolder({ app, models: data === app ? "" : data }))
+      .catch(() => setFolder({ app: "", models: "" })); // a dev server has no Tauri to ask
+  }, []);
 
   // ---- updates ----
 
@@ -114,6 +142,9 @@ export default function DataPanel({
   const [pending, setPending] = useState<{ backup: Backup; from: string } | null>(null);
   /** A folder that already holds data, waiting on which side wins. */
   const [both, setBoth] = useState<{ dir: string; meta: Meta; theirs: Summary; mine: Summary } | null>(null);
+  /** "Delete everything", open — holding what is about to be lost, counted. */
+  const [wiping, setWiping] = useState<Summary | null>(null);
+  const [typed, setTyped] = useState("");
 
   // The folder can change underneath this panel — App syncs on launch, and a
   // background push lands while Settings is open. Re-read rather than cache.
@@ -137,6 +168,14 @@ export default function DataPanel({
       setSync_(state());
     }
   };
+
+  const reveal = (path: string, item: string) =>
+    run("Opening…", async () => {
+      // The file rather than its folder: a file manager asked to reveal a file
+      // opens the folder with that file picked out, which is the "here it is"
+      // someone clicking this is looking for.
+      await revealItemInDir(await join(path, item));
+    });
 
   // ---- export / import a file ----
 
@@ -163,6 +202,12 @@ export default function DataPanel({
   const doImport = () =>
     run("Restoring…", async () => {
       if (!pending) return;
+      // Before anything is replaced (§5.5). Written to Verba's own folder rather
+      // than asked for with a save dialog: a learner who is one click from losing
+      // a year of history should not have to answer a filename question first,
+      // and a copy they never asked for is the one they will want.
+      const safety = await join(await appConfigDir(), `verba-before-import-${stamp()}.json`);
+      await invoke("file_write", { path: safety, contents: JSON.stringify(await collect(appVersion)) });
       await restore(pending.backup);
       setPending(null);
       // A hand-fed import is a local change like any other: if this machine syncs
@@ -212,6 +257,25 @@ export default function DataPanel({
       return r.plan === "push" ? "Folder updated." : "Already up to date.";
     });
 
+  // ---- delete everything ----
+
+  const askWipe = () =>
+    run("", async () => {
+      setTyped("");
+      setWiping(summarize(await collect(appVersion)));
+    });
+
+  const doWipe = () =>
+    run("Deleting…", async () => {
+      // The folder first, and not by deleting it: "delete everything" is about
+      // this machine. A push after the wipe would carry the deletion to every
+      // other machine pointed at the same folder, which nobody asked for.
+      detach();
+      await wipe();
+      setWiping(null);
+      reload();
+    });
+
   const stop = () =>
     run("", async () => {
       detach();
@@ -228,25 +292,73 @@ export default function DataPanel({
       )}
       {err && <div className="err">{err}</div>}
 
-      <div className="sec">Your data</div>
-      <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "14px 4px 4px" }}>
-        Everything Verba knows — conversations, saved words and their review schedule, passages, daily plans, what the
-        coach has written down, and your settings — is on this machine and nowhere else. These are the two ways to move
-        it.
-      </div>
-      <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "0 4px 16px" }}>
-        A backup file includes your API keys, so treat it like one. Downloaded speech models are not included; they are
-        hundreds of megabytes and a restored machine re-downloads the ones it needs.
+      <div className="sec">Where your data is</div>
+      <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "14px 4px 10px" }}>
+        Your conversations, saved words and their review schedule, the passages and listening pieces you have worked
+        through, your daily plans, what the coach has written down about you, and your settings. All of it is in one
+        folder on this computer
+        {dir ? ", and in the sync folder you chose below." : ", and in no other place."}
       </div>
 
-      <div className="field" style={{ borderBottom: "1px solid var(--line2)", paddingBottom: 20, marginBottom: 28 }}>
-        <button className="btn sm ghost" onClick={exportFile} disabled={!!busy}>
-          Export to a file
-        </button>
-        <button className="btn sm ghost" onClick={pickFile} disabled={!!busy}>
-          Import from a file
-        </button>
-        {busy && <span className="model">{busy}</span>}
+      {folder.app ? (
+        <>
+          <div className="model" style={{ fontSize: 12, wordBreak: "break-all", padding: "0 4px 10px" }}>
+            {folder.app}
+          </div>
+          <div className="field">
+            <button className="btn sm ghost" onClick={() => reveal(folder.app, "verba.db")} disabled={!!busy}>
+              Open this folder
+            </button>
+            {folder.models && (
+              <button className="btn sm ghost" onClick={() => reveal(folder.models, "models")} disabled={!!busy}>
+                Open the voices folder
+              </button>
+            )}
+          </div>
+          {folder.models && (
+            <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "10px 4px 0" }}>
+              Downloaded voices are large enough that this system keeps them apart, in {folder.models}.
+            </div>
+          )}
+        </>
+      ) : (
+        // The browser build has no Tauri to ask, and a path invented for it would
+        // be a lie in the one place this section promises not to tell one.
+        <div className="desc" style={{ padding: "0 4px" }}>
+          The folder is on the machine Verba is installed on — this preview can't reach it.
+        </div>
+      )}
+
+      <div className="sec" style={{ marginTop: 36 }}>
+        A copy you keep
+      </div>
+      <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "14px 4px 16px" }}>
+        One file holding everything above, to put on another machine or to keep somewhere safe.
+      </div>
+
+      <div style={{ padding: "0 4px 20px", maxWidth: 480 }}>
+        <div className="field" style={{ padding: 0 }}>
+          <button className="btn sm ghost" onClick={exportFile} disabled={!!busy}>
+            Export to a file
+          </button>
+        </div>
+        <div className="desc" style={{ lineHeight: 1.6, marginTop: 8 }}>
+          The file holds your API keys — treat it like one of them. Downloaded voices are left out; they are hundreds of
+          megabytes, and a machine that reads this file back knows which ones it had and fetches them again.
+        </div>
+      </div>
+
+      <div style={{ padding: "0 4px 4px", maxWidth: 480 }}>
+        <div className="field" style={{ padding: 0 }}>
+          <button className="btn sm ghost" onClick={pickFile} disabled={!!busy}>
+            Import from a file
+          </button>
+          {busy && <span className="model">{busy}</span>}
+        </div>
+        <div className="desc" style={{ lineHeight: 1.6, marginTop: 8 }}>
+          Importing replaces what is here — Verba asks before it does, and writes a copy of the current data into the
+          folder above first.
+        </div>
       </div>
 
       <div className="sec">Sync folder</div>
@@ -274,13 +386,19 @@ export default function DataPanel({
             <div className="model" style={{ fontSize: 12, wordBreak: "break-all" }}>
               {dir}
             </div>
+            {/* When it worked, how big it is, and — if it stopped — why (§7 row 6). */}
             <div className="desc" style={{ marginTop: 8 }}>
-              Last synced {when(sync_.syncedAt)} · {sync_.dirty ? "changes waiting to be written" : "up to date"}
+              {statusLine(sync_)}
             </div>
           </div>
           <div className="field">
             <button className="btn sm ghost" onClick={syncNow} disabled={!!busy}>
               Sync now
+            </button>
+            {/* The way out of a folder that has stopped answering: point at
+                another one without losing anything first. */}
+            <button className="btn sm ghost" onClick={choose} disabled={!!busy}>
+              Choose another folder…
             </button>
             <button className="btn sm ghost" onClick={stop} disabled={!!busy}>
               Stop syncing
@@ -355,29 +473,70 @@ export default function DataPanel({
             )}
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 20,
-              padding: "16px 4px",
-              borderTop: "1px solid var(--line2)",
-              marginTop: 16,
-            }}
-          >
-            <div>
-              <div className="name">Include beta versions</div>
-              <div className="desc" style={{ maxWidth: 440, lineHeight: 1.5 }}>
-                Prereleases, before they are ready for everyone. You will still be offered the stable version whenever it
-                is the newer of the two.
-              </div>
-            </div>
-            <button className={`toggle ${beta ? "on" : ""}`} onClick={() => onBeta(!beta)} aria-pressed={beta}>
-              <span />
-            </button>
-          </div>
+          <ToggleRow
+            title="Include beta versions"
+            desc="Prereleases, before they are ready for everyone. You will still be offered the stable version whenever it is the newer of the two."
+            on={beta}
+            onClick={() => onBeta(!beta)}
+          />
         </>
+      )}
+
+      <div className="sec" style={{ marginTop: 36 }}>
+        Delete everything
+      </div>
+      <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "14px 4px 16px" }}>
+        Empty this machine and start over. Verba counts what you would be giving up before it asks.
+      </div>
+      <div className="field">
+        <button className="btn sm ghost" onClick={askWipe} disabled={!!busy}>
+          Delete everything…
+        </button>
+      </div>
+
+      {wiping && (
+        <div className="scrim" onClick={() => setWiping(null)}>
+          <div className="palette confirm" onClick={(e) => e.stopPropagation()}>
+            <h2>Delete everything on this machine?</h2>
+            <p>
+              This removes <strong>{counts(wiping)}</strong>, along with your level, your streak and every setting.
+              Verba goes back to the welcome screen as though it had just been installed.
+            </p>
+            <p>
+              It cannot be undone. {dir ? "Your sync folder keeps its copy and Verba stops writing to it, so another machine's history is untouched. " : ""}
+              Export first if there is any chance you want this back.
+            </p>
+            <div className="field" style={{ padding: "0 0 12px" }}>
+              <button className="btn sm ghost" onClick={exportFile} disabled={!!busy}>
+                Export to a file
+              </button>
+            </div>
+            <p>
+              Type <strong>{DELETE_PHRASE}</strong> to confirm.
+            </p>
+            {/* Inside .field so it takes the bordered settings input rather than
+                the palette's borderless search box (.palette > input). */}
+            <div className="field" style={{ padding: 0 }}>
+              <input
+                autoFocus
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                placeholder={DELETE_PHRASE}
+                aria-label={`Type ${DELETE_PHRASE} to confirm`}
+              />
+            </div>
+            <div className="row" style={{ justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="btn sm ghost" onClick={() => setWiping(null)}>
+                Cancel
+              </button>
+              {/* The one disabled control in this section that needs no reason
+                  written beside it: the sentence above the field is the reason. */}
+              <button className="btn sm" disabled={typed.trim().toLowerCase() !== DELETE_PHRASE} onClick={doWipe}>
+                Delete everything
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {pending && (
@@ -390,7 +549,8 @@ export default function DataPanel({
             </p>
             <p>
               Everything currently on this machine — conversations, words, progress and settings — is removed and
-              replaced by it. This cannot be undone, so export first if you are not sure.
+              replaced by it. Before that happens, what is here now is written to Verba's folder as{" "}
+              <code>verba-before-import-…json</code>, so this is not a one-way door.
             </p>
             <div className="row" style={{ justifyContent: "flex-end" }}>
               <button className="btn sm ghost" onClick={() => setPending(null)}>

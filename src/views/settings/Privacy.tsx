@@ -12,9 +12,11 @@ export default function Privacy({
   return (
     <>
       <div className="sec">Offline mode</div>
+      {/* The name of a setting, not a slogan (§5.5) — it says what it does to the
+          machine, and the sentence under it says what that costs. */}
       <ToggleRow
-        title="Never leave this machine"
-        desc="Forces local providers only. Cloud options are closed and no learner data ever leaves your device."
+        title="Use this computer only"
+        desc="Models that run over the network are closed, and so are the voices that do. Verba works from what is installed here, and nothing you say, write or save leaves this computer."
         on={settings.offline}
         // Everything the lock drags with it — the provider, the cloud voices —
         // and the sentence it writes are lib/rules' business, not this row's.
