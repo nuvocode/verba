@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { collect, parseBackup, restore, suggestedFilename, summarize, type Backup, type Summary } from "../lib/backup";
+import { canUpdate, check, install, pending as pendingUpdate, type Available, type Progress } from "../lib/update";
 import {
   attach,
   detach,
@@ -32,6 +33,8 @@ import {
 
 const when = (t: number) => (t ? new Date(t).toLocaleString() : "never");
 
+const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
 /** "12 conversations · 340 words · 8 passages" — the line a decision is actually made from. */
 function counts(s: Summary): string {
   const parts: [number, string][] = [
@@ -46,12 +49,64 @@ function counts(s: Summary): string {
   return said.length ? said.join(" · ") : "nothing yet";
 }
 
-export default function DataPanel({ appVersion }: { appVersion: string }) {
+export default function DataPanel({
+  appVersion,
+  offline,
+  beta,
+  onBeta,
+}: {
+  appVersion: string;
+  offline: boolean;
+  beta: boolean;
+  onBeta: (on: boolean) => void;
+}) {
   const [dir, setDir] = useState(vaultDir());
   const [sync_, setSync_] = useState(state());
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+
+  // ---- updates ----
+
+  /** False on a .deb or .rpm: the package manager owns the app there. */
+  const [selfUpdating, setSelfUpdating] = useState(true);
+  const [found, setFound] = useState<Available | null>(pendingUpdate());
+  const [checking, setChecking] = useState(false);
+  /** Only true after a check the learner asked for — "up to date" is an answer
+   *  to a question, and saying it unprompted claims more than the app knows. */
+  const [asked, setAsked] = useState(false);
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [updateErr, setUpdateErr] = useState("");
+
+  useEffect(() => {
+    canUpdate()
+      .then(setSelfUpdating)
+      .catch(() => setSelfUpdating(true)); // a dev server has no Tauri to ask
+  }, []);
+
+  const checkNow = async () => {
+    setChecking(true);
+    setUpdateErr("");
+    try {
+      setFound(await check(beta));
+      setAsked(true);
+    } catch (e: any) {
+      setUpdateErr(String(e?.message ?? e));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const installNow = async () => {
+    setUpdateErr("");
+    try {
+      // Resolves only on failure — on success the process is replaced.
+      await install(setProgress);
+    } catch (e: any) {
+      setUpdateErr(String(e?.message ?? e));
+      setProgress(null);
+    }
+  };
 
   /** A backup file the learner opened, waiting on "yes, replace everything". */
   const [pending, setPending] = useState<{ backup: Backup; from: string } | null>(null);
@@ -229,6 +284,91 @@ export default function DataPanel({ appVersion }: { appVersion: string }) {
               Stop syncing
             </button>
             {busy && <span className="model">{busy}</span>}
+          </div>
+        </>
+      )}
+
+      <div className="sec" style={{ marginTop: 36 }}>
+        Version
+      </div>
+      <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "14px 4px 4px" }}>
+        You are running <strong>Verba {appVersion}</strong>.
+      </div>
+
+      {!selfUpdating ? (
+        // Only the AppImage can replace itself. Saying so beats offering a
+        // button that cannot work.
+        <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "8px 4px 16px" }}>
+          This copy was installed from a package — a <code>.deb</code> or <code>.rpm</code> — so updates come from your
+          package manager, not from Verba. The AppImage build updates itself.
+        </div>
+      ) : (
+        <>
+          <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "8px 4px 16px" }}>
+            {offline
+              ? "Offline mode is on, so Verba never contacts GitHub — not even to ask whether a new version exists. Turn it off under Settings → Offline to check for updates."
+              : "Verba checks once when it starts, and whenever you ask. Updates are downloaded from GitHub and verified against a signature before anything is replaced."}
+          </div>
+
+          {updateErr && <div className="err">{updateErr}</div>}
+
+          {found && (
+            <div style={{ padding: "0 4px 12px", maxWidth: 480 }}>
+              <div className="name">Verba {found.version} is available.</div>
+              {found.notes && (
+                <div className="desc" style={{ lineHeight: 1.6, marginTop: 6, whiteSpace: "pre-wrap" }}>
+                  {found.notes}
+                </div>
+              )}
+            </div>
+          )}
+
+          {asked && !found && (
+            <div className="desc" style={{ padding: "0 4px 12px" }}>
+              You are on the latest version.
+            </div>
+          )}
+
+          <div className="field">
+            <button className="btn sm ghost" onClick={checkNow} disabled={offline || checking || !!progress}>
+              {checking ? "Checking…" : "Check for updates"}
+            </button>
+            {found && (
+              <button className="btn sm" onClick={installNow} disabled={!!progress}>
+                Install {found.version}
+              </button>
+            )}
+            {offline && <span className="model">· disabled offline</span>}
+            {progress && (
+              <span className="model">
+                {progress.step === "installing"
+                  ? "Installing… Verba will restart."
+                  : `Downloading… ${mb(progress.received)}${progress.total ? ` of ${mb(progress.total)}` : ""}`}
+              </span>
+            )}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 20,
+              padding: "16px 4px",
+              borderTop: "1px solid var(--line2)",
+              marginTop: 16,
+            }}
+          >
+            <div>
+              <div className="name">Include beta versions</div>
+              <div className="desc" style={{ maxWidth: 440, lineHeight: 1.5 }}>
+                Prereleases, before they are ready for everyone. You will still be offered the stable version whenever it
+                is the newer of the two.
+              </div>
+            </div>
+            <button className={`toggle ${beta ? "on" : ""}`} onClick={() => onBeta(!beta)} aria-pressed={beta}>
+              <span />
+            </button>
           </div>
         </>
       )}

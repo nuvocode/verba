@@ -16,6 +16,7 @@ import Memory from "./views/Memory";
 import Coach from "./views/Coach";
 import SettingsView from "./views/Settings";
 import { ConflictDialog } from "./views/DataPanel";
+import { checkOnLaunch } from "./lib/update";
 import { configure as configureVault, flush, type Conflict, type SyncResult } from "./lib/vault";
 import "./theme.css";
 
@@ -100,6 +101,9 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
    */
   useEffect(() => {
     configureVault(appVersion, { error: (e) => setSyncErr(String((e as any)?.message ?? e)), conflict: setConflict });
+    // One quiet check per launch. It contacts nothing under offline mode, says
+    // nothing on failure, and shows up only as a badge in Settings.
+    void checkOnLaunch(settings.offline, settings.betaUpdates);
     const onHide = () => document.visibilityState === "hidden" && void flush();
     document.addEventListener("visibilitychange", onHide);
     return () => document.removeEventListener("visibilitychange", onHide);
