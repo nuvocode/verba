@@ -3,7 +3,7 @@
 // Spec: docs/plans/2-verba-ana-ekran-ve-ayarlar-spec.md §5.7 — the model is
 // picked from a list rather than typed, every row says what it is like to use,
 // and a row too big for this machine says so.
-import type { ProviderId, Settings } from "./settings.ts";
+import { isLocalProvider, type ProviderId, type Settings } from "./settings.ts";
 
 // Both reached lazily, so this module's pure half — the sizing rules and the
 // cloud lists — stays loadable by plain node (models.check.ts). Import either
@@ -172,6 +172,93 @@ export function localChoices(models: Installed[], ram: number, offline = false):
         ? `Bigger than this machine's ${gb(ram)} of memory. It will load off the disk instead, one slow word at a time.`
         : undefined,
   }));
+}
+
+/**
+ * Every provider, and which settings field holds its model, key and host.
+ *
+ * One table rather than two: Advanced renders it as the picker, and `modelTrouble`
+ * reads it to work out whether there is anything to talk to at all. A second copy
+ * of this mapping is a second copy that can be wrong.
+ */
+export const PROVIDERS: {
+  id: ProviderId;
+  name: string;
+  desc: string;
+  model: keyof Settings;
+  key?: keyof Settings;
+  host?: keyof Settings;
+}[] = [
+  {
+    id: "ollama",
+    name: "Ollama",
+    desc: "Runs on this machine. Private, free, works on a plane.",
+    model: "ollamaModel",
+    host: "ollamaHost",
+  },
+  {
+    id: "lmstudio",
+    name: "LM Studio",
+    desc: "Local OpenAI-compatible server. No key needed.",
+    model: "lmstudioModel",
+    host: "lmstudioHost",
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    desc: "Deeper conversation and subtler corrections. API key required.",
+    model: "anthropicModel",
+    key: "anthropicKey",
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    desc: "Alternative cloud provider. API key required.",
+    model: "openaiModel",
+    key: "openaiKey",
+  },
+  { id: "gemini", name: "Gemini", desc: "Google's models. API key required.", model: "geminiModel", key: "geminiKey" },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    desc: "One key, many models. API key required.",
+    model: "openrouterModel",
+    key: "openrouterKey",
+  },
+];
+
+
+/**
+ * Is there anything to talk to? §7 row 2 — "Model yanıt vermiyor → ana ekranda
+ * uyarı + sına düğmesi + model değiştir yolu".
+ *
+ * Everything here is free to find out. A local server is a GET to a port on this
+ * machine, and a missing key is a string length — neither spends a token, which is
+ * why Today can ask on the way in. What it deliberately does *not* do is send a
+ * real request to a cloud provider to see whether the key works: that costs money
+ * to answer a question nobody asked, and the Test connection button in Advanced is
+ * where a learner asks it on purpose.
+ *
+ * `served` is what the local server answered with — `null` for "never answered",
+ * which is a different sentence from "running, nothing pulled".
+ */
+export function modelTrouble(s: Settings, served: Installed[] | null): string | null {
+  const p = PROVIDERS.find((x) => x.id === s.provider);
+  if (!p) return null;
+  const model = String(s[p.model] ?? "").trim();
+
+  if (isLocalProvider(s.provider)) {
+    const host = String(s[p.host!] ?? "");
+    if (served === null) return `${p.name} is not answering at ${host}. Nothing can be practised until it is running.`;
+    if (!served.length) return `${p.name} is running but has no models pulled, so there is nothing to answer with.`;
+    if (model && !served.some((m) => m.id === model))
+      return `${p.name} is running, but it is not serving ${model} — the model this app is set to use.`;
+    return null;
+  }
+
+  if (p.key && !String(s[p.key] ?? "").trim())
+    return `${p.name} needs an API key, and there is not one saved. Nothing can be practised until there is.`;
+  return null;
 }
 
 /**

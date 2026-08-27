@@ -505,7 +505,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       </div>
 
       <div className="body">
-        {space === "today" && <Today settings={settings} day={day} onBegin={begin} />}
+        {space === "today" && <Today settings={settings} day={day} onBegin={begin} onOpen={go} />}
         {space === "talk" && <Talk settings={settings} talk={talk} day={day} onAdvance={advance} />}
         {space === "read" && (
           <Read
