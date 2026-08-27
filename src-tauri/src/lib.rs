@@ -1,18 +1,11 @@
 mod speech;
+mod update;
 mod vault;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // Registered here rather than in the chain below because the crate is
-        // desktop-only. The commands that use it come in M1 phase 3; nothing
-        // checks for an update yet.
-        .setup(|app| {
-            #[cfg(desktop)]
-            app.handle()
-                .plugin(tauri_plugin_updater::Builder::new().build())?;
-            Ok(())
-        })
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
@@ -20,6 +13,8 @@ pub fn run() {
         // Loaded speech models live here for the life of the app: Kokoro takes
         // ~0.6s to load and we would otherwise pay it on every single turn.
         .manage(speech::SpeechState::default())
+        // The update a check found, waiting on the learner's yes (src/update.rs).
+        .manage(update::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             speech::models_installed,
             speech::model_download,
@@ -33,6 +28,9 @@ pub fn run() {
             vault::vault_check,
             vault::file_read,
             vault::file_write,
+            update::can_update,
+            update::fetch_update,
+            update::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

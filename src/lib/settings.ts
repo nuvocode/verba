@@ -88,6 +88,9 @@ export interface Settings {
   correctionTiming: CorrectionTiming;
   offline: boolean; // hard-forces local providers; cloud options are disabled
   showHints: boolean; // keyboard hint lines under each screen
+  /** Take prereleases too. Off by default — the beta channel is for people who
+   *  volunteered for it, and it is also the channel that ships a broken build. */
+  betaUpdates: boolean;
   // Which way the reading screen was left. It lives here, not in useRead, because the
   // whole point is that it outlives the passage — and the session.
   readView: ReadView;
@@ -166,6 +169,7 @@ export const defaultSettings: Settings = {
   correctionTiming: "adaptive",
   offline: true,
   showHints: true,
+  betaUpdates: false,
   // Close reading is the default and stays the default — the teleprompter is a second
   // exercise you opt into, not a new front door.
   readView: "passage",

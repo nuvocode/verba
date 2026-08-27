@@ -28,6 +28,7 @@ import { importScenario, listScenarios } from "../lib/scenarios";
 import { allMemories, deleteMemory, MEMORY_BUDGET, type MemoryRow } from "../lib/db";
 import { memoryDate } from "../lib/prompts";
 import DataPanel from "./DataPanel";
+import { pending as pendingUpdate } from "../lib/update";
 
 /**
  * Is the speech server the learner typed actually there? Same shape as the model
@@ -700,6 +701,9 @@ export default function SettingsView({
         {NAV.map(([id, label]) => (
           <button key={id} className={tab === id ? "on" : ""} onClick={() => setTab(id)}>
             {label}
+            {/* What the quiet launch check found — the only place an update
+                announces itself, and it waits here until Settings is opened. */}
+            {id === "data" && pendingUpdate() && <span className="badge" title={`Verba ${pendingUpdate()?.version} is available`} />}
           </button>
         ))}
       </nav>
@@ -1118,7 +1122,14 @@ export default function SettingsView({
         </>
       )}
 
-      {tab === "data" && <DataPanel appVersion={appVersion} />}
+      {tab === "data" && (
+        <DataPanel
+          appVersion={appVersion}
+          offline={settings.offline}
+          beta={settings.betaUpdates}
+          onBeta={(betaUpdates) => onChange({ betaUpdates })}
+        />
+      )}
 
       {tab === "extensions" && (
         <>
