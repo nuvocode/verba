@@ -91,7 +91,7 @@ export default function Listening({
       <div className="listen-play">
         {!listening.canSpeak ? (
           <div className="err" style={{ maxWidth: 480 }}>
-            No voice is available to play this. Turn one on in Settings → Speech — until then, the transcript is your only
+            No voice is available to play this. Turn one on in Settings → Speech and listening — until then, the transcript is your only
             way in.
           </div>
         ) : listening.playing ? (

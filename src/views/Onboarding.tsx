@@ -137,7 +137,7 @@ export default function Onboarding({
   // on their second machine, should never be asked their level and their
   // interests again. Their answers are already in the folder. Offered only on a
   // genuinely fresh install — on a replay there is local data that restoring
-  // would silently overwrite, and Settings → Data is where that conversation
+  // would silently overwrite, and Settings → Privacy and data is where that conversation
   // belongs, with its counts and its confirm.
   const [restoring, setRestoring] = useState("");
   const [restoreErr, setRestoreErr] = useState("");

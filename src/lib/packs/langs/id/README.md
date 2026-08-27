@@ -13,7 +13,7 @@ The reference language pack for Standard Indonesian (Bahasa Indonesia).
 | [`grammar.md`](./grammar.md) | Grammar the three `grammar` bullets have no room for. |
 | [`register.md`](./register.md) | `prompt: true` — also fed to the tutor on every turn. |
 
-Docs are shown in **Settings → Language**, index (`README.md`) first, then by
+Docs are shown in **Settings → Learning**, index (`README.md`) first, then by
 filename. Prefix with `01-`, `02-` if a language needs a reading order.
 
 ## Scope of this pack

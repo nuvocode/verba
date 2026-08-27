@@ -262,7 +262,7 @@ export function parseSummary(raw: string): SessionSummary {
 // Not the vocabulary deck — that is the "Memory" space in the nav, and it keeps
 // the name. This is the learner themselves: who they are, what they do, what they
 // are learning the language for. Written at the end of a session, read back at the
-// start of the next one, and on show in Settings → User Memory, where the learner
+// start of the next one, and on show in Settings → About me, where the learner
 // can strike out anything that is wrong or none of the machine's business.
 
 /**

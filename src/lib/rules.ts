@@ -15,10 +15,10 @@ import { isLocalProvider, type ProviderId, type Settings } from "./settings.ts";
  * spec's five sections, and when it does, this object is the whole edit.
  */
 export const AT = {
-  learning: "#settings/language",
-  privacy: "#settings/offline",
+  learning: "#settings/learning",
+  privacy: "#settings/privacy",
   speech: "#settings/speech",
-  advanced: "#settings/provider",
+  advanced: "#settings/advanced",
 } as const;
 
 /** A way out. Never a dead end — §7: "Hiçbir durum kullanıcıyı çıkışsız bırakmaz." */
@@ -156,7 +156,7 @@ export function applyPatch(before: Settings, patch: Partial<Settings>): Applied 
  * A closed option stays on screen — a missing one reads as a missing feature,
  * a closed one reads as a switch you flipped.
  */
-export function cloudGate(s: Settings): Gate | null {
+export function cloudGate(s: Pick<Settings, "offline">): Gate | null {
   if (!s.offline) return null;
   return {
     why: "Off while Verba stays on this machine",
