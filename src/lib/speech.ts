@@ -134,20 +134,94 @@ if (synth) synth.getVoices();
 
 // ---- cloud speech ----
 
+/** A microphone the learner can pick between. `label` is "" until permission is granted. */
+export interface MicDevice {
+  id: string;
+  label: string;
+}
+
+/**
+ * The microphones this machine offers.
+ *
+ * Empty labels are not a bug: a browser withholds device names until the page has
+ * been granted the microphone once, so the panel that lists these has to open a
+ * stream before the list is worth reading. Callers ask again after the test.
+ */
+export async function micDevices(): Promise<MicDevice[]> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) return [];
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    return all.filter((d) => d.kind === "audioinput").map((d) => ({ id: d.deviceId, label: d.label }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Open the chosen microphone — the one door every recording goes through, so the
+ * device picked in Settings is the device the mic test proves and the device Talk
+ * then uses. Nothing else in the app calls getUserMedia.
+ *
+ * A device id that no longer resolves falls back to the system default rather than
+ * failing: a headset unplugged since it was chosen would otherwise kill dictation
+ * everywhere, with the only clue three screens away. The Speech panel is where the
+ * stale choice gets noticed, because its list no longer contains it.
+ */
+export async function mic(deviceId = ""): Promise<MediaStream> {
+  const md = navigator.mediaDevices;
+  if (!deviceId) return md.getUserMedia({ audio: true });
+  try {
+    return await md.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
+  } catch (e) {
+    const name = (e as { name?: string })?.name;
+    if (name !== "OverconstrainedError" && name !== "NotFoundError") throw e;
+    return md.getUserMedia({ audio: true });
+  }
+}
+
+/**
+ * Where the operating system keeps the microphone switch. Named per platform
+ * because "check your privacy settings" is the kind of help that helps nobody —
+ * §7 row 4 asks for the route, not the diagnosis.
+ */
+export function micRoute(platform = typeof navigator === "undefined" ? "" : navigator.userAgent): string {
+  if (/Mac|iPhone|iPad/i.test(platform)) return "Open System Settings → Privacy & Security → Microphone and switch Verba on.";
+  if (/Win/i.test(platform)) return "Open Settings → Privacy & security → Microphone and switch Verba on.";
+  return "Allow Verba to use the microphone in your system's privacy settings.";
+}
+
+/**
+ * Why the microphone would not open, in words that name the next move.
+ *
+ * The browser's own messages are written for developers ("Requested device not
+ * found"), and the four failures a learner actually hits have four different
+ * answers — a permission is granted, a device is plugged in, another app is
+ * closed. Anything unrecognised falls through verbatim rather than being
+ * flattened into a guess.
+ */
+export function micTrouble(err: unknown): string {
+  const name = (err as { name?: string })?.name ?? "";
+  if (name === "NotAllowedError" || name === "SecurityError")
+    return `Verba is not allowed to use the microphone. ${micRoute()}`;
+  if (name === "NotFoundError" || name === "OverconstrainedError")
+    return "No microphone is connected to this machine. Plug one in, then try again.";
+  if (name === "NotReadableError")
+    return "Another app is holding the microphone. Close it, then try again.";
+  return `The microphone would not open: ${String((err as { message?: string })?.message ?? err)}`;
+}
+
 /**
  * Record until `onStart`'s recorder is stopped — push-to-talk, not a fixed
  * window. A learner mid-sentence at second 6 was the old behaviour; the cap is
  * only there so a mic left open doesn't record until the heat death.
  */
-function record(onStart: (r: MediaRecorder) => void, maxMs = 60_000): Promise<Blob> {
+function record(onStart: (r: MediaRecorder) => void, maxMs = 60_000, deviceId = ""): Promise<Blob> {
   return new Promise(async (resolve, reject) => {
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (e: any) {
-      // macOS denies here when the user said no to the mic prompt (or Info.plist
-      // lacks NSMicrophoneUsageDescription, in which case we never even get here).
-      return reject(new Error(`Microphone unavailable: ${e?.message ?? e}. Check System Settings → Privacy → Microphone.`));
+      stream = await mic(deviceId);
+    } catch (e) {
+      return reject(new Error(micTrouble(e)));
     }
     const rec = new MediaRecorder(stream);
     const chunks: BlobPart[] = [];
@@ -262,13 +336,13 @@ export function openaiTts(baseUrl: string, model: string, voice: string, apiKey 
  * `POST /audio/transcriptions` — multipart, as speaches/faster-whisper serves it.
  * Records until `cancel()`, like Deepgram.
  */
-export function openaiStt(baseUrl: string, model: string, apiKey = ""): Stt {
+export function openaiStt(baseUrl: string, model: string, apiKey = "", deviceId = ""): Stt {
   let rec: MediaRecorder | null = null;
   return {
     canListen: hasMic(),
 
     async listen(locale) {
-      const clip = await record((r) => (rec = r));
+      const clip = await record((r) => (rec = r), undefined, deviceId);
       rec = null;
       if (!clip.size) return "";
 
@@ -357,13 +431,13 @@ async function pcm16k(clip: Blob): Promise<Float32Array> {
 }
 
 /** Whisper, in this process. Records until `cancel()`, like the others. */
-export function bundledStt(modelId: string): Stt {
+export function bundledStt(modelId: string, deviceId = ""): Stt {
   let rec: MediaRecorder | null = null;
   return {
     canListen: hasMic(),
 
     async listen(locale) {
-      const clip = await record((r) => (rec = r));
+      const clip = await record((r) => (rec = r), undefined, deviceId);
       rec = null;
       if (!clip.size) return "";
       const samples = await pcm16k(clip);
@@ -390,14 +464,14 @@ export function bundledStt(modelId: string): Stt {
 }
 
 /** Deepgram speech-to-text. Records until `cancel()`, then transcribes the clip. */
-export function deepgram(apiKey: string): Stt {
+export function deepgram(apiKey: string, deviceId = ""): Stt {
   let rec: MediaRecorder | null = null;
   return {
     canListen: hasMic(),
 
     async listen(locale) {
       if (!apiKey) throw new Error("Deepgram API key is not set (Settings → Speech and listening).");
-      const clip = await record((r) => (rec = r));
+      const clip = await record((r) => (rec = r), undefined, deviceId);
       rec = null;
       if (!clip.size) return "";
 
@@ -455,6 +529,8 @@ export interface SpeechSettings {
   bundledTtsModel?: string; // "" → this half skips the bundled tier
   bundledTtsVoice?: number; // sherpa speaker id within that model
   bundledSttModel?: string; // "" → likewise
+  /** Which microphone to record from. "" → whichever the system calls default. */
+  micDeviceId?: string;
   ttsTier?: Tier; // default "auto"
   sttTier?: Tier;
 }
@@ -525,6 +601,47 @@ export function pruneBundled(s: SpeechSettings, onDisk: Set<string>): Partial<Sp
   return patch;
 }
 
+/**
+ * What a tier is called when it has to be named in a sentence rather than picked
+ * from a list. One table, because the Speech panel's status line, the fallback
+ * note and Advanced's engine line were all writing their own and could drift.
+ */
+const TIER_NAME: Record<Exclude<Tier, "auto">, Record<Half, string>> = {
+  bundled: { tts: "a voice on this machine", stt: "dictation on this machine" },
+  local: { tts: "your local server", stt: "your local server" },
+  cloud: { tts: "ElevenLabs", stt: "Deepgram" },
+  native: { tts: "your system voice", stt: "your system's speech recognition" },
+};
+
+export const tierName = (t: Exclude<Tier, "auto">, half: Half) => TIER_NAME[t][half];
+
+/**
+ * §7 row 3: "Seçili ses indirilmemiş → otomatik olarak paketli sese düşülür, bu
+ * söylenir." pruneBundled does the falling; this is the saying.
+ *
+ * Without it the clearing is silent, and a learner whose data folder was cleared
+ * finds a voice that simply stopped being the voice — no error, no explanation,
+ * a setting that appears to have forgotten itself. The note names what went, what
+ * is speaking now, and that it can be downloaded again.
+ *
+ * `label` turns a model id into the name the learner saw, and is passed in so this
+ * file goes on knowing nothing about the catalogue.
+ */
+export function prunedNote(
+  before: SpeechSettings,
+  patch: Partial<SpeechSettings>,
+  label: (id: string) => string,
+): string {
+  const after = { ...before, ...patch };
+  const parts: string[] = [];
+  if (patch.bundledTtsModel === "" && before.bundledTtsModel)
+    parts.push(`The ${label(before.bundledTtsModel)} voice is no longer on this machine, so Verba is speaking with ${tierName(resolveTier(after, "tts"), "tts")}.`);
+  if (patch.bundledSttModel === "" && before.bundledSttModel)
+    parts.push(`The dictation model you chose is no longer on this machine, so Verba is listening with ${tierName(resolveTier(after, "stt"), "stt")}.`);
+  if (!parts.length) return "";
+  return `${parts.join(" ")} Download ${parts.length > 1 ? "them" : "it"} again under Speech and listening.`;
+}
+
 /** Why the mic is dead, in words a learner can act on. "" when it works. */
 export function listenBlocker(s: SpeechSettings): string {
   if (webSpeech().canListen) return "";
@@ -585,11 +702,11 @@ export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void =
 
   const stt: Stt =
     sttTier === "bundled"
-      ? bundledStt(s.bundledSttModel!)
+      ? bundledStt(s.bundledSttModel!, s.micDeviceId)
       : sttTier === "local"
-        ? openaiStt(s.localSttUrl!, s.localSttModel || "Systran/faster-whisper-small")
+        ? openaiStt(s.localSttUrl!, s.localSttModel || "Systran/faster-whisper-small", "", s.micDeviceId)
         : sttTier === "cloud"
-          ? deepgram(s.deepgramKey!)
+          ? deepgram(s.deepgramKey!, s.micDeviceId)
           : web;
 
   // One warning per half for the life of this adapter (it is rebuilt when the

@@ -31,6 +31,13 @@ export interface CatalogModel {
   url: string;
   sha256: string;
   voices: Voice[]; // [] for whisper; one entry for a piper voice; many for kokoro
+  /**
+   * What choosing this one costs and buys, for the dictation rows. §5.4 keeps the
+   * model's name and size out of the main flow and asks for the trade instead —
+   * "faster" or "more accurate, slower" is the question a learner can answer, and
+   * "Whisper small, 639 MB" is not.
+   */
+  tradeoff?: string;
 }
 
 // Kokoro's speaker ids are positions in voices.bin, fixed by the script that built
@@ -109,6 +116,7 @@ export const CATALOG: CatalogModel[] = [
     engine: "whisper",
     half: "stt",
     label: "Whisper base",
+    tradeoff: "Faster",
     langs: [], // multilingual: the pack's language is passed in per request
     mb: 208,
     url: `${ASR_RELEASE}/sherpa-onnx-whisper-base.tar.bz2`,
@@ -120,6 +128,7 @@ export const CATALOG: CatalogModel[] = [
     engine: "whisper",
     half: "stt",
     label: "Whisper small",
+    tradeoff: "More accurate, slower",
     langs: [],
     mb: 639,
     url: `${ASR_RELEASE}/sherpa-onnx-whisper-small.tar.bz2`,
@@ -136,6 +145,96 @@ export function voiceOf(modelId: string, sid: number): Voice | undefined {
 }
 
 /**
+ * The line a voice reads when it is auditioned.
+ *
+ * §5.4: no voice is downloaded without being heard. A greeting the learner will
+ * meet on their first turn is a fairer sample than a pangram — it is the register
+ * the coach actually speaks in, and it is short enough that hearing eight of them
+ * is not a chore. Any language without one falls back to English rather than to
+ * silence: hearing the wrong language is still hearing the voice.
+ */
+const SAMPLES: Record<string, string> = {
+  en: "Good morning. Shall we practise for a few minutes?",
+  es: "Buenos días. ¿Practicamos unos minutos?",
+  fr: "Bonjour. On pratique quelques minutes ?",
+  de: "Guten Morgen. Üben wir ein paar Minuten?",
+  it: "Buongiorno. Facciamo pratica per qualche minuto?",
+  pt: "Bom dia. Vamos praticar alguns minutos?",
+  tr: "Günaydın. Birkaç dakika pratik yapalım mı?",
+  ja: "おはようございます。少し練習しましょうか。",
+};
+
+export const sampleLine = (lang: string) => SAMPLES[lang] ?? SAMPLES.en;
+
+/**
+ * The one model that carries the badge. Packs list their voices best-first, so the
+ * first that this build actually ships is it — and §5.4 allows exactly one at a
+ * time, because two recommendations is a list with no recommendation in it.
+ */
+export const oneRecommended = (ids: string[]): string => ids.find((id) => !!catalogModel(id)) ?? "";
+
+/**
+ * The voice list, ordered as §5.4 asks for it.
+ *
+ * The language being learned leads, with the one recommendation at the top of it;
+ * everything else sits under a single "other languages" heading. Two headings,
+ * neither of which can contradict what is under it — `mine` speaks the target
+ * language by definition and `rest` does not, which is the whole of the rule and
+ * is why this is a function rather than a shape assembled inside JSX.
+ */
+export function voiceList(
+  packLang: string,
+  recommendedIds: string[],
+): { mine: CatalogModel[]; rest: CatalogModel[]; recommended: string } {
+  const recommended = oneRecommended(recommendedIds);
+  const all = CATALOG.filter((m) => m.half === "tts");
+  const mine = all
+    .filter((m) => m.langs.includes(packLang))
+    // The recommendation first; after that the small ones, because a learner who
+    // ignores the badge is usually looking for the cheapest download.
+    .sort((a, b) => (a.id === recommended ? -1 : b.id === recommended ? 1 : a.mb - b.mb));
+  return { mine, rest: all.filter((m) => !m.langs.includes(packLang)), recommended };
+}
+
+/**
+ * When nothing in the catalogue speaks the language being learned — Indonesian
+ * today, and any pack that ships ahead of its voice tomorrow.
+ *
+ * §5.4 puts the target language's voices first, and a heading over an empty group
+ * is not first, it is a hole the learner has to guess at. Verba still speaks, via
+ * whatever the operating system has; saying which is the difference between a
+ * limitation and a bug. The name is passed in — this file does not know language
+ * names and the check in lang.check.ts keeps it that way.
+ */
+export function noVoiceNote(mine: CatalogModel[], languageName: string): string | null {
+  if (mine.length) return null;
+  return `Verba has no downloadable voice for ${languageName} yet, so replies are read by your system voice. How good that sounds depends on which voices this machine already has. The voices below are still yours to hear and use.`;
+}
+
+/** Voices grouped under the language every one of them speaks. */
+export interface VoiceGroup {
+  lang: string;
+  voices: Voice[];
+}
+
+/**
+ * One model's voices, same rule one level down: the target language first, the
+ * rest grouped by their own language.
+ *
+ * Kokoro carries fourteen across six languages, and a flat list of them is a wall.
+ * A voice has exactly one language, so every heading here is literally true of
+ * everything beneath it.
+ */
+export function voicesFor(m: CatalogModel, packLang: string): { mine: Voice[]; others: VoiceGroup[] } {
+  const mine = m.voices.filter((v) => v.lang === packLang);
+  const rest = m.voices.filter((v) => v.lang !== packLang);
+  return {
+    mine,
+    others: [...new Set(rest.map((v) => v.lang))].map((lang) => ({ lang, voices: rest.filter((v) => v.lang === lang) })),
+  };
+}
+
+/**
  * Human size. Whisper's download carries fp32 and int8 weights both; we keep only
  * int8, so what lands on disk is smaller than what comes down the wire. The row
  * shows the download, because that is what the learner waits for.
@@ -146,6 +245,7 @@ export const sizeLabel = (m: CatalogModel) => `${m.mb} MB`;
 export type ModelState =
   | { s: "absent" }
   | { s: "downloading"; pct: number }
+  | { s: "playing" } // auditioning the sample — see Speech's `audition`
   | { s: "ready"; bytes: number }
   | { s: "failed"; why: string };
 
