@@ -37,7 +37,7 @@ const TABLE: Row[] = [
     id: 2,
     state: "Model yanıt vermiyor",
     answer: "Ana ekranda uyarı + sına düğmesi + model değiştir yolu",
-    pending: "#26 — the test button exists (Advanced); Today still has to raise the warning that links to it",
+    assertedIn: [{ file: "src/lib/models.check.ts", marker: "state 2" }],
   },
   {
     id: 3,
@@ -73,7 +73,7 @@ const TABLE: Row[] = [
     id: 8,
     state: "Plan günlük süre hedefine ulaşamıyor",
     answer: "Ana ekranda nedeni yazılır",
-    pending: "#26 — Today's day summary is where the reason goes",
+    assertedIn: [{ file: "src/lib/learn.check.ts", marker: "state 8" }],
   },
   {
     id: 9,

@@ -4,7 +4,8 @@
 // big for this machine, and what a row says about itself. All of it is one pure
 // function so the claims a learner reads are claims a check can hold.
 import assert from "node:assert";
-import { CLOUD_MODELS, gb, isRemoteModel, localChoices, type Installed } from "./models.ts";
+import { CLOUD_MODELS, gb, isRemoteModel, localChoices, modelTrouble, PROVIDERS, type Installed } from "./models.ts";
+import { defaultSettings, isLocalProvider } from "./settings.ts";
 
 const GB = 1024 ** 3;
 const m = (id: string, sizeGb: number): Installed => ({ id, bytes: Math.round(sizeGb * GB) });
@@ -99,6 +100,40 @@ for (const [id, list] of Object.entries(CLOUD_MODELS)) {
   assert(list && list.length > 0, `${id} must offer something to pick`);
   assert.equal(list.filter((c) => c.recommended).length, 1, `${id} must recommend exactly one model`);
   for (const c of list) assert(c.hint.trim().length > 0, `${id}/${c.id} must say what it is like to use`);
+}
+
+// ---- state 2: Today owes a warning when there is nothing to talk to ----
+//
+// §7 row 2, "Model yanıt vermiyor". Everything asserted here is free to find out
+// at start-up — a port on this machine, or the length of a saved key. None of it
+// spends a token, which is the whole reason Today is allowed to ask.
+const ollama = { ...defaultSettings, provider: "ollama" as const, ollamaModel: "gemma4:e2b-mlx" };
+
+// Never answered is a different sentence from running-with-nothing-pulled, and a
+// learner acts on them differently: start the server, or pull a model.
+const dead = modelTrouble(ollama, null)!;
+assert.match(dead, /not answering/, "state 2: a server that is down says so");
+assert.match(dead, new RegExp(ollama.ollamaHost.replace(/[/:.]/g, "\\$&")), "state 2: …and names the address it tried");
+assert.match(modelTrouble(ollama, [])!, /no models pulled/, "state 2: an empty server is its own problem");
+
+// Running, serving models, but not the one this app is set to use — the failure
+// that looks like nothing is wrong until the first turn.
+const wrong = modelTrouble(ollama, [m("llama3.1:8b", 4.7)])!;
+assert.match(wrong, /gemma4:e2b-mlx/, "state 2: the missing model is named");
+assert.equal(modelTrouble(ollama, [m("gemma4:e2b-mlx", 6.1)]), null, "state 2: a working setup says nothing");
+
+// A cloud provider is judged on what can be known for free. A missing key is a
+// certainty; a wrong key is not, and claiming it would mean spending money to
+// find out — Advanced's Test connection is where that is asked on purpose.
+const cloud = { ...defaultSettings, provider: "anthropic" as const, anthropicKey: "" };
+assert.match(modelTrouble(cloud, null)!, /API key/, "state 2: a cloud provider with no key cannot answer either");
+assert.equal(modelTrouble({ ...cloud, anthropicKey: "sk-ant-x" }, null), null, "state 2: a key that exists is not second-guessed");
+
+// Every provider is reachable by this door — a provider missing from the table
+// would silently never warn about anything.
+for (const p of PROVIDERS) {
+  assert(p.name.trim(), `${p.id} must have a name`);
+  assert(isLocalProvider(p.id) ? !!p.host : !!p.key, `${p.id} must name the field that makes it usable`);
 }
 
 console.log(`models.check ✓ ${rows.length} local rows, ${Object.keys(CLOUD_MODELS).length} cloud lists`);

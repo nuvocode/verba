@@ -620,6 +620,37 @@ export async function progressByLang(): Promise<Record<string, { days: number; w
   return out;
 }
 
+/**
+ * The last day before this one that was actually opened — §4.2's "dünün izi".
+ *
+ * Deliberately not filtered on `recap IS NOT NULL` the way latestRecap is: a day
+ * the learner abandoned halfway is exactly the day worth reminding them about, and
+ * it never got a recap.
+ */
+export async function previousDay(
+  lang: string,
+  before: string,
+): Promise<{ date: string; theme: string; done: number; total: number } | null> {
+  const db = await getDb();
+  const rows = await db.select<DailyRow[]>(
+    "SELECT * FROM daily_sessions WHERE lang = $1 AND date < $2 ORDER BY date DESC LIMIT 1",
+    [lang, before],
+  );
+  if (!rows[0]) return null;
+  try {
+    const plan = JSON.parse(rows[0].plan);
+    const done: unknown[] = JSON.parse(rows[0].done);
+    return {
+      date: rows[0].date,
+      theme: String(plan?.theme ?? ""),
+      done: Array.isArray(done) ? done.length : 0,
+      total: Array.isArray(plan?.activities) ? plan.activities.length : 0,
+    };
+  } catch {
+    return null; // a row we cannot read is a row with nothing to say
+  }
+}
+
 /** The most recent day's recap — its nextFocus seeds the next plan's weak-area drills. */
 export async function latestRecap(lang: string, before: string): Promise<{ recap: string; nextFocus: string[] } | null> {
   const db = await getDb();

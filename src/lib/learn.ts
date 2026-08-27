@@ -73,6 +73,75 @@ export function themeForDate(date: string, interests: string[] = []): string {
   return list[day % list.length];
 }
 
+/**
+ * Which activities a day of this length contains.
+ *
+ * The three lengths are not three sizes of one day — the shortest is a different
+ * day, and setup already said so in as many words: "Three short pieces —
+ * conversation, a passage, the words that are due." Squeezing six activities into
+ * twenty minutes would honour the number and break the promise, so the short day
+ * drops the two the copy never claimed and gives their minutes to the rest.
+ */
+const SHORT_DAY = 20;
+
+/**
+ * The activities whose length is a choice rather than a fact.
+ *
+ * A role-play is a scripted situation and a wrap-up is a paragraph; neither gets
+ * better with more minutes. Review takes exactly as long as the cards that came
+ * due. Conversation, reading and listening are the three that genuinely stretch,
+ * so the day's remaining minutes go to them in proportion to what they were
+ * already worth.
+ */
+const STRETCHY: Partial<Record<ActivityKind, number>> = { talk: 5, read: 3, listen: 4 };
+
+/**
+ * Spend the learner's stated minutes on the day (§4.2: "Süre, ayarlardaki günlük
+ * süre hedefiyle tutarlıdır").
+ *
+ * The floors are what each activity is still worth doing at — below them the row
+ * would be a number rather than an activity. When the fixed half already costs
+ * more than the budget (a big review on a short day) everything lands on its floor
+ * and the day simply runs long; `shortfallNote` is what says so out loud, because
+ * a plan quietly ignoring the setting is the contradiction §6 forbids.
+ */
+function fitToBudget(activities: PlannedActivity[], budget: number): PlannedActivity[] {
+  const stretchy = activities.filter((a) => STRETCHY[a.kind] !== undefined);
+  if (!stretchy.length) return activities;
+
+  const fixed = activities.filter((a) => STRETCHY[a.kind] === undefined).reduce((n, a) => n + a.estimatedMinutes, 0);
+  const base = stretchy.reduce((n, a) => n + a.estimatedMinutes, 0);
+  const room = Math.max(0, budget - fixed);
+
+  const minutes = new Map<string, number>();
+  for (const a of stretchy)
+    minutes.set(a.id, Math.max(STRETCHY[a.kind]!, Math.round((a.estimatedMinutes / base) * room)));
+
+  // Rounding three shares independently loses or gains a minute or two, and the
+  // total is the number on screen — so the drift lands on the longest of them,
+  // where one minute either way changes nothing anybody can feel.
+  const longest = stretchy.reduce((b, a) => (minutes.get(a.id)! > minutes.get(b.id)! ? a : b));
+  const drift = room - [...minutes.values()].reduce((n, m) => n + m, 0);
+  minutes.set(longest.id, Math.max(STRETCHY[longest.kind]!, minutes.get(longest.id)! + drift));
+
+  return activities.map((a) => (minutes.has(a.id) ? { ...a, estimatedMinutes: minutes.get(a.id)! } : a));
+}
+
+/**
+ * Why today does not add up to the time the learner asked for (§7 row 8).
+ *
+ * Only one thing can do this: the words that came due. Everything else is already
+ * at its floor, and a review is not something the plan gets to shorten — the cards
+ * are due or they are not. Under three minutes over is rounding, not a shortfall,
+ * and saying so would train the learner to stop reading these.
+ */
+export function shortfallNote(plan: DailyPlan, dailyMinutes: number): string | null {
+  if (plan.estimatedMinutes - dailyMinutes < 3) return null;
+  const review = plan.activities.find((a) => a.kind === "memory");
+  if (!review) return null;
+  return `Today comes to about ${plan.estimatedMinutes} minutes rather than the ${dailyMinutes} you asked for. The words that came due need ${review.estimatedMinutes} of them on their own, and everything else is already as short as it is worth doing.`;
+}
+
 /** Build a personalised daily session. Pure — no I/O, no clock. */
 export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
   const theme = ctx.theme?.trim() || themeForDate(ctx.date, s.profile.interests);
@@ -103,15 +172,21 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
       estimatedMinutes: 5,
       goal: readGoal,
     }),
-    planActivity({
-      id: "roleplay",
-      kind: "roleplay",
-      title: "Role-play",
-      rationale: `A scripted situation puts the same ${theme} language under a little pressure.`,
-      estimatedMinutes: 5,
-      scenarioId: pickScenario(theme),
-    }),
   ];
+
+  // "Three short pieces — conversation, a passage, the words that are due."
+  const short = s.dailyMinutes <= SHORT_DAY;
+  if (!short)
+    activities.push(
+      planActivity({
+        id: "roleplay",
+        kind: "roleplay",
+        title: "Role-play",
+        rationale: `A scripted situation puts the same ${theme} language under a little pressure.`,
+        estimatedMinutes: 5,
+        scenarioId: pickScenario(theme),
+      }),
+    );
 
   if (ctx.dueVocab > 0) {
     activities.push(
@@ -120,22 +195,29 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
         kind: "memory",
         title: "Vocabulary review",
         rationale: `${ctx.dueVocab} cards are due today, and reviewing them after you have used the words is when they stick.`,
-        estimatedMinutes: Math.min(10, Math.max(2, Math.ceil(ctx.dueVocab / 4))),
+        // Not capped. A review is the one part of the day whose length is a fact
+        // rather than a choice — forty cards are forty cards, and a plan that
+        // called them ten minutes would be describing a different afternoon.
+        estimatedMinutes: Math.max(2, Math.ceil(ctx.dueVocab / 4)),
       }),
     );
   }
 
   // A listening cool-down before the recap — an input skill to close the working
   // activities, kept last so it never displaces the conversation-first running order.
+  if (!short)
+    activities.push(
+      planActivity({
+        id: "listen",
+        kind: "listen",
+        title: "Listening",
+        rationale: "Listening closes the day on input, so the last thing you do is understand rather than produce.",
+        estimatedMinutes: 6,
+        goal: listenGoal,
+      }),
+    );
+
   activities.push(
-    planActivity({
-      id: "listen",
-      kind: "listen",
-      title: "Listening",
-      rationale: "Listening closes the day on input, so the last thing you do is understand rather than produce.",
-      estimatedMinutes: 6,
-      goal: listenGoal,
-    }),
     planActivity({
       id: "wrapup",
       kind: "wrapup",
@@ -153,8 +235,110 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
     dayIndex: ctx.dayIndex,
     theme,
     targetedWeaknesses: declared.map((w) => w.id),
-    activities,
+    activities: fitToBudget(activities, s.dailyMinutes),
   });
+}
+
+// ---- what Today says about the plan ----
+
+/**
+ * The day in one paragraph (§4.2): what it is about, how many pieces, how long,
+ * and — when the signals have something to say — what it is trying to fix.
+ *
+ * Not a template with a slot in it. A plan that targets nothing says why the order
+ * is what it is; a plan that targets something names it, because "conversation
+ * first, then a passage" is true of every day and therefore tells the learner
+ * nothing about this one.
+ */
+export function daySummary(plan: DailyPlan, weaknesses: Weakness[] = []): string {
+  const n = plan.activities.length;
+  const opening = `${n} ${n === 1 ? "piece" : "pieces"} on ${plan.theme}, about ${plan.estimatedMinutes} minutes in all`;
+  // The plan names the weaknesses it set out to address, by id; the labels live
+  // with the evidence. A weakness the plan targeted but that no longer shows in
+  // the signals is simply not mentioned — the alternative is citing something the
+  // learner can no longer see.
+  const targeted = weaknesses.filter((w) => plan.targetedWeaknesses.includes(w.id)).map((w) => w.label);
+  if (!targeted.length) return `${opening}. Conversation comes first, so the rest of the day reuses words you produced yourself.`;
+  return `${opening}, built around ${list(targeted)} — what your last few sessions kept tripping on.`;
+}
+
+/** "a, b and c" — the serial list every sentence here needs and none should rebuild. */
+function list(items: string[]): string {
+  if (items.length < 2) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * Where the day stands, above the list (§4.2: "Oturum yarıda kesilip dönüldüğünde
+ * kullanıcı nerede kaldığını arayarak bulmaz").
+ *
+ * The minutes left are the minutes of what is actually unfinished, not the total
+ * minus elapsed time — nobody is holding a stopwatch, and the useful number is how
+ * much is still in front of them.
+ */
+export function progressLine(plan: DailyPlan, done: ActivityKind[]): string {
+  const total = plan.activities.length;
+  const finished = plan.activities.filter((a) => done.includes(a.kind)).length;
+  const left = plan.activities.filter((a) => !done.includes(a.kind)).reduce((n, a) => n + a.estimatedMinutes, 0);
+  if (finished === 0) return `${total} to go · about ${plan.estimatedMinutes} minutes`;
+  if (finished === total) return `All ${total} finished`;
+  return `${finished} of ${total} done · about ${left} minutes left`;
+}
+
+/**
+ * A row's state (§4.2: tamamlandı / sırada / bekliyor).
+ *
+ * Three, not four. An activity cannot be "skipped": `nextActivity` hands back the
+ * first one not finished, so nothing can sit before the active row and still be
+ * waiting. There is no fourth state to track because nothing in the app can put an
+ * activity into it.
+ */
+export type ActivityStatus = "done" | "next" | "waiting";
+
+export function activityStatus(plan: DailyPlan, done: ActivityKind[], kind: ActivityKind): ActivityStatus {
+  if (done.includes(kind)) return "done";
+  return nextActivity(plan, done) === kind ? "next" : "waiting";
+}
+
+/** What the last day the learner worked leaves behind. */
+export interface Trace {
+  theme: string;
+  done: number;
+  total: number;
+}
+
+/**
+ * §4.2's "dünün izi" — one line at the bottom of Today, from the session before
+ * this one.
+ *
+ * `null` on day one rather than an empty row: a reminder with nothing in it is
+ * worse than no reminder, and a learner on their first day has nothing to be
+ * reminded of.
+ *
+ * It names the topic rather than the words due for review. The spec allows either,
+ * but a day with cards due already carries them as an activity in the list above,
+ * and a line repeating that would be furniture.
+ */
+export function traceLine(prev: Trace | null): string | null {
+  if (!prev || !prev.total) return null;
+  if (prev.done >= prev.total) return `Last time you finished the day on ${prev.theme}.`;
+  if (prev.done === 0) return `Last time you opened a day on ${prev.theme} and did not get into it.`;
+  return `Last time you were on ${prev.theme}, ${prev.done} of ${prev.total} done.`;
+}
+
+/**
+ * A different theme from this one — §4.2's "başka bir konu".
+ *
+ * The rotation is deterministic per date, so "another" has to mean stepping along
+ * it rather than rolling dice: pressing it twice gets you a third topic, not the
+ * first one back. A pool with only one entry in it falls through to the full
+ * rotation, because a link promising another topic has to produce one.
+ */
+export function anotherTheme(current: string, interests: string[] = []): string {
+  const pool = [...new Set(interests.flatMap((i) => INTEREST_THEMES[i] ?? []))];
+  const list = pool.length > 1 ? pool : THEMES;
+  const at = list.indexOf(current);
+  return at === -1 ? list[0] : list[(at + 1) % list.length];
 }
 
 /**

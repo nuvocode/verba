@@ -6,13 +6,14 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { isLocalProvider, type ProviderId, type Settings } from "../../lib/settings";
+import { isLocalProvider, type Settings } from "../../lib/settings";
 import { AT, cloudGate } from "../../lib/rules";
 import { importPack, missingPackNote, originLabel, registry, removeImportedPack } from "../../lib/packs";
 import { importScenario, removeImportedScenario, scenarioRegistry } from "../../lib/scenarios";
 import {
   CLOUD_MODELS,
   KEY_SOURCE,
+  PROVIDERS,
   isRemoteModel,
   listModels,
   localChoices,
@@ -28,52 +29,6 @@ import { EngineHalf } from "./engines";
 
 /** Where the format, the schema and the worked examples live. Not a filename on screen (§5.7). */
 const DOCS = "https://github.com/nuvocode/verba/blob/master/CONTRIBUTING.md";
-
-const PROVIDERS: {
-  id: ProviderId;
-  name: string;
-  desc: string;
-  model: keyof Settings;
-  key?: keyof Settings;
-  host?: keyof Settings;
-}[] = [
-  {
-    id: "ollama",
-    name: "Ollama",
-    desc: "Runs on this machine. Private, free, works on a plane.",
-    model: "ollamaModel",
-    host: "ollamaHost",
-  },
-  {
-    id: "lmstudio",
-    name: "LM Studio",
-    desc: "Local OpenAI-compatible server. No key needed.",
-    model: "lmstudioModel",
-    host: "lmstudioHost",
-  },
-  {
-    id: "anthropic",
-    name: "Anthropic",
-    desc: "Deeper conversation and subtler corrections. API key required.",
-    model: "anthropicModel",
-    key: "anthropicKey",
-  },
-  {
-    id: "openai",
-    name: "OpenAI",
-    desc: "Alternative cloud provider. API key required.",
-    model: "openaiModel",
-    key: "openaiKey",
-  },
-  { id: "gemini", name: "Gemini", desc: "Google's models. API key required.", model: "geminiModel", key: "geminiKey" },
-  {
-    id: "openrouter",
-    name: "OpenRouter",
-    desc: "One key, many models. API key required.",
-    model: "openrouterModel",
-    key: "openrouterKey",
-  },
-];
 
 export default function Advanced({ settings, onChange }: SectionProps) {
   const [msg, setMsg] = useState("");

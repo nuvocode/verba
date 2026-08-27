@@ -2,12 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import type { Settings } from "./settings";
 import { getProvider } from "./providers";
 import {
+  anotherTheme,
   buildDailyPlan,
   nextActivity,
   recapPrompt,
   parseRecap,
   isLegacyPlanShape,
   type DayRecap,
+  type Trace,
 } from "./learn";
 import type { ActivityKind, DailyPlan, LevelEstimate, SignalDraft, Weakness } from "./model";
 import { levelEstimateFrom } from "./metrics";
@@ -19,6 +21,7 @@ import {
   saveSignals,
   recentSignals,
   latestRecap,
+  previousDay,
   vocabCounts,
   dayNumber,
   recentMetricScores,
@@ -52,6 +55,8 @@ export interface Day {
   weaknesses: Weakness[];
   done: ActivityKind[];
   recap: DayRecap | null;
+  /** The session before this one, for Today's closing line. null on day one. */
+  trace: Trace | null;
   loading: boolean;
   isDone(kind: ActivityKind): boolean;
   /** The first activity not yet finished — what ↵ on Today starts. */
@@ -68,6 +73,16 @@ export interface Day {
   complete(kind: ActivityKind, signals?: SignalDraft[]): Promise<ActivityKind | null>;
   /** Ask the coach to close out the day. Marks the wrap-up activity done. */
   wrapUp(): Promise<void>;
+  /**
+   * Build today again on the next theme in the rotation (§4.2's "başka bir konu").
+   *
+   * Finished activities stay finished: the learner already spent that time, and
+   * erasing a conversation they actually had would be a worse trade than a day
+   * whose first half was about something else. A day that is *entirely* finished
+   * starts clean instead — carrying every activity over would hand back a plan
+   * with nothing left to do in it, which is the dead end §7 exists to prevent.
+   */
+  changeTopic(): Promise<void>;
 }
 
 /**
@@ -86,6 +101,10 @@ export function useDay(settings: Settings): Day {
   // resume they are re-derived from the latest recap and held here for wrapUp.
   const [focus, setFocus] = useState<string[]>([]);
   const [weaknesses, setWeaknesses] = useState<Weakness[]>([]);
+  const [trace, setTrace] = useState<Trace | null>(null);
+  // The cards due when the day was built. Held so a regenerated plan is the same
+  // day on a different topic, rather than one that quietly forgot the review.
+  const [due, setDue] = useState(0);
 
   // ponytail: the measured estimate only refreshes when this effect re-runs — on
   // date, target-language, or level change. A Talk session writes new session_metrics
@@ -115,14 +134,17 @@ export function useDay(settings: Settings): Day {
             setRecap(row.recap ? JSON.parse(row.recap) : null);
             setFocus(nextFocus);
             setWeaknesses(declared);
+            setTrace(await previousDay(settings.profile.targetLanguage, date));
+            setDue((await vocabCounts(settings.profile.targetLanguage)).due);
             return;
           }
         }
         // No plan for today (or the learner switched language, or the row is stale) — build fresh.
-        const [{ due }, dayIndex, scores] = await Promise.all([
+        const [{ due }, dayIndex, scores, before] = await Promise.all([
           vocabCounts(settings.profile.targetLanguage),
           dayNumber(settings.profile.targetLanguage),
           recentMetricScores(settings.profile.targetLanguage, 12),
+          previousDay(settings.profile.targetLanguage, date),
         ]);
         const levelEstimate = levelEstimateFrom(scores);
         const fresh = buildDailyPlan(settings, { date, dayIndex, dueVocab: due, focus: nextFocus, weaknesses: declared });
@@ -133,6 +155,8 @@ export function useDay(settings: Settings): Day {
         setRecap(null);
         setFocus(nextFocus);
         setWeaknesses(declared);
+        setTrace(before);
+        setDue(due);
         await saveDailySession(date, settings.profile.targetLanguage, fresh, [], null);
       } catch {
         // No DB (browser dev, first run) — still give the learner a plan to work from.
@@ -230,6 +254,24 @@ export function useDay(settings: Settings): Day {
     });
   }, [plan, done, focus, settings, persist]);
 
+  const changeTopic = useCallback(async () => {
+    if (!plan) return;
+    const finished = plan.activities.every((a) => done.includes(a.kind));
+    const keep = finished ? [] : done;
+    const fresh = buildDailyPlan(settings, {
+      date,
+      dayIndex: plan.dayIndex,
+      dueVocab: due,
+      focus,
+      weaknesses,
+      theme: anotherTheme(plan.theme, settings.profile.interests),
+    });
+    setPlan(fresh);
+    setDone(keep);
+    setRecap(null);
+    await persist(keep, null, fresh);
+  }, [plan, done, due, focus, weaknesses, settings, date, persist]);
+
   return {
     date,
     plan,
@@ -238,10 +280,12 @@ export function useDay(settings: Settings): Day {
     weaknesses,
     done,
     recap,
+    trace,
     loading,
     isDone: (k) => done.includes(k),
     next: nextActivity(plan, done),
     complete,
     wrapUp,
+    changeTopic,
   };
 }

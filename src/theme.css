@@ -124,6 +124,11 @@ input { font: inherit; }
 .eyebrow .opt { margin-left: 8px; color: var(--ink3); opacity: .55; text-transform: lowercase; letter-spacing: .06em; }
 
 /* ---------- today ---------- */
+/* A button that reads as a link: used where the action is a sentence rather than a
+   control — "another topic", yesterday's trace. */
+.linky { background: none; border: none; padding: 0; font: inherit; color: var(--accent-ink); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.linky:hover { color: var(--fg); }
+
 .today { max-width: 860px; margin: 0 auto; padding: 72px 32px 80px; }
 .today h1 { font-size: 52px; margin: 14px 0 26px; }
 .spine { border-top: 1px solid var(--line); }
