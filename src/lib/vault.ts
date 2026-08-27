@@ -53,9 +53,18 @@ export interface State {
   syncedAt: number;
   /** Local changes since `syncedAt` that the folder has not been told about. */
   dirty: boolean;
+  /** How big the folder's copy was the last time the two agreed. 0 until one has. */
+  bytes: number;
+  /**
+   * Why the folder could not be reached, or "" while it can. Kept beside
+   * `syncedAt` rather than thrown away with the call that failed: a push that
+   * dies in the background is exactly the failure nobody is watching, and §7
+   * says the learner is owed the reason next to the last time it worked.
+   */
+  error: string;
 }
 
-const NO_STATE: State = { syncedAt: 0, dirty: false };
+const NO_STATE: State = { syncedAt: 0, dirty: false, bytes: 0, error: "" };
 
 export function vaultDir(): string {
   return localStorage.getItem(DIR_KEY) ?? "";
@@ -71,6 +80,27 @@ export function state(): State {
 
 function setState(s: State): void {
   localStorage.setItem(STATE_KEY, JSON.stringify(s));
+}
+
+/** Remember why the folder said no, without touching what it last agreed to. */
+function note(e: unknown): void {
+  setState({ ...state(), error: String((e as { message?: string })?.message ?? e) });
+}
+
+/**
+ * The sync folder's status line — §7 row 6: "son başarılı yazma zamanı + neden".
+ *
+ * Pure, so the one sentence a learner reads about a folder they cannot see is
+ * something a check can hold to. The way out ("Choose a folder…") is a button
+ * that never leaves the panel, so it is not this string's job.
+ */
+export function statusLine(s: State): string {
+  const written = s.syncedAt ? `Last written ${new Date(s.syncedAt).toLocaleString()}` : "Nothing written yet";
+  const size = s.bytes ? ` · ${(s.bytes / 1024 / 1024).toFixed(1)} MB` : "";
+  // The reason replaces the "up to date / waiting" half rather than joining it:
+  // a folder that cannot be reached is neither.
+  if (s.error) return `${written}${size} · Can't reach the folder — ${s.error}`;
+  return `${written}${size} · ${s.dirty ? "changes waiting to be written" : "up to date"}`;
 }
 
 /** Something was written locally. Cheap enough to call from every DB write. */
@@ -136,16 +166,17 @@ async function remoteMeta(dir: string): Promise<Meta | null> {
 }
 
 /** Header *and* data — only when something is about to be restored or described. */
-async function load(dir: string): Promise<{ meta: Meta | null; backup: Backup | null }> {
+async function load(dir: string): Promise<{ meta: Meta | null; backup: Backup | null; bytes: number }> {
   const meta = await remoteMeta(dir);
   const data = await (await rust())<string | null>("vault_data", { dir });
   // A header with no data beside it is a folder that was copied half-way. Read as
   // empty: pushing over it is right, pulling from it would restore nothing.
-  if (!meta || !data) return { meta: null, backup: null };
+  if (!meta || !data) return { meta: null, backup: null, bytes: 0 };
+  const bytes = data.length;
   try {
-    return { meta, backup: parseBackup(data) };
+    return { meta, backup: parseBackup(data), bytes };
   } catch {
-    return { meta, backup: null };
+    return { meta, backup: null, bytes };
   }
 }
 
@@ -160,8 +191,9 @@ export async function push(appVersion: string): Promise<Meta> {
     device: deviceId(),
     appVersion,
   };
-  await (await rust())("vault_save", { dir, meta: JSON.stringify(meta), data: JSON.stringify(backup) });
-  setState({ syncedAt: meta.updatedAt, dirty: false });
+  const data = JSON.stringify(backup);
+  await (await rust())("vault_save", { dir, meta: JSON.stringify(meta), data });
+  setState({ syncedAt: meta.updatedAt, dirty: false, bytes: data.length, error: "" });
   return meta;
 }
 
@@ -171,10 +203,10 @@ export async function push(appVersion: string): Promise<Meta> {
  * and re-reading them one hook at a time is not something to get right by hand.
  */
 export async function pull(): Promise<void> {
-  const { meta, backup } = await load(vaultDir());
+  const { meta, backup, bytes } = await load(vaultDir());
   if (!meta || !backup) throw new Error("That folder has no Verba data in it yet.");
   await restore(backup);
-  setState({ syncedAt: meta.updatedAt, dirty: false });
+  setState({ syncedAt: meta.updatedAt, dirty: false, bytes, error: "" });
 }
 
 /** Park a copy of what is about to be overwritten. Returns the file it wrote. */
@@ -202,7 +234,17 @@ export interface SyncResult {
 export async function sync(appVersion: string): Promise<SyncResult> {
   const dir = vaultDir();
   if (!dir) return { plan: "idle" };
+  try {
+    return await round(dir, appVersion);
+  } catch (e) {
+    // Recorded *and* rethrown: the caller shows it now, the status line keeps it
+    // afterwards. A folder that stopped answering is not a transient message.
+    note(e);
+    throw e;
+  }
+}
 
+async function round(dir: string, appVersion: string): Promise<SyncResult> {
   const meta = await remoteMeta(dir);
   const plan = decide(state(), meta);
   if (plan === "push") await push(appVersion);
@@ -250,7 +292,7 @@ export async function attach(dir: string): Promise<{ meta: Meta | null; summary:
   await (await rust())("vault_check", { dir });
   const { meta, backup } = await load(dir);
   localStorage.setItem(DIR_KEY, dir);
-  setState({ syncedAt: 0, dirty: true }); // both sides unproven until the caller says which wins
+  setState({ ...NO_STATE, dirty: true }); // both sides unproven until the caller says which wins
   return { meta, summary: backup };
 }
 
@@ -321,6 +363,7 @@ export async function flush(): Promise<void> {
     if (decide(state(), meta) === "conflict") return onConflict?.({ remote: meta! });
     await push(version);
   } catch (e) {
+    note(e);
     onError?.(e);
   }
 }

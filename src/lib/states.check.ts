@@ -13,7 +13,9 @@
 //
 // The two remaining bullets of #43 — designed empty states, and destructive
 // actions that count what is lost — belong to the screens that carry them
-// (#36, #39, #40, #41) and are asserted there, not here.
+// (#36, #40, #41) and are asserted there, not here. Privacy's share of that is
+// done: the wipe's confirmation counts what it removes, and backup.check holds
+// the wipe to emptying every table it counted.
 import assert from "node:assert";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -59,13 +61,13 @@ const TABLE: Row[] = [
     id: 6,
     state: "Eşitleme klasörü erişilemiyor",
     answer: "Son başarılı yazma zamanı + neden + yeniden seç",
-    pending: "#39 — the sync folder's status line",
+    assertedIn: [{ file: "src/lib/backup.check.ts", marker: "state 6" }],
   },
   {
     id: 7,
     state: "İçe aktarılan dosya geçersiz",
     answer: "Ne beklendiği yazılır, mevcut veri korunur",
-    pending: "#39 — parseBackup says what it expected; nothing asserts the existing data survives",
+    assertedIn: [{ file: "src/lib/backup.check.ts", marker: "state 7" }],
   },
   {
     id: 8,

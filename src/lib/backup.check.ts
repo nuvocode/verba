@@ -30,9 +30,11 @@ const {
   suggestedFilename,
   lit,
   restoreScript,
+  wipeScript,
+  TABLES,
   BACKUP_FORMAT,
 } = await import("./backup.ts");
-const { decide, parseMeta } = await import("./vault.ts");
+const { decide, parseMeta, statusLine } = await import("./vault.ts");
 type Meta = import("./vault.ts").Meta;
 type State = import("./vault.ts").State;
 
@@ -190,5 +192,47 @@ assert.equal(parseMeta('{"app":"notverba","updatedAt":1}'), null);
 assert.equal(parseMeta('{"app":"verba","updatedAt":"soon"}'), null);
 assert.equal(parseMeta("{ truncated"), null);
 assert.equal(parseMeta('{"app":"verba","updatedAt":42}')?.device, "another machine");
+
+// ---- state 6: a folder that cannot be reached still says when it last worked ----
+// §7 row 6 — "Son başarılı yazma zamanı + neden". The reason on its own is a dead
+// end; the last good write is what tells the learner how much is actually at risk.
+
+const reachable: State = { syncedAt: Date.parse("2026-08-20T09:15:00Z"), dirty: true, bytes: 3_200_000, error: "" };
+assert.match(statusLine(reachable), /Last written/, "a folder that has been written names when");
+assert.match(statusLine(reachable), /3\.1 MB/, "…and how big the copy is");
+assert.match(statusLine(reachable), /changes waiting/, "…and whether this machine is ahead of it");
+
+const broken: State = { ...reachable, error: "No such file or directory (os error 2)" };
+assert.match(statusLine(broken), /Last written/, "a broken folder still names the last write it managed");
+assert.match(statusLine(broken), /os error 2/, "…and the reason it cannot be reached now");
+assert(
+  !/changes waiting|up to date/.test(statusLine(broken)),
+  "a folder that cannot be reached is neither waiting nor up to date — saying both contradicts §6",
+);
+
+// A folder nobody has written yet is a different sentence from a broken one.
+assert.match(statusLine({ syncedAt: 0, dirty: false, bytes: 0, error: "" }), /Nothing written yet/);
+
+// ---- state 7: an invalid file is refused before it can touch anything ----
+// §7 row 7 — "Ne beklendiği yazılır, mevcut veri korunur". The second half is
+// structural rather than a message: this file runs in plain node with no Tauri
+// and no database, so every rejection above happened without a connection
+// existing. A parse that could reach the data would have thrown a different
+// error here, not a readable one.
+
+for (const [junk, expected] of [
+  ["not json at all", /isn't JSON/],
+  ['{"hello":1}', /isn't a Verba backup/],
+  ['{"app":"verba","format":1}', /no data in it/],
+] as const)
+  assert.throws(() => parseBackup(junk), expected, "a rejection says what was expected instead");
+
+// ---- delete everything empties every table, or none ----
+// The confirm dialog counts what is lost out of `summarize`, so a table missing
+// from the wipe is data the learner was told they were deleting and still has.
+const emptying = wipeScript();
+for (const t of TABLES) assert.match(emptying, new RegExp(`DELETE FROM ${t}\\b`), `wipe must empty ${t}`);
+assert(emptying.startsWith("BEGIN IMMEDIATE"), "a half-deleted database is worse than a full one");
+assert(emptying.trimEnd().endsWith("COMMIT;"), "…so the deletes are one transaction");
 
 console.log("backup.check.ts ok");

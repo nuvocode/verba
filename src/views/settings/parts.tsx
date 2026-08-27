@@ -63,9 +63,17 @@ export function ToggleRow({
           {desc}
         </div>
       </div>
-      <button className={`toggle ${on ? "on" : ""}`} onClick={onClick} aria-pressed={on}>
-        <span />
-      </button>
+      {/* §5.5: the state is readable as a word, not only as a colour. Here rather
+          than in one section, because a switch that only a sighted-in-colour
+          learner can read is the same bug wherever it appears. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <span className="desc" style={{ minWidth: 22, textAlign: "right" }}>
+          {on ? "On" : "Off"}
+        </span>
+        <button className={`toggle ${on ? "on" : ""}`} onClick={onClick} aria-pressed={on} aria-label={title}>
+          <span />
+        </button>
+      </div>
     </div>
   );
 }

@@ -306,6 +306,28 @@ export function applyLocal(local: Record<string, string>): void {
   }
 }
 
+/**
+ * Everything, gone — §5.5's "Her şeyi sil".
+ *
+ * The same `DELETE FROM` list a restore opens with, without the inserts that
+ * follow it, plus the settings. What it deliberately does *not* touch: the sync
+ * folder (its copy is a second machine's history as much as this one's — the
+ * caller detaches instead) and the downloaded speech models (files, not the
+ * learner's record; Speech removes those one at a time and says how big they are).
+ *
+ * One `execute`, for the reason spelled out on `restore`: many calls are many
+ * connections, and a half-deleted database is worse than a full one.
+ */
+export function wipeScript(): string {
+  return ["BEGIN IMMEDIATE", ...TABLES.map((t) => `DELETE FROM ${t}`), "COMMIT"].join(";\n") + ";";
+}
+
+export async function wipe(): Promise<void> {
+  const sql = await db();
+  await sql.execute(wipeScript());
+  for (const k of syncedKeys()) localStorage.removeItem(k);
+}
+
 /** `verba-backup-2026-07-21.json` — the date is what anyone scanning a Downloads folder actually reads. */
 export function suggestedFilename(now = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
