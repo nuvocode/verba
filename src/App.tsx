@@ -78,6 +78,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
   const live = useRef(settings);
   live.current = settings;
   const [notice, setNotice] = useState<Applied | null>(null);
+  const [levelTest, setLevelTest] = useState(false);
 
   const update = useCallback((patch: Partial<Settings>) => {
     const applied = applyPatch(live.current, patch);
@@ -408,6 +409,25 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
     <ConflictDialog remote={conflict.remote} appVersion={appVersion} onDone={() => setConflict(null)} />
   );
 
+  // Settings → Learning sends the learner here for "I'm not sure — take a short
+  // test": the setup test, run on its own and handed straight back, rather than a
+  // second placement test living in Settings with its own idea of the answer.
+  if (levelTest)
+    return (
+      <div className="shell">
+        <Onboarding
+          settings={settings}
+          only={{ step: 2, back: "settings" }}
+          onDone={(patch) => {
+            update(patch);
+            setLevelTest(false);
+          }}
+          onExit={() => setLevelTest(false)}
+        />
+        {conflictDialog}
+      </div>
+    );
+
   if (space === "onboarding")
     return (
       <div className="shell">
@@ -510,6 +530,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
             onChange={update}
             notice={notice}
             onDismissNotice={() => setNotice(null)}
+            onLevelTest={() => setLevelTest(true)}
             appVersion={appVersion}
           />
         )}

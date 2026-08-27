@@ -5,19 +5,11 @@ import { languages } from "../lib/langs";
 import { listModels, type LocalProvider } from "../lib/models";
 import { getProvider } from "../lib/providers";
 import { CEFR_LEVELS, type CEFRLevel } from "../lib/model";
+import { LEVELS, TIMES } from "../lib/choices";
 import { parsePlacement, placementPrompt, scorePlacement, type PlacementQ } from "../lib/placement";
 import { attach, detach, pickFolder, pull } from "../lib/vault";
 
 /** Every CEFR level is selectable — the test only proposes one. */
-const LEVELS: [CEFRLevel, string, string][] = [
-  ["A1", "Brand new", "I know a few words at most. Start me from zero, gently."],
-  ["A2", "I can get by", "Ordering food, asking directions — but real conversations lose me fast."],
-  ["B1", "Conversational", "I can hold a conversation but plateau on nuance, speed, and idiom."],
-  ["B2", "Comfortable", "I'm fluent in most situations; I want nuance, idiom, and native speed."],
-  ["C1", "Advanced", "I work or study in it. I'm after precision, register, and the last 5%."],
-  ["C2", "Near-native", "I want to sound like someone who grew up with it."],
-];
-
 const AI: { id: LocalProvider; name: string; desc: string; host: string }[] = [
   {
     id: "ollama",
@@ -31,12 +23,6 @@ const AI: { id: LocalProvider; name: string; desc: string; host: string }[] = [
     desc: "Local OpenAI-compatible server. No key needed.",
     host: "http://localhost:1234/v1",
   },
-];
-
-const TIMES: [number, string][] = [
-  [20, "a focused burst"],
-  [45, "the sweet spot"],
-  [75, "deep immersion"],
 ];
 
 const INTERESTS = ["Travel", "Work", "Family & friends", "Books & film"];
@@ -122,14 +108,33 @@ export default function Onboarding({
   settings,
   onDone,
   onExit,
+  only,
 }: {
   settings: Settings;
   onDone: (patch: Partial<Settings>, dest?: "today" | "settings") => void;
   /** Present only on a replay — a first run has nowhere to escape to. */
   onExit?: () => void;
+  /**
+   * Run one step on its own and hand the answer straight back to where the
+   * learner came from. Settings → Learning uses this for "I'm not sure — take a
+   * short test": §5.3 asks for *the setup test*, not a second one written to
+   * live in Settings, and two placement tests would be two things to keep true.
+   */
+  only?: { step: number; back: "settings" };
 }) {
   const packs = listPacks();
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(only?.step ?? 0);
+
+  /**
+   * Walk on through setup, or — on a single-step run — answer and go back.
+   * `level` is passed where the answer was chosen in the same tick: `setCefr` has
+   * not landed yet, and `patch()` would send the level the learner just replaced.
+   */
+  const advance = (to: number, level?: CEFRLevel) => {
+    if (!only) return setStep(to);
+    const p = patch();
+    onDone(level ? { ...p, profile: { ...p.profile!, level } } : p, only.back);
+  };
 
   // ---- coming back rather than starting (step 0) ----
   //
@@ -493,7 +498,7 @@ export default function Onboarding({
       LEVELS.forEach(([l], i) => {
         picks[i] = () => {
           setCefr(l);
-          setStep(3);
+          advance(3, l);
         };
       });
       return (
@@ -510,7 +515,7 @@ export default function Onboarding({
                 className={`pick ${cefr === l ? "on" : ""}`}
                 onClick={() => {
                   setCefr(l);
-                  setStep(3);
+                  advance(3, l);
                 }}
               >
                 <span className="tag">{i + 1}</span>
@@ -554,7 +559,7 @@ export default function Onboarding({
     }
 
     // result — proposed, never imposed
-    onEnter = () => setStep(3);
+    onEnter = () => advance(3);
     return (
       <>
         <h1>You're around {cefr}.</h1>
@@ -569,8 +574,8 @@ export default function Onboarding({
             </button>
           ))}
         </div>
-        <button className="btn" onClick={() => setStep(3)}>
-          Continue →
+        <button className="btn" onClick={() => advance(3)}>
+          {only ? "Save this level →" : "Continue →"}
         </button>
       </>
     );
@@ -690,21 +695,23 @@ export default function Onboarding({
       </div>
 
       <div className="onb-esc">
-        {/* Skip needs a language and a model first — without them there is nothing to generate. */}
-        {(step === 2 || step === 3) && (
+        {/* Skip needs a language and a model first — without them there is nothing to
+            generate. On a single-step run there is no setup to skip: the learner
+            came here to answer one question and already has everything else. */}
+        {!only && (step === 2 || step === 3) && (
           <button className="skip" onClick={skip} title="Level: placed in your first conversation · 20 min a day">
             Skip setup →
           </button>
         )}
         {onExit && (
           <button className="skip esc" onClick={onExit}>
-            <span className="kbd">esc</span> Leave setup
+            <span className="kbd">esc</span> {only ? "Back to settings" : "Leave setup"}
           </button>
         )}
       </div>
 
       <div className="sheet">
-        <div className="eyebrow">{STEP_LABELS[step]}</div>
+        <div className="eyebrow">{only ? "Your level" : STEP_LABELS[step]}</div>
         {body}
 
         <div className="hints" style={{ marginTop: 40 }}>

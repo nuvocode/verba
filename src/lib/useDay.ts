@@ -121,7 +121,7 @@ export function useDay(settings: Settings): Day {
         // No plan for today (or the learner switched language, or the row is stale) — build fresh.
         const [{ due }, dayIndex, scores] = await Promise.all([
           vocabCounts(settings.profile.targetLanguage),
-          dayNumber(),
+          dayNumber(settings.profile.targetLanguage),
           recentMetricScores(settings.profile.targetLanguage, 12),
         ]);
         const levelEstimate = levelEstimateFrom(scores);
