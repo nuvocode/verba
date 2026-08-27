@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadSettings, saveSettings, isLocalProvider, onboardingReset, type Settings } from "./lib/settings";
+import { applyPatch, type Applied } from "./lib/rules";
 import { installed } from "./lib/bundled";
 import { pruneBundled } from "./lib/speech";
 import type { ActivityKind, SignalDraft } from "./lib/model";
@@ -70,12 +71,23 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
   const [conflict, setConflict] = useState<Conflict | null>(boot.conflict ?? null);
   const [syncErr, setSyncErr] = useState(boot.error ?? "");
 
+  // The one door every settings write goes through. lib/rules decides what a
+  // patch is allowed to do, so setup and Settings cannot disagree about a rule —
+  // and a refused change never reaches disk. The ref is what lets this stay a
+  // stable callback: half the app takes `update` as a dependency.
+  const live = useRef(settings);
+  live.current = settings;
+  const [notice, setNotice] = useState<Applied | null>(null);
+
   const update = useCallback((patch: Partial<Settings>) => {
-    setSettings((s) => {
-      const next = { ...s, ...patch };
-      saveSettings(next);
-      return next;
-    });
+    const applied = applyPatch(live.current, patch);
+    setNotice(applied.refused || applied.consequence ? applied : null);
+    if (applied.refused) return;
+    // Ahead of the re-render, so a second update in the same tick reads this
+    // change rather than the one it replaced.
+    live.current = applied.next;
+    saveSettings(applied.next);
+    setSettings(applied.next);
   }, []);
 
   const day = useDay(settings);
@@ -492,7 +504,15 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
           />
         )}
         {space === "coach" && <Coach settings={settings} day={day} />}
-        {space === "settings" && <SettingsView settings={settings} onChange={update} appVersion={appVersion} />}
+        {space === "settings" && (
+          <SettingsView
+            settings={settings}
+            onChange={update}
+            notice={notice}
+            onDismissNotice={() => setNotice(null)}
+            appVersion={appVersion}
+          />
+        )}
       </div>
 
       {/* A folder that couldn't be reached. Said once, dismissable, and never a

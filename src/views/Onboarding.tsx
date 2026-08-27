@@ -49,13 +49,20 @@ type LevelMode = "intro" | "busy" | "test" | "manual" | "result";
 function NativePicker({
   value,
   onChange,
+  exclude,
   prefix,
 }: {
   value: string;
   onChange: (name: string) => void;
+  /** The language being learned. It is not on offer here — §3: the two can never
+   *  be the same, and a list that offers the pair is a route to a refusal. */
+  exclude?: string;
   prefix?: string;
 }) {
-  const all = useMemo(languages, []);
+  const all = useMemo(
+    () => languages().filter((l) => l.name.toLowerCase() !== (exclude ?? "").trim().toLowerCase()),
+    [exclude],
+  );
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
 
@@ -398,7 +405,11 @@ export default function Onboarding({
   };
 
   const stepLanguage = () => {
-    packs.forEach((p, i) => {
+    // The language you already speak is not one you are learning (§3). Filtered
+    // once: the number keys and the grid have to offer the same list, or the
+    // shortcut lands on a card that isn't there.
+    const offered = packs.filter((p) => p.name.trim().toLowerCase() !== nativeLang.trim().toLowerCase());
+    offered.forEach((p, i) => {
       if (i < 9)
         picks[i] = () => {
           setPackId(p.id);
@@ -410,7 +421,7 @@ export default function Onboarding({
       <>
         <h1>Which language are you learning?</h1>
         <div className="grid3">
-          {packs.map((p) => {
+          {offered.map((p) => {
             const origin = packOrigin(p.id);
             return (
               <button
@@ -428,7 +439,7 @@ export default function Onboarding({
             );
           })}
         </div>
-        <NativePicker value={nativeLang} onChange={setNativeLang} prefix="Native language: " />
+        <NativePicker value={nativeLang} onChange={setNativeLang} exclude={lang} prefix="Native language: " />
       </>
     );
   };
@@ -638,6 +649,7 @@ export default function Onboarding({
               <NativePicker
                 value={nativeLang}
                 onChange={setNativeLang}
+                exclude={lang}
                 prefix="Corrections and explanations are written in "
               />
             </div>
