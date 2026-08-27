@@ -13,6 +13,7 @@ import { importScenario, removeImportedScenario, scenarioRegistry } from "../../
 import {
   CLOUD_MODELS,
   KEY_SOURCE,
+  isRemoteModel,
   listModels,
   localChoices,
   machineRam,
@@ -114,7 +115,12 @@ export default function Advanced({ settings, onChange }: SectionProps) {
   }, [local, host, settings.provider]);
 
   /** The rows to choose from: what a local server serves, or the short cloud list. */
-  const choices: Choice[] = local ? localChoices(served ?? [], ram) : (CLOUD_MODELS[settings.provider] ?? []);
+  const choices: Choice[] = local
+    ? localChoices(served ?? [], ram, settings.offline)
+    : (CLOUD_MODELS[settings.provider] ?? []);
+
+  /** How many rows the lock took off the list, so a shorter list is never a mystery. */
+  const withheld = settings.offline ? (served ?? []).filter((m) => isRemoteModel(m.id)).length : 0;
 
   // ---- does it answer? ----
 
@@ -323,6 +329,19 @@ export default function Advanced({ settings, onChange }: SectionProps) {
           {/* Separate and marked as such (§5.7). It holds the live value, so a
               row picked above shows up here — the field is a second way to set
               the same setting, not a second setting. */}
+          {withheld > 0 && (
+            // Hidden, but not silently (#42): the reason and the switch that
+            // caused it are both here.
+            <div className="desc" style={{ padding: "12px 4px 0", maxWidth: 480, lineHeight: 1.5 }}>
+              {withheld} more {withheld === 1 ? "model runs" : "models run"} on Ollama's servers rather than on this
+              machine, so {withheld === 1 ? "it is" : "they are"} not offered —{" "}
+              <a href={AT.privacy} style={{ color: "inherit" }}>
+                Offline lock
+              </a>
+              .
+            </div>
+          )}
+
           <div className="field" style={{ marginTop: 18 }}>
             <label>Any other model</label>
             <input

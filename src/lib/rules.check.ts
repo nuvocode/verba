@@ -94,6 +94,37 @@ const base: Settings = withProfile({ ...defaultSettings, offline: false, provide
   assert(applyPatch(locked, { sttTier: "cloud" }).refused, "nor cloud dictation");
 }
 
+// Ollama serves its own hosted models through the local API, so "the provider is
+// local" is not the whole question — the model has to be local too, or the lock
+// promises one thing and every turn does another.
+{
+  const locked: Settings = { ...base, offline: true, provider: "ollama", ollamaModel: "gemma4:e2b-mlx" };
+  const r = applyPatch(locked, { ollamaModel: "qwen3.5:cloud" });
+  assert(r.refused, "a hosted model must not be selectable under the lock, typed or picked");
+  assert.equal(r.next, locked, "…and nothing is written when it is refused");
+  assert.equal(r.refused.exits[0].href, AT.privacy, "the way out is the setting that closed it");
+
+  assert(
+    !applyPatch(locked, { ollamaModel: "llama3.1:8b" }).refused,
+    "a model that only happens to be new is ordinary business",
+  );
+}
+
+// And the lock going on over one already selected takes it down, out loud: a
+// silent model swap is how someone ends up debugging the wrong model.
+{
+  const r = applyPatch({ ...base, provider: "ollama", ollamaModel: "gemma4:31b-cloud" }, { offline: true });
+  assert(!r.refused, "turning the lock on is always allowed");
+  assert.notEqual(r.next.ollamaModel, "gemma4:31b-cloud", "the hosted model does not survive the lock");
+  assert.match(r.consequence ?? "", /gemma4:31b-cloud/, "…and the sentence names what it moved");
+  assert.match(r.consequence ?? "", new RegExp(r.next.ollamaModel), "…and what it moved to");
+  assert.deepEqual(
+    applyPatch(r.next, r.undo!).next.ollamaModel,
+    "gemma4:31b-cloud",
+    "Undo puts the model back with everything else",
+  );
+}
+
 // A local provider under the lock is ordinary business.
 {
   const locked: Settings = { ...base, offline: true, provider: "ollama" };

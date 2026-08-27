@@ -123,6 +123,20 @@ function sizeHint(bytes: number): string {
 }
 
 /**
+ * Is this "installed" model actually somewhere else?
+ *
+ * Ollama serves its own hosted models through the same local API and the same
+ * list — `qwen3.5:cloud`, `gemma4:31b-cloud`. Nothing about the address they
+ * arrive at says so; only the name does. They are a cloud provider wearing a
+ * local provider's coat, which matters twice: the list claims to be what is on
+ * this machine, and the offline lock promises nothing leaves it.
+ *
+ * The test is the suffix, anchored: a model genuinely called `nimbus-cloud-7b`
+ * is not matched, and neither is anything with `cloud` in the middle.
+ */
+export const isRemoteModel = (id: string) => /[:-]cloud$/i.test(id.trim());
+
+/**
  * The installed models, ranked and annotated.
  *
  * "Recommended" is computed rather than curated: the largest model that still
@@ -131,18 +145,27 @@ function sizeHint(bytes: number): string {
  * gets the badge, and none does when no size is known — a badge on a guess is
  * worse than no badge.
  */
-export function localChoices(models: Installed[], ram: number): Choice[] {
+export function localChoices(models: Installed[], ram: number, offline = false): Choice[] {
   const room = ram > 0 ? ram * HEADROOM : 0;
   const sizeOf = (m: Installed) => (m.bytes >= REAL_MODEL ? m.bytes : 0);
+  // While the lock is on these cannot be used at all, so they are gone rather
+  // than greyed. The exception to "a closed option stays on screen" is earned:
+  // a greyed row teaches the learner about a Verba feature they could switch on,
+  // and these are not that — they are somebody else's list leaking through. The
+  // panel says how many went and why, so a list that got shorter is never a
+  // mystery.
+  const offered = offline ? models.filter((m) => !isRemoteModel(m.id)) : models;
   const best = room
-    ? models
+    ? offered
         .filter((m) => sizeOf(m) > 0 && sizeOf(m) <= room)
         .reduce<Installed | null>((b, m) => (!b || sizeOf(m) > sizeOf(b) ? m : b), null)
     : null;
 
-  return models.map((m) => ({
+  return offered.map((m) => ({
     id: m.id,
-    hint: sizeHint(sizeOf(m)),
+    // Named for what it is, lock or no lock: this row is not on your disk, and
+    // "Installed models" would otherwise be saying it is.
+    hint: isRemoteModel(m.id) ? "Runs on Ollama's servers, not on this machine" : sizeHint(sizeOf(m)),
     recommended: !!best && m.id === best.id,
     warning:
       room && sizeOf(m) > room
