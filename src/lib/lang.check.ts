@@ -87,7 +87,7 @@ assert.match(vocabPrompt(s, pack), /Never pick a proper name, a number, a time/,
 // not claim more — "the target language changes everywhere at once" is not
 // something a static scan can prove.
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, extname } from "node:path";
+import { extname } from "node:path";
 import { BUNDLED_PACKS } from "./packs/bundled.ts";
 import { COMMUNITY_PACKS } from "./packs/community.ts";
 
@@ -110,7 +110,11 @@ function isExcluded(p: string): boolean {
 function walk(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
-    const p = join(dir, entry);
+    // Not join(): on Windows it separates with a backslash, and every path in
+    // isExcluded is written with forward slashes — so the exclusions all miss
+    // and the gate reports every pack file as an offender. Node reads a
+    // forward-slash path on Windows perfectly well.
+    const p = `${dir}/${entry}`;
     const st = statSync(p);
     if (st.isDirectory()) out.push(...walk(p));
     else if (st.isFile() && (extname(p) === ".ts" || extname(p) === ".tsx")) out.push(p);
@@ -145,6 +149,10 @@ assert(scanText('const x = "Spanish";', PACK_NAMES).length === 1, "the gate must
 
 const files = walk("src");
 assert(files.length > 0, "the gate walked no files — a silent green is a lie");
+// The walker and isExcluded have to agree about what a path looks like. When
+// they stopped agreeing, nothing was excluded and the gate failed on files it
+// was written to permit — so prove at least one exclusion still fires.
+assert(files.some(isExcluded), "no file was excluded — walk and isExcluded disagree about path separators");
 const offenders: string[] = [];
 for (const f of files) {
   if (isExcluded(f)) continue;
