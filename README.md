@@ -61,10 +61,10 @@ server, nothing on the network.
 
 | Platform | | |
 |---|---|---|
-| **macOS** — Apple Silicon (M1–M4) | [`.dmg`](https://github.com/nuvocode/verba/releases/download/v0.3.0/Verba_0.3.0_aarch64.dmg) | |
-| **macOS** — Intel | [`.dmg`](https://github.com/nuvocode/verba/releases/download/v0.3.0/Verba_0.3.0_x64.dmg) | |
-| **Windows** | [`.exe`](https://github.com/nuvocode/verba/releases/download/v0.3.0/Verba_0.3.0_x64-setup.exe) | [`.msi`](https://github.com/nuvocode/verba/releases/download/v0.3.0/Verba_0.3.0_x64_en-US.msi) |
-| **Linux** | [`.AppImage`](https://github.com/nuvocode/verba/releases/download/v0.3.0/Verba_0.3.0_amd64.AppImage) | [`.deb`](https://github.com/nuvocode/verba/releases/download/v0.3.0/Verba_0.3.0_amd64.deb) · [`.rpm`](https://github.com/nuvocode/verba/releases/download/v0.3.0/Verba-0.3.0-1.x86_64.rpm) |
+| **macOS** — Apple Silicon (M1–M4) | [`.dmg`](https://github.com/nuvocode/verba/releases/download/v0.4.0/Verba_0.4.0_aarch64.dmg) | |
+| **macOS** — Intel | [`.dmg`](https://github.com/nuvocode/verba/releases/download/v0.4.0/Verba_0.4.0_x64.dmg) | |
+| **Windows** | [`.exe`](https://github.com/nuvocode/verba/releases/download/v0.4.0/Verba_0.4.0_x64-setup.exe) | [`.msi`](https://github.com/nuvocode/verba/releases/download/v0.4.0/Verba_0.4.0_x64_en-US.msi) |
+| **Linux** | [`.AppImage`](https://github.com/nuvocode/verba/releases/download/v0.4.0/Verba_0.4.0_amd64.AppImage) | [`.deb`](https://github.com/nuvocode/verba/releases/download/v0.4.0/Verba_0.4.0_amd64.deb) · [`.rpm`](https://github.com/nuvocode/verba/releases/download/v0.4.0/Verba-0.4.0-1.x86_64.rpm) |
 
 On a Mac, take **aarch64** for Apple Silicon and **x64** only for an Intel Mac — the
 wrong one either refuses to start or crawls under Rosetta.
