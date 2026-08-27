@@ -44,6 +44,11 @@ tar = "0.4"
 bzip2 = "0.4"
 thiserror = "2"
 
+# Desktop only: the updater has nothing to replace on a phone, and the crate
+# does not build for mobile targets.
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
+
 [dev-dependencies]
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
 

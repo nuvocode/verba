@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "check": "tsc --noEmit && node scripts/check.mjs",
+    "check": "tsc --noEmit && node scripts/version.mjs && node scripts/check.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

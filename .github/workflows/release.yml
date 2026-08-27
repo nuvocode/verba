@@ -79,6 +79,11 @@ jobs:
 
       - run: npm ci
 
+      # Before anything is built: the updater compares versions, so a release
+      # that bumped two of the three files must not reach an installed copy.
+      - name: Check the version matches across all three files
+        run: node scripts/version.mjs
+
       # Pure-logic checks, on every target. They are fast, and a pack that fails
       # validation should not be shipped to anyone.
       - name: Run checks
@@ -99,6 +104,10 @@ jobs:
         id: build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # createUpdaterArtifacts is on, so every target also produces an update
+          # bundle and its minisign .sig. Without these the build fails outright.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
 
