@@ -3,7 +3,9 @@ import type { ReadView, Settings } from "../../lib/settings";
 import { levelOf } from "../../lib/model";
 import { tokens } from "../../lib/text";
 import { bare, type Read as ReadState } from "../../lib/useRead";
+import { live } from "../../lib/keys";
 import ViewToggle from "./ViewToggle";
+import Hints from "../Hints";
 
 /**
  * Close reading: the passage sitting still, a sentence at a time. Click a sentence to
@@ -42,6 +44,7 @@ export default function Passage({
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (e.key !== "Enter" || el?.tagName === "INPUT" || el?.tagName === "TEXTAREA") return;
+      if (!live("read", e.key)) return; // the table is the gate
       e.preventDefault();
       void read.saveWord();
     };
@@ -116,24 +119,9 @@ export default function Passage({
           </button>
         </div>
 
-        {settings.showHints && (
-          <div className="hints" style={{ marginTop: 44, gap: 20 }}>
-            <span>
-              <span className="kbd">← →</span> move focus
-            </span>
-            {read.canBilingual && (
-              <span>
-                <span className="kbd">T</span> bilingual mode
-              </span>
-            )}
-            <span>
-              <span className="kbd">P</span> read it out loud
-            </span>
-            <span>
-              <span className="kbd">esc</span> clear focus
-            </span>
-          </div>
-        )}
+        <div style={{ marginTop: 44 }}>
+          <Hints settings={settings} surface="read" has={[read.canBilingual ? "bilingual" : "", canSave ? "save" : ""]} />
+        </div>
       </div>
 
       <div className="notes">

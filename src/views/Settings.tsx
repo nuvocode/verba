@@ -9,12 +9,14 @@ import { useEffect, useState } from "react";
 import type { Settings } from "../lib/settings";
 import type { Applied } from "../lib/rules";
 import { pending as pendingUpdate } from "../lib/update";
+import { live } from "../lib/keys";
 import { linkish } from "./settings/parts";
 import Learning from "./settings/Learning";
 import Speech from "./settings/Speech";
 import Privacy from "./settings/Privacy";
 import AboutMe from "./settings/AboutMe";
 import Advanced from "./settings/Advanced";
+import Hints from "./Hints";
 
 /**
  * The five sections, in nav order, each labelled with the question it answers.
@@ -101,6 +103,7 @@ export default function SettingsView({
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(el?.tagName ?? "") || el?.isContentEditable) return;
+      if (!live("settings", e.key)) return; // the table is the gate
       const step = e.key === "ArrowDown" || e.key === "]" ? 1 : e.key === "ArrowUp" || e.key === "[" ? -1 : 0;
       if (!step) return;
       e.preventDefault();
@@ -174,6 +177,10 @@ export default function SettingsView({
       {tab === "privacy" && <Privacy {...section} appVersion={appVersion} />}
       {tab === "about" && <AboutMe {...section} />}
       {tab === "advanced" && <Advanced {...section} />}
+
+      {/* The section walk is a shortcut like any other — announced here, from the
+          same table, so a key that works is a key that is shown. */}
+      <Hints settings={settings} surface="settings" />
     </div>
   );
 }

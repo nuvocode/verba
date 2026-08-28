@@ -12,6 +12,7 @@ import type { Day } from "../lib/useDay";
 import { activityStatus, daySummary, progressLine, shortfallNote, traceLine } from "../lib/learn";
 import { listModels, modelTrouble, PROVIDERS, type Installed } from "../lib/models";
 import { AT } from "../lib/rules";
+import Hints from "./Hints";
 
 function greeting(h = new Date().getHours()): string {
   if (h < 12) return "Good morning";
@@ -195,19 +196,9 @@ export default function Today({
         </button>
       )}
 
-      {settings.showHints && (
-        <div className="hints" style={{ marginTop: 44 }}>
-          <span>
-            <span className="kbd">↵</span> begin next
-          </span>
-          <span>
-            <span className="kbd">1–6</span> spaces
-          </span>
-          <span>
-            <span className="kbd">⌘K</span> anything — ask, jump, search
-          </span>
-        </div>
-      )}
+      <div style={{ marginTop: 44 }}>
+        <Hints settings={settings} surface="today" />
+      </div>
     </div>
   );
 }

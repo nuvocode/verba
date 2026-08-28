@@ -12,7 +12,9 @@ import {
   WPM_MAX,
   WPM_MIN,
 } from "../../lib/prompter";
+import { live } from "../../lib/keys";
 import ViewToggle from "./ViewToggle";
+import Hints from "../Hints";
 
 /**
  * The teleprompter: the same passage, read out loud, at a pace that doesn't wait for you.
@@ -191,6 +193,8 @@ export default function Prompter({
       const el = e.target as HTMLElement | null;
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(el?.tagName ?? "") || el?.isContentEditable) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return; // ⌘K belongs to the palette
+      // The table is the gate: a key that is not a prompter key does nothing here.
+      if (!live("prompter", e.key)) return;
       const k = e.key;
       if (k === " ") {
         e.preventDefault(); // …or the body scrolls under the column
@@ -292,25 +296,9 @@ export default function Prompter({
         </div>
       )}
 
-      {settings.showHints && (
-        <div className="hints" style={{ padding: "0 28px 20px", gap: 20 }}>
-          <span>
-            <span className="kbd">space</span> {running ? "pause" : "start"}
-          </span>
-          <span>
-            <span className="kbd">+ −</span> speed
-          </span>
-          <span>
-            <span className="kbd">← →</span> skip a line
-          </span>
-          <span>
-            <span className="kbd">R</span> from the top
-          </span>
-          <span>
-            <span className="kbd">P</span> back to close reading
-          </span>
-        </div>
-      )}
+      <div style={{ padding: "0 28px 20px" }}>
+        <Hints settings={settings} surface="prompter" has={[running ? "running" : "idle"]} />
+      </div>
     </div>
   );
 }

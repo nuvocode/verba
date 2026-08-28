@@ -7,6 +7,7 @@ import type { Talk as TalkState } from "../lib/useTalk";
 import { talkSignals } from "../lib/signals";
 import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
 import Face from "./talk/Face";
+import Hints from "./Hints";
 
 // Where the reflection sends them, named by what the plan has next. The wording is the
 // day's, not this screen's — Talk never decides that reading (or anything) comes after.
@@ -390,12 +391,16 @@ export default function Talk({
                 Send
               </button>
             </div>
-            {settings.showHints && (
-              <div style={{ maxWidth: 640, margin: "10px auto 0", fontSize: 11, color: "var(--ink3)" }}>
-                Type freely, press <span style={{ fontFamily: "var(--mono)" }}>1–3</span> to use a suggestion, or click ◉
-                to speak. <span style={{ fontFamily: "var(--mono)" }}>Esc</span> to end the session.
-              </div>
-            )}
+            {/* The keyboard half comes from the one table; the mouse half — click ◉
+                to speak — is a pointer instruction, so it stays beside it (§5.4). */}
+            <div style={{ maxWidth: 640, margin: "10px auto 0", fontSize: 11, color: "var(--ink3)" }}>
+              <Hints settings={settings} surface="talk" />
+              {settings.showHints && (
+                <span style={{ marginLeft: 22 }}>
+                  or click <span style={{ fontFamily: "var(--mono)" }}>◉</span> to speak
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

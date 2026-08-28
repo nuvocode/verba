@@ -47,10 +47,10 @@ input { font: inherit; }
 .nav-item.on { color: var(--ink); background: var(--bg2); font-weight: 500; }
 .nav-item .k { font-family: var(--mono); font-size: 9.5px; color: var(--ink3); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; opacity: .6; }
 .nav-item.on .k { opacity: 1; }
+/* Memory's due count — a counter, not a shortcut, so it is styled apart from `.k`
+   and always says what it counts (the title). */
+.nav-item .count { font-family: var(--mono); font-size: 9.5px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; }
 .spacer { flex: 1; }
-.dots { display: flex; align-items: center; gap: 8px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); border: 1px solid var(--ink3); }
-.dot.done { background: var(--good); border-color: var(--good); }
 .status { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 11px; color: var(--ink3); padding: 5px 10px; border-radius: 6px; }
 .status:hover { background: var(--bg2); color: var(--ink2); }
 .status .led { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }

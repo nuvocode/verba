@@ -8,6 +8,8 @@ import { useDay } from "./lib/useDay";
 import { useTalk } from "./lib/useTalk";
 import { useRead } from "./lib/useRead";
 import { useListening } from "./lib/useListening";
+import { live as keyLive, navLive } from "./lib/keys";
+import { PROVIDERS } from "./lib/models";
 import Onboarding from "./views/Onboarding";
 import Today from "./views/Today";
 import Talk from "./views/Talk";
@@ -34,15 +36,6 @@ const NAV: [string, Space, string][] = [
   ["Memory", "memory", "5"],
   ["Coach", "coach", "6"],
 ];
-
-const PROVIDER_NAMES: Record<string, string> = {
-  ollama: "Ollama",
-  lmstudio: "LM Studio",
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  gemini: "Gemini",
-  openrouter: "OpenRouter",
-};
 
 const isSettingsHash = () => window.location.hash.startsWith("#settings");
 
@@ -231,7 +224,9 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         kbd: "↵",
         run: () => day.next && begin(day.next),
       },
-      { label: "Resurface the words that are due", kbd: "R", run: () => begin("memory") },
+      // No R badge: there is no global R — Memory's own R is a surface key, and a
+      // badge here would announce a shortcut that does not work from this screen.
+      { label: "Resurface the words that are due", run: () => begin("memory") },
       {
         label: "Generate a new reading passage",
         run: () => {
@@ -249,7 +244,8 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       },
       {
         label: "Read the passage out loud — the teleprompter",
-        kbd: "P",
+        // P is a Read surface key, so the badge only shows where it works.
+        kbd: space === "read" ? "P" : undefined,
         run: () => {
           go("read");
           update({ readView: "prompter" });
@@ -285,7 +281,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       },
     });
     return hits;
-  }, [query, go, begin, day, read, talk, listening, settings.theme, update]);
+  }, [query, go, begin, day, read, talk, listening, settings.theme, update, space]);
 
   // The one thing Esc does on this screen. The key and the visible pill run it, so nobody
   // has to know the shortcut exists. Memory's review owns its own Esc while it's captured.
@@ -373,16 +369,39 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       }
       if (space === "today" && e.key === "Enter" && day.next) return begin(day.next);
 
-      const nav: Record<string, Space> = {
-        "1": "today",
-        "2": "talk",
-        "3": "read",
-        "4": "listening",
-        "5": "memory",
-        "6": "coach",
-        ",": "settings",
-      };
-      if (nav[e.key]) go(nav[e.key]);
+      // Memory's R starts the resurfacing — the same action the "Resurface due"
+      // button promises, so the badge and the key agree. Review mode owns its own
+      // keys (App stands down while it is captured), so this is the collection only.
+      if (space === "memory" && keyLive("memory", e.key) && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        setReviewSignal((n) => n + 1);
+        return;
+      }
+
+      // Listening is a media surface: Space plays and stops the chapter. The label
+      // says what it does — "stop", not "pause", because the surface stops (§6).
+      if (space === "listening" && keyLive("listening", e.key) && e.key === " ") {
+        e.preventDefault();
+        if (listening.playing) listening.stop();
+        else void listening.play();
+        return;
+      }
+
+      // The nav keys come from the one table, and only where they are actually live:
+      // on Talk, 1–3 are suggestions, so the topbar shows no badges and no nav fires.
+      if (navLive(space, e.key)) {
+        const dest: Record<string, Space> = {
+          "1": "today",
+          "2": "talk",
+          "3": "read",
+          "4": "listening",
+          "5": "memory",
+          "6": "coach",
+          ",": "settings",
+        };
+        const to = dest[e.key];
+        if (to) go(to);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -403,7 +422,6 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
     update,
     settings.readView,
   ]);
-
   useEffect(() => {
     if (paletteOpen) paletteInput.current?.focus();
   }, [paletteOpen]);
@@ -453,6 +471,13 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
   const local = isLocalProvider(settings.provider);
   const items = paletteItems();
   const active = Math.min(pIdx, items.length - 1);
+  // The provider's name, host and model are the detail behind the status — the
+  // badge itself says only where the AI runs (§4.3: the commercial name does not
+  // sit in the bar, it is a hover away).
+  const provider = PROVIDERS.find((p) => p.id === settings.provider);
+  const statusTitle = provider
+    ? `${provider.name} · ${local ? "runs on this computer" : "online"} · ${String(settings[provider.model] ?? "")}`
+    : "Where the AI runs — open Settings";
 
   return (
     <div className="shell">
@@ -464,25 +489,31 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
           {NAV.map(([label, key, kbd]) => (
             <button key={key} className={`nav-item ${space === key ? "on" : ""}`} onClick={() => go(key)}>
               <span>{label}</span>
-              <span className="k">{kbd}</span>
+              {/* The badge is the shortcut, and only where the shortcut is live: on
+                  Talk, 1–3 are suggestions, so the bar shows no numbers there. */}
+              {navLive(space, kbd) && <span className="k">{kbd}</span>}
+              {/* Memory's due count is a *counter*, not a shortcut — a separate badge
+                  that says what it counts, so a bare number never stands alone. */}
+              {key === "memory" && day.due > 0 && (
+                <span className="count" title={`${day.due} ${day.due === 1 ? "word" : "words"} due for resurfacing`}>
+                  {day.due}
+                </span>
+              )}
             </button>
           ))}
+          {/* Settings is not one of the six sections, so it sits apart from them —
+              a separate entry at the end of the bar, not a seventh nav item. */}
+          <button className={`nav-item ${space === "settings" ? "on" : ""}`} onClick={() => go("settings")}>
+            <span>Settings</span>
+            {navLive(space, ",") && <span className="k">,</span>}
+          </button>
         </div>
         <div className="spacer" />
-        <div className="dots" title="Today's session">
-          {(day.plan?.activities ?? []).map((b) => (
-            <div
-              key={b.kind}
-              className={`dot ${day.isDone(b.kind) ? "done" : ""}`}
-              title={`${b.title}${day.isDone(b.kind) ? " — done" : ""}`}
-            />
-          ))}
-        </div>
-        <button className="status" onClick={() => go("settings")} title="Where the AI runs — open Settings">
+        {/* The day's plan, as a sentence — Today already says it; a second, unlabelled
+            strip would be a second language for the same fact (§4.3). */}
+        <button className="status" onClick={() => go("settings")} title={statusTitle}>
           <span className={`led ${local ? "" : "cloud"}`} />
-          <span>
-            {PROVIDER_NAMES[settings.provider] ?? settings.provider} · {local ? "local" : "cloud"}
-          </span>
+          <span>{local ? "On this computer" : "Online"}</span>
         </button>
         <button
           className="icon-btn"

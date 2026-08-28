@@ -57,6 +57,8 @@ export interface Day {
   recap: DayRecap | null;
   /** The session before this one, for Today's closing line. null on day one. */
   trace: Trace | null;
+  /** The cards due when the day was built — Memory's counter badge reads it. */
+  due: number;
   loading: boolean;
   isDone(kind: ActivityKind): boolean;
   /** The first activity not yet finished — what ↵ on Today starts. */
@@ -281,6 +283,7 @@ export function useDay(settings: Settings): Day {
     done,
     recap,
     trace,
+    due,
     loading,
     isDone: (k) => done.includes(k),
     next: nextActivity(plan, done),
