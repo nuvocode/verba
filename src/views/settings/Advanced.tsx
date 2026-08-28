@@ -183,7 +183,7 @@ export default function Advanced({ settings, onChange }: SectionProps) {
         where speech comes from, and what you have added yourself.
       </div>
 
-      <div className="sec">Model</div>
+      <div className="sec" data-setting="model">Model</div>
       {PROVIDERS.map((p) => {
         const isLocal = isLocalProvider(p.id);
         const gate = isLocal ? null : cloudGate(settings);
@@ -332,7 +332,7 @@ export default function Advanced({ settings, onChange }: SectionProps) {
       {/* Sits with the model rather than under Coaching: it is a property of
           the model chosen above, and it is the first thing to reach for when
           a provider that should be quick is not. */}
-      <div className="sec" style={{ marginTop: 22 }}>Speed</div>
+      <div className="sec" style={{ marginTop: 22 }} data-setting="thinking">Speed</div>
       <ToggleRow
         title="Let the model think first"
         desc="Better answers from reasoning models, at the cost of a longer silence before the coach starts — the thinking happens before the first word appears. Models that don't reason are unaffected."
@@ -343,17 +343,17 @@ export default function Advanced({ settings, onChange }: SectionProps) {
       {/* Moved out of Speech and listening (§5.4). That page names what is in use
           and links here; the choice, and the addresses and keys behind it, are
           an Advanced question. */}
-      <div className="sec" style={{ marginTop: 44 }}>Speech engine</div>
+      <div className="sec" style={{ marginTop: 44 }} data-setting="speech-engine">Speech engine</div>
       <div className="desc" style={{ maxWidth: 460, lineHeight: 1.5, marginBottom: 4 }}>Where the voice comes from.</div>
       <EngineHalf half="tts" settings={settings} onChange={onChange} />
 
-      <div className="sec" style={{ marginTop: 30 }}>Dictation engine</div>
+      <div className="sec" style={{ marginTop: 30 }} data-setting="dictation-engine">Dictation engine</div>
       <div className="desc" style={{ maxWidth: 460, lineHeight: 1.5, marginBottom: 4 }}>
         What turns your speech into words.
       </div>
       <EngineHalf half="stt" settings={settings} onChange={onChange} />
 
-      <div className="sec" style={{ marginTop: 44 }}>Language packs</div>
+      <div className="sec" style={{ marginTop: 44 }} data-setting="language-packs">Language packs</div>
 
       {gone && (
         // §7 row 9: the app is open, and the one thing that is quietly worse says so.
@@ -381,7 +381,7 @@ export default function Advanced({ settings, onChange }: SectionProps) {
       )}
       {addRow("pack", "Add a language pack", addFromFile, pasting, setPasting, pasted, setPasted, take)}
 
-      <div className="sec" style={{ marginTop: 44 }}>Role-plays</div>
+      <div className="sec" style={{ marginTop: 44 }} data-setting="role-plays">Role-plays</div>
       {scenarios.map((r) =>
         removeRow(
           `${r.scenario.emoji} ${r.scenario.title}`,

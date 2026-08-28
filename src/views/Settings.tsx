@@ -7,9 +7,10 @@
 // there is no "Provider" section and no "Offline" one.
 import { useEffect, useState } from "react";
 import type { Settings } from "../lib/settings";
-import type { Applied } from "../lib/rules";
+import { AT, type Applied } from "../lib/rules";
 import { pending as pendingUpdate } from "../lib/update";
 import { live } from "../lib/keys";
+import { SETTINGS_INDEX } from "../lib/settingsIndex";
 import { linkish } from "./settings/parts";
 import Learning from "./settings/Learning";
 import Speech from "./settings/Speech";
@@ -79,6 +80,12 @@ export default function SettingsView({
   appVersion: string;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
+  // The search box (§5.2). A query matches a row's name *and* its description,
+  // and picking a result opens the owning section and highlights the row in
+  // place — not a separate results page, the target row scrolled to and marked.
+  const [query, setQuery] = useState("");
+  // The row currently being highlighted, by its index id.
+  const [highlight, setHighlight] = useState("");
 
   // The tab is the URL: reload lands back here, and #settings/speech is a link
   // anything in the app can hand out.
@@ -96,6 +103,31 @@ export default function SettingsView({
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  // A search result was picked: open its section, then scroll the row into view
+  // and mark it for a moment. The highlight is a transient class, not a route —
+  // the row is found by the same id the index keys on.
+  useEffect(() => {
+    if (!highlight) return;
+    const el = document.querySelector(`[data-setting="${highlight}"]`);
+    if (el) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      el.classList.add("hl");
+      const t = setTimeout(() => el.classList.remove("hl"), 1800);
+      return () => clearTimeout(t);
+    }
+  }, [highlight]);
+
+  const q = query.trim().toLowerCase();
+  const hits = q
+    ? SETTINGS_INDEX.filter((r) => (r.title + " " + r.desc).toLowerCase().includes(q))
+    : [];
+
+  const jump = (id: string, panel: keyof typeof AT) => {
+    setQuery("");
+    setTab(panel);
+    setHighlight(id);
+  };
 
   // Up/down or [ ] walks the sections — the same keys the palette uses, and Esc
   // still leaves for Today (App owns that). Typing in a field is never a shortcut.
@@ -130,6 +162,30 @@ export default function SettingsView({
           </button>
         ))}
       </nav>
+
+      {/* §5.2: a search field. It matches a setting's name and its description,
+          and a result opens the section and highlights the row in place. */}
+      <div className="field search" style={{ maxWidth: 480, margin: "0 4px 20px" }}>
+        <input
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setHighlight("");
+          }}
+          placeholder="Search settings — voice, microphone, delete, language…"
+          aria-label="Search settings"
+        />
+        {hits.length > 0 && (
+          <div className="search-results">
+            {hits.map((r) => (
+              <button key={r.id} className="pitem" onClick={() => jump(r.id, r.panel)}>
+                <span>{r.title}</span>
+                <span className="desc">{r.desc}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* The page title is the section you are in — §5.2. The product's tagline
           belongs on the way in, not on every settings page. Every section starts

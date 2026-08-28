@@ -10,6 +10,7 @@ import { useRead } from "./lib/useRead";
 import { useListening } from "./lib/useListening";
 import { live as keyLive, navLive } from "./lib/keys";
 import { PROVIDERS } from "./lib/models";
+import { SETTINGS_INDEX, hashOf } from "./lib/settingsIndex";
 import Onboarding from "./views/Onboarding";
 import Today from "./views/Today";
 import Talk from "./views/Talk";
@@ -42,6 +43,8 @@ const isSettingsHash = () => window.location.hash.startsWith("#settings");
 interface PaletteItem {
   section?: string;
   label: string;
+  /** A searchable description — the settings rows carry theirs from the index. */
+  desc?: string;
   kbd?: string;
   run: () => void;
 }
@@ -218,6 +221,18 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       { label: "Memory — everything you've met", kbd: "5", run: () => go("memory") },
       { label: "Coach — your weekly report", kbd: "6", run: () => go("coach") },
       { label: "Settings — providers, packs, offline", kbd: ",", run: () => go("settings") },
+      // Every settings row, from the one index — the same list the Settings
+      // search reads, so the palette and the search cannot describe a setting
+      // differently (#29). Picking one opens Settings on its section.
+      ...SETTINGS_INDEX.map((row) => ({
+        section: "Settings",
+        label: row.title,
+        desc: row.desc,
+        run: () => {
+          go("settings");
+          window.location.hash = hashOf(row);
+        },
+      })),
       {
         section: "Do",
         label: "Begin the next activity in today's session",
@@ -267,7 +282,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
     const q = query.trim();
     if (!q) return items;
     const hits: PaletteItem[] = items
-      .filter((i) => i.label.toLowerCase().includes(q.toLowerCase()))
+      .filter((i) => (i.label + " " + (i.desc ?? "")).toLowerCase().includes(q.toLowerCase()))
       .map((i) => ({ ...i, section: undefined }));
     // Anything the palette can't route becomes a question for the coach.
     hits.push({
@@ -639,7 +654,10 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
                     onMouseEnter={() => setPIdx(i)}
                     onClick={item.run}
                   >
-                    <span style={{ flex: 1 }}>{item.label}</span>
+                    <span style={{ flex: 1 }}>
+                      {item.label}
+                      {item.desc && <span className="desc">{item.desc}</span>}
+                    </span>
                     <span className="k">{item.kbd}</span>
                   </button>
                 </div>

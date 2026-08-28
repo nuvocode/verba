@@ -33,7 +33,7 @@ export default function AboutMe({ settings }: SectionProps) {
 
   return (
     <>
-      <div className="desc" style={{ maxWidth: 480, lineHeight: 1.5, margin: "0 4px 8px" }}>
+      <div className="desc" style={{ maxWidth: 480, lineHeight: 1.5, margin: "0 4px 8px" }} data-setting="about-me">
         What the coach has picked up about you while you talked, and reads back before every session — so it can
         ask after the trip you mentioned last week, and set your reading in your own city. Written at the end of a
         conversation, never anywhere else. Delete anything wrong, stale, or none of its business: a line struck out

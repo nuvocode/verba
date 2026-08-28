@@ -136,7 +136,7 @@ export default function Learning({
     <>
       <div className="sec">Language</div>
 
-      <div className="field" style={{ marginTop: 10 }}>
+      <div className="field" style={{ marginTop: 10 }} data-setting="native-language">
         <label>I speak</label>
         <select
           value={settings.profile.nativeLanguage}
@@ -174,7 +174,7 @@ export default function Learning({
         const mine = inMyLanguage(p.id);
         const line = progressLine(p.name);
         return (
-          <div key={p.id}>
+          <div key={p.id} data-setting="target-language">
             <button
               className="srow"
               style={{ borderBottom: "none" }}
@@ -296,6 +296,7 @@ export default function Learning({
         <button
           key={l}
           className="srow"
+          data-setting="level"
           onClick={() => onChange({ profile: { ...settings.profile, level: l } })}
         >
           <div className={`radio ${settings.profile.level === l ? "on" : ""}`} />
@@ -315,7 +316,7 @@ export default function Learning({
 
       <div className="sec" style={{ marginTop: 44 }}>Minutes a day</div>
       {TIMES.map(([n, name, desc]) => (
-        <button key={n} className="srow" onClick={() => onChange({ dailyMinutes: n })}>
+        <button key={n} className="srow" data-setting="daily-minutes" onClick={() => onChange({ dailyMinutes: n })}>
           <div className={`radio ${settings.dailyMinutes === n ? "on" : ""}`} />
           <div style={{ flex: 1 }}>
             <div className="name">
@@ -328,7 +329,7 @@ export default function Learning({
 
       <div className="sec" style={{ marginTop: 44 }}>Coaching</div>
       {TIMINGS.map(([id, name, desc, sketch]) => (
-        <button key={id} className="srow" onClick={() => onChange({ correctionTiming: id })}>
+        <button key={id} className="srow" data-setting="coaching" onClick={() => onChange({ correctionTiming: id })}>
           <div className={`radio ${settings.correctionTiming === id ? "on" : ""}`} />
           <div style={{ flex: 1 }}>
             <div className="name">{name}</div>
@@ -345,12 +346,14 @@ export default function Learning({
       ))}
 
       <div className="sec" style={{ marginTop: 44 }}>Interface</div>
-      <ToggleRow
-        title="Keyboard hints"
-        desc="The small shortcut lines under each screen."
-        on={settings.showHints}
-        onClick={() => onChange({ showHints: !settings.showHints })}
-      />
+      <div data-setting="keyboard-hints">
+        <ToggleRow
+          title="Keyboard hints"
+          desc="The small shortcut lines under each screen."
+          on={settings.showHints}
+          onClick={() => onChange({ showHints: !settings.showHints })}
+        />
+      </div>
     </>
   );
 }
