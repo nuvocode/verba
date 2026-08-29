@@ -46,6 +46,9 @@ export const SETTINGS_INDEX: SettingRow[] = [
 
   // ---- About me (§5.6) ----
   { id: "about-me", title: "About me", desc: "What the coach has written down about you, and what you can strike out.", panel: "about" },
+  { id: "keep-learning", title: "Keep learning about me", desc: "Pause the coach from writing new facts — what's here keeps working.", panel: "about" },
+  { id: "add-fact", title: "Add a fact", desc: "Write down something about yourself by hand, without waiting for a conversation.", panel: "about" },
+  { id: "forget-everything", title: "Forget everything", desc: "Wipe the whole record for this language — it counts what you would give up first.", panel: "about" },
 
   // ---- Advanced (§5.7) ----
   { id: "model", title: "Model", desc: "Which model answers, where it runs, and whether it answers at all.", panel: "advanced" },

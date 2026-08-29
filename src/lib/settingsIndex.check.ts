@@ -45,7 +45,7 @@ assert(realFaults.length === 0, "the index is broken:\n" + realFaults.join("\n")
 // §5.2 names four searches a learner should be able to type. Each must land on
 // at least one row — a search that finds nothing is a search that might as well
 // not exist.
-const KNOWN = ["voice", "microphone", "delete", "language"];
+const KNOWN = ["voice", "microphone", "delete", "language", "forget", "pause"];
 for (const q of KNOWN) {
   const hit = SETTINGS_INDEX.find((r) => (r.title + " " + r.desc).toLowerCase().includes(q));
   assert(hit, `search "${q}" finds nothing`);
