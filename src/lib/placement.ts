@@ -2,6 +2,11 @@ import { CEFR_LEVELS, extractJson, type Cefr } from "./level.ts";
 import type { Settings } from "./settings.ts";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 
+// Reached lazily so this module's pure half stays loadable by plain node
+// (placement.check.ts). A static import of the providers would stop the file
+// from opening at all.
+const provider = async () => (await import("./providers/index.ts")).getProvider;
+
 // The fixed placement stage of onboarding: a short written test the model writes,
 // the app grades locally. The learner can always overrule the result — it is a
 // starting point for Day 1, not a certificate.
@@ -65,4 +70,38 @@ export function scorePlacement(qs: PlacementQ[], answers: number[]): Cefr {
     placed = lvl;
   }
   return placed;
+}
+
+// ---- the test is written in the background, before the learner asks for it ----
+
+let pending: Promise<PlacementQ[] | null> | null = null;
+
+/** Start writing the placement test in the background. Called the moment the model
+ *  answers on screen 3 (§5, screen 3): by the time the learner asks for the test on
+ *  screen 4 it is already written, and asking twice costs nothing. */
+export function primePlacement(s: Settings, pack?: LanguagePack): void {
+  if (pending) return;
+  pending = (async () => {
+    try {
+      const raw = await (await provider())(s).chat(
+        [{ role: "user", content: placementPrompt(s, pack) }],
+        { json: true },
+      );
+      return parsePlacement(raw);
+    } catch {
+      // A primed test that throws must never surface as an unhandled rejection
+      // while the learner is on another screen — null is the safe answer.
+      return null;
+    }
+  })();
+}
+
+/** The test being written, or null when nothing was ever started. */
+export function placementPending(): Promise<PlacementQ[] | null> | null {
+  return pending;
+}
+
+/** Throw the pending test away — the model or the language changed under it. */
+export function clearPlacement(): void {
+  pending = null;
 }

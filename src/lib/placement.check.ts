@@ -3,7 +3,16 @@
 // Run: node --experimental-strip-types src/lib/placement.check.ts
 import assert from "node:assert";
 import { defaultSettings, type Settings } from "./settings.ts";
-import { PLACEMENT_LADDER, parsePlacement, placementPrompt, scorePlacement, type PlacementQ } from "./placement.ts";
+import {
+  clearPlacement,
+  PLACEMENT_LADDER,
+  placementPending,
+  placementPrompt,
+  primePlacement,
+  parsePlacement,
+  scorePlacement,
+  type PlacementQ,
+} from "./placement.ts";
 
 const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "Turkish" } };
 
@@ -46,5 +55,14 @@ assert.equal(scorePlacement(quiz, []), "A1", "an abandoned test places at the fl
 // half of a two-question level is still a pass; one wrong A1 out of two is survivable
 const oneA1Wrong = quiz.map((x, i) => (x.level === "A1" && i === 0 ? x.answer + 1 : right[i]));
 assert.equal(scorePlacement(quiz, oneA1Wrong), "C2", "half right at a level clears it");
+
+// ---- the background write: safe to prime, safe to clear, no network needed ----
+assert.equal(placementPending(), null, "nothing is pending before anything is primed");
+// A settings object pointing at an unreachable host must not throw — the promise
+// resolves to null instead, and clearing it leaves nothing behind.
+primePlacement({ ...s, ollamaHost: "http://127.0.0.1:1" });
+assert(placementPending() instanceof Promise, "priming starts a promise");
+clearPlacement();
+assert.equal(placementPending(), null, "clearing leaves nothing pending");
 
 console.log("placement.check ✓");

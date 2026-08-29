@@ -1,32 +1,34 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SKIP_DEFAULTS, type ProviderId, type Settings } from "../lib/settings";
 import { getPack, listPacks, packOrigin, originLabel, type PackOrigin } from "../lib/packs";
 import { endonym, langCode, langName, langNameIn, languages, UI_LANGUAGES } from "../lib/langs";
 import { sameLanguage } from "../lib/rules";
-import { listModels, type LocalProvider } from "../lib/models";
+import {
+  gb,
+  INSTALLS,
+  isRemoteModel,
+  listModels,
+  localChoices,
+  machineRam,
+  prettyModel,
+  pullCommand,
+  pullModel,
+  slowNote,
+  suggestedModel,
+  testConnection,
+  troubleFrom,
+  type Installed,
+  type LocalProvider,
+  type Probe,
+  type PullProgress,
+} from "../lib/models";
 import { getProvider } from "../lib/providers";
 import { CEFR_LEVELS, type CEFRLevel } from "../lib/model";
 import { LEVELS, TIMES } from "../lib/choices";
-import { parsePlacement, placementPrompt, scorePlacement, type PlacementQ } from "../lib/placement";
+import { parsePlacement, placementPrompt, primePlacement, scorePlacement, type PlacementQ } from "../lib/placement";
 import { attach, detach, pickFolder, pull } from "../lib/vault";
 import { live } from "../lib/keys";
 import Hints from "./Hints";
-
-/** Every CEFR level is selectable — the test only proposes one. */
-const AI: { id: LocalProvider; name: string; desc: string; host: string }[] = [
-  {
-    id: "ollama",
-    name: "Ollama",
-    desc: "Runs on this machine. Private, free, works on a plane.",
-    host: "http://localhost:11434",
-  },
-  {
-    id: "lmstudio",
-    name: "LM Studio",
-    desc: "Local OpenAI-compatible server. No key needed.",
-    host: "http://localhost:1234/v1",
-  },
-];
 
 const STEP_LABELS = ["Before we start", "Setup · 1 of 4", "Setup · 2 of 4", "Setup · 3 of 4", "Setup · 4 of 4", "Your plan"];
 
@@ -117,6 +119,23 @@ const PACK_ORIGIN_NOTE: Record<PackOrigin, string> = {
   imported: "A pack you pasted in yourself. Nobody has reviewed it.",
 };
 
+/** A copy-to-clipboard button that swaps its own label to "Copied" for two seconds. */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="btn sm ghost"
+      onClick={() => {
+        void navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+    >
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
 /** The offered interface language that matches the OS locale, or English. */
 function pickUi(locale: string): string {
   const base = (locale.split("-")[0] || "").toLowerCase();
@@ -191,9 +210,22 @@ export default function Onboarding({
   const [prov, setProv] = useState<LocalProvider>(settings.provider === "lmstudio" ? "lmstudio" : "ollama");
   const [hosts, setHosts] = useState({ ollama: settings.ollamaHost, lmstudio: settings.lmstudioHost });
   const [models, setModels] = useState({ ollama: settings.ollamaModel, lmstudio: settings.lmstudioModel });
-  // null while the probe is in flight; null after it fails means "server never answered".
-  const [found, setFound] = useState<string[] | null>(null);
-  const [probing, setProbing] = useState(true);
+  // What each local server is serving right now — null means it never answered.
+  const [served, setServed] = useState<Record<LocalProvider, Installed[] | null>>({ ollama: null, lmstudio: null });
+  const [asked, setAsked] = useState(false); // has the first probe answered at all
+  const [ram, setRam] = useState(0); // machineRam(), 0 = unknown
+  const [verify, setVerify] = useState<"idle" | "busy" | "ok">("idle");
+  const [probe, setProbe] = useState<Probe | null>(null);
+  const [pulling, setPulling] = useState<PullProgress | null>(null);
+  const [pullErr, setPullErr] = useState("");
+  const [openInstall, setOpenInstall] = useState(0); // which install card 3a has expanded
+  // The learner has clicked a provider or a model themselves — from then on a
+  // manual choice is never overridden by the auto-selection.
+  const touched = useRef(false);
+  // Aborted when the step unmounts, so a download left running is not left hanging.
+  const abortPull = useRef<AbortController | null>(null);
+  // The 700 ms pause before the step changes after a passing probe.
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Nothing is pre-selected on a fresh install — a default target language would be a silent
   // guess. On a replay, the learner's current pack is shown as chosen.
@@ -240,22 +272,62 @@ export default function Onboarding({
   /** The settings the placement test itself must run under — the ones just chosen, not the saved ones. */
   const draft = (): Settings => ({ ...settings, ...patch() } as Settings);
 
-  // Probe the chosen server whenever the provider or its host changes.
+  // The poll: once a second while on step 3, ask both local servers what they
+  // serve. §5 3a — no refresh button; the screen moves on by itself.
   useEffect(() => {
-    let live = true;
-    setProbing(true);
-    void listModels(prov, host).then((list) => {
-      if (!live) return;
-      setFound(list?.map((m) => m.id) ?? null);
-      setProbing(false);
-      // Adopt the first served model only if the current one isn't there — never overwrite a real choice.
-      if (list?.length && !list.some((m) => m.id === models[prov]))
-        setModels((m) => ({ ...m, [prov]: list[0].id }));
-    });
-    return () => {
-      live = false;
+    if (step !== 3) return;
+    let alive = true;
+    const tick = async () => {
+      const [o, l] = await Promise.all([listModels("ollama", hosts.ollama), listModels("lmstudio", hosts.lmstudio)]);
+      if (!alive) return;
+      setServed({ ollama: o, lmstudio: l });
+      setAsked(true);
     };
-  }, [prov, host]);
+    void tick();
+    const id = setInterval(() => void tick(), 1000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [step, hosts.ollama, hosts.lmstudio]);
+
+  // How much machine there is, once — 0 means unknown and no size claim is made.
+  useEffect(() => {
+    void machineRam().then(setRam);
+  }, []);
+
+  // What the poll found, read the same way by the screen and by the two effects
+  // below: which providers answered, which of those serve anything, and the state
+  // that follows. Derived on every render rather than stored — a second copy in
+  // state is a second thing that can be stale.
+  const up = (["ollama", "lmstudio"] as LocalProvider[]).filter((p) => served[p] !== null);
+  const stocked = up.filter((p) => (served[p] ?? []).length > 0);
+  const modelState = !asked ? "looking" : stocked.length ? "ready" : up.length ? "empty" : "none";
+
+  // Move to the provider that actually has models — unless the learner has
+  // already chosen one, in which case their choice stands.
+  useEffect(() => {
+    if (modelState !== "ready" || touched.current) return;
+    if (!stocked.includes(prov)) setProv(stocked[0]);
+  }, [modelState, stocked.join(","), prov]);
+
+  // Preselect: the recommended row, or the first local one, but only while the
+  // model on file is not something the server is actually serving.
+  useEffect(() => {
+    if (modelState !== "ready" || touched.current) return;
+    if ((served[prov] ?? []).some((m) => m.id === models[prov])) return;
+    const rows = localChoices(served[prov] ?? [], ram);
+    const rec = rows.find((r) => r.recommended) ?? rows.find((r) => !isRemoteModel(r.id));
+    if (rec) setModels((m) => ({ ...m, [prov]: rec.id }));
+  }, [modelState, prov, ram]);
+
+  // Abort a running download and any pending advance when the step goes away.
+  useEffect(() => {
+    return () => {
+      abortPull.current?.abort();
+      if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    };
+  }, []);
 
   const startTest = useCallback(async () => {
     setMode("busy");
@@ -336,88 +408,265 @@ export default function Onboarding({
 
   // ---- step bodies (each one registers its number keys and its Enter action) ----
 
-  const stepAi = () => {
-    AI.forEach((p, i) => (picks[i] = () => setProv(p.id)));
-    onEnter = model.trim() ? () => setStep(4) : undefined;
+  const stepModel = () => {
+    // 3a: nothing is running (or we are still looking). Offer the installs.
+    if (modelState === "none" || modelState === "looking") {
+      INSTALLS.forEach((_, i) => (picks[i] = () => setOpenInstall(i)));
+      onEnter = undefined; // there is nothing to continue to yet
+      return (
+        <>
+          <h1>Verba needs a model on this machine.</h1>
+          <div className="sub">
+            Verba talks to a language model running on your own computer. You set it up once, then forget about it. This
+            screen is watching, and moves on by itself the moment it finds one.
+          </div>
+          <div className="col">
+            {INSTALLS.map((install, i) => {
+              const open = openInstall === i;
+              return (
+                <div key={install.id} className={`pick ${open ? "on" : ""}`} style={{ textAlign: "left" }}>
+                  <span className="tag">{i + 1}</span>
+                  <div className="big" style={{ fontSize: 20 }}>
+                    {install.name}
+                  </div>
+                  <div className="small" style={{ lineHeight: 1.5 }}>
+                    {install.what}
+                  </div>
+                  {open && (
+                    <>
+                      <div className="small" style={{ lineHeight: 1.5, marginTop: 10 }}>
+                        <strong>Size:</strong> {install.size}
+                      </div>
+                      <div className="small" style={{ lineHeight: 1.5 }}>
+                        <strong>Time:</strong> {install.time}
+                      </div>
+                      <ol style={{ margin: "10px 0 0 20px", padding: 0 }}>
+                        {install.steps.map((s, j) => (
+                          <li key={j} className="small" style={{ lineHeight: 1.5 }}>
+                            {s}
+                          </li>
+                        ))}
+                      </ol>
+                      {install.id === "ollama" && (
+                        <div className="native" style={{ marginTop: 12 }}>
+                          <code>{pullCommand()}</code> <CopyButton text={pullCommand()} />
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <div style={{ marginTop: 12 }}>
+                    <a href={install.url} target="_blank" rel="noreferrer">
+                      Download {install.name} →
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="native" style={{ marginTop: 26 }}>
+            {modelState === "looking" ? "Still looking for Ollama or LM Studio…" : "Nothing is running yet. This updates on its own."}
+          </div>
+        </>
+      );
+    }
+
+    // 3b: a provider is up but serving nothing. One download and it is done.
+    if (modelState === "empty") {
+      const p = up[0];
+      const name = INSTALLS.find((x) => x.id === p)!.name;
+      const rec = prettyModel(suggestedModel());
+      const doPull = async () => {
+        setPullErr("");
+        const ctrl = new AbortController();
+        abortPull.current = ctrl;
+        try {
+          await pullModel(hosts.ollama, suggestedModel(), setPulling, ctrl.signal);
+        } catch (e: any) {
+          setPullErr(String(e?.message ?? e));
+        } finally {
+          abortPull.current = null;
+        }
+      };
+      onEnter = undefined;
+      return (
+        <>
+          <h1>{name} is running — there is no model yet.</h1>
+          <div className="sub">
+            Verba can see it at {hosts[p]}, and it is serving nothing. One download and you are finished.
+          </div>
+          <div className="native" style={{ marginTop: 20 }}>
+            <strong>{rec}</strong> — The model Verba starts everyone on. It fits comfortably on most machines.
+            {ram > 0 && ram < 8 * 1024 ** 3 && ` Your machine has ${gb(ram)} of memory, so expect it to be slow.`}
+          </div>
+          <div className="native" style={{ marginTop: 12 }}>
+            <code>{pullCommand()}</code> <CopyButton text={pullCommand()} />
+          </div>
+          {p === "ollama" && (
+            <div style={{ marginTop: 16 }}>
+              <button className="btn" onClick={() => void doPull()} disabled={!!pulling}>
+                {pulling
+                  ? `${pulling.status}${pulling.total > 0 ? ` — ${gb(pulling.done)} of ${gb(pulling.total)}` : ""}`
+                  : "Download it for me"}
+              </button>
+              {pulling && pulling.total > 0 && (
+                <div className="meter" style={{ margin: "12px 0" }}>
+                  <div style={{ width: `${(pulling.done / pulling.total) * 100}%` }} />
+                </div>
+              )}
+              {pullErr && <div className="err" style={{ marginTop: 10 }}>{pullErr}</div>}
+            </div>
+          )}
+          <div className="native" style={{ marginTop: 20 }}>
+            When it finishes, this screen moves on by itself.
+          </div>
+        </>
+      );
+    }
+
+    // 3c: at least one provider is serving models. Pick one, then verify.
+    const name = INSTALLS.find((x) => x.id === prov)!.name;
+    const rows = localChoices(served[prov] ?? [], ram);
+    const local = rows.filter((r) => !isRemoteModel(r.id));
+    const remote = rows.filter((r) => isRemoteModel(r.id));
+    const flat = [...local, ...remote]; // local-first, so the number keys and the visual order agree
+    flat.forEach((r, i) => (picks[i] = () => setModels((m) => ({ ...m, [prov]: r.id }))));
+
+    const selected = models[prov];
+    const selectedRemote = isRemoteModel(selected);
+
+    const check = async () => {
+      setVerify("busy");
+      const p = await testConnection(draft());
+      setProbe(p);
+      if (!p.ok) return setVerify("idle");
+      setVerify("ok");
+      primePlacement(draft(), getPack(packId)); // §5: the test starts writing itself here
+      // A slow model is a broken experience, so a passing-but-painful probe does
+      // not auto-advance — the learner reads the note and chooses to continue.
+      if (!slowNote(p.ms)) advanceTimer.current = setTimeout(() => setStep(4), 700);
+    };
+
+    const slow = probe?.ok ? slowNote(probe.ms) : "";
+    onEnter = modelState === "ready" && verify !== "busy" ? () => void check() : undefined;
+
     return (
       <>
-        <h1>Where should the AI run?</h1>
-        <div className="sub">
-          Verba needs a model to talk to. Both options run on your own machine — nothing leaves it. Start the server,
-          then pick the model you pulled.
-        </div>
-        <div className="row" style={{ marginBottom: 22 }}>
-          {AI.map((p, i) => (
+        <h1>
+          Connected to {name} · {rows.length} {rows.length === 1 ? "model" : "models"}
+        </h1>
+        <div className="col">
+          <div className="native">
+            <strong>On this machine</strong> — These run on your computer. Nothing you say leaves it.
+          </div>
+          {local.map((r) => (
             <button
-              key={p.id}
-              className={`pick ${prov === p.id ? "on" : ""}`}
-              style={{ flex: 1 }}
-              onClick={() => setProv(p.id)}
+              key={r.id}
+              className={`pick ${selected === r.id ? "on" : ""}`}
+              title={r.id}
+              onClick={() => setModels((m) => ({ ...m, [prov]: r.id }))}
             >
-              <span className="tag">{i + 1}</span>
-              <div className="big" style={{ fontSize: 20 }}>
-                {p.name}
+              <div className="big" style={{ fontSize: 19 }}>
+                {prettyModel(r.id)}
+                {r.recommended && (
+                  <span className="chip on" style={{ marginLeft: 8 }}>
+                    Recommended
+                  </span>
+                )}
               </div>
-              <div className="small" style={{ lineHeight: 1.5 }}>
-                {p.desc}
-              </div>
+              <div className="small" style={{ lineHeight: 1.5 }}>{r.hint}</div>
+              {r.warning && <div className="warn" style={{ marginTop: 6 }}>{r.warning}</div>}
             </button>
           ))}
-        </div>
-
-        <div className="field">
-          <label>Server</label>
-          <input value={host} onChange={(e) => setHosts((h) => ({ ...h, [prov]: e.target.value }))} />
-        </div>
-        <div className="field">
-          <label>Model</label>
-          <input
-            value={model}
-            placeholder="Type a model name, or pick one below"
-            onChange={(e) => setModels((m) => ({ ...m, [prov]: e.target.value }))}
-          />
-        </div>
-
-        <div className="native" style={{ marginTop: 12 }}>
-          {probing && "Looking for the server…"}
-          {!probing && found === null && (
-            <span className="warn">
-              <strong>No answer from {host}</strong> — start {AI.find((p) => p.id === prov)!.name}, or type the model
-              name anyway and fix the server later in Settings.
-            </span>
-          )}
-          {!probing && found?.length === 0 && (
-            <span className="warn">
-              <strong>Server is up, but serving no models.</strong> Pull one first.
-            </span>
-          )}
-          {!probing && !!found?.length && (
+          {remote.length > 0 && (
             <>
-              <strong>{found.length} models available</strong> — click one, or keep what you typed.
-              <div className="lang-list">
-                {found.map((m) => (
-                  <button
-                    key={m}
-                    className={`lang-opt ${m === model ? "on" : ""}`}
-                    onClick={() => setModels((s) => ({ ...s, [prov]: m }))}
-                  >
-                    {m}
-                  </button>
-                ))}
+              <div className="native" style={{ marginTop: 20 }}>
+                <strong>On someone else's</strong> — These run on {name}'s servers. What you say in a conversation is
+                sent there.
               </div>
+              {remote.map((r) => (
+                <button
+                  key={r.id}
+                  className={`pick ${selected === r.id ? "on" : ""}`}
+                  title={r.id}
+                  onClick={() => setModels((m) => ({ ...m, [prov]: r.id }))}
+                >
+                  <div className="big" style={{ fontSize: 19 }}>
+                    {prettyModel(r.id)}
+                    {r.recommended && (
+                      <span className="chip on" style={{ marginLeft: 8 }}>
+                        Recommended
+                      </span>
+                    )}
+                  </div>
+                  <div className="small" style={{ lineHeight: 1.5 }}>{r.hint}</div>
+                  {r.warning && <div className="warn" style={{ marginTop: 6 }}>{r.warning}</div>}
+                </button>
+              ))}
             </>
           )}
         </div>
 
-        <button className="btn" style={{ marginTop: 32 }} disabled={!model.trim()} onClick={() => setStep(4)}>
-          Continue →
-        </button>
-        {/* Not a silent disabled (#42): the field is empty, so there is no model to continue with. */}
-        {!model.trim() && (
-          <div className="model" style={{ color: "var(--ink3)", marginTop: 8 }}>
-            Type a model name to continue
+        {selectedRemote && (
+          <div className="warn" style={{ marginTop: 16 }}>
+            The model you have chosen runs on {name}'s servers, so the promise that nothing leaves this machine does
+            not hold for it.
           </div>
         )}
+
+        <details className="native" style={{ marginTop: 20 }}>
+          <summary>Advanced</summary>
+          <div className="row" style={{ marginTop: 12 }}>
+            {INSTALLS.map((p, i) => (
+              <button
+                key={p.id}
+                className={`pick ${prov === p.id ? "on" : ""}`}
+                style={{ flex: 1 }}
+                onClick={() => {
+                  touched.current = true;
+                  setProv(p.id);
+                }}
+              >
+                <span className="tag">{i + 1}</span>
+                <div className="big" style={{ fontSize: 18 }}>{p.name}</div>
+              </button>
+            ))}
+          </div>
+          <div className="field" style={{ marginTop: 12 }}>
+            <label>Server</label>
+            <input value={host} onChange={(e) => setHosts((h) => ({ ...h, [prov]: e.target.value }))} />
+          </div>
+        </details>
+
+        {verify === "busy" && <div className="native" style={{ marginTop: 20 }}>Asking the model to say hello…</div>}
+        {verify === "ok" && probe?.ok && (
+          <div className="native" style={{ marginTop: 20 }}>
+            Model responds — {(probe.ms / 1000).toFixed(1)}s
+            {slow && (
+              <>
+                <div className="warn" style={{ marginTop: 8 }}>{slow}</div>
+                <button className="btn" style={{ marginTop: 12 }} onClick={() => setStep(4)}>
+                  Continue anyway →
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {verify === "idle" && probe && !probe.ok && (() => {
+          const t = troubleFrom(probe, name, hosts[prov], models[prov]);
+          return (
+            <div className="native" style={{ marginTop: 20 }}>
+              <div className="err">{t!.why}</div>
+              <div className="small" style={{ marginTop: 6 }}>{t!.next}</div>
+              <button className="btn" style={{ marginTop: 12 }} onClick={() => void check()}>
+                Try again
+              </button>
+            </div>
+          );
+        })()}
+
+        <button className="btn" style={{ marginTop: 32 }} disabled={verify === "busy"} onClick={() => void check()}>
+          Continue →
+        </button>
       </>
     );
   };
@@ -705,18 +954,18 @@ export default function Onboarding({
 
   const stepPlan = () => {
     onEnter = () => onDone(patch());
-    const aiName = AI.find((p) => p.id === prov)!.name;
+    const aiName = INSTALLS.find((p) => p.id === prov)!.name;
     return (
       <>
         <h1 style={{ lineHeight: 1.15, marginBottom: 28 }}>Your plan is ready.</h1>
         <div style={{ borderTop: "1px solid var(--line)", paddingTop: 8 }}>
           <div className="plan-row">
             <div className="key">AI</div>
-            <div className={`val ${found === null && !probing ? "warn" : ""}`}>
+            <div className={`val ${served[prov] === null ? "warn" : ""}`}>
               <strong>
                 {aiName} · {model}
               </strong>{" "}
-              — {found === null && !probing ? "not answering yet; start it and Verba will connect." : "runs locally, nothing leaves your machine."}{" "}
+              — {served[prov] === null ? "not answering yet; start it and Verba will connect." : "runs locally."}{" "}
               {changeLink(3)}
             </div>
           </div>
@@ -765,7 +1014,7 @@ export default function Onboarding({
     );
   };
 
-  const body = [stepUi, stepLanguage, stepRhythm, stepAi, stepLevel, stepPlan][step]();
+  const body = [stepUi, stepLanguage, stepRhythm, stepModel, stepLevel, stepPlan][step]();
 
   return (
     <div className="onb">
