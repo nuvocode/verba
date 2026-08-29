@@ -23,7 +23,9 @@ Verba bir dil öğrenme **döngüsüdür** (bkz. `3-verba-activity-layer-spec.md
 
 ### 1.1 Tek harita
 
-Uygulamanın tek klavye haritası `src/lib/keys.ts`'tir. Her global `keydown` dinleyicisi `live(surface, key)` kapısının arkasında durur; tabloda olmayan bir tuş ateşleyemez. İpucu satırları `keysFor(surface)`'dan türetilir; tabloda olmayan bir tuş duyurulamaz.
+Uygulamanın tek klavye haritası `src/lib/keys.ts`'tir. Her global `keydown` dinleyicisi `live(surface, key)` kapısının arkasında durmalıdır; tabloda olmayan bir tuş ateşleyemez. İpucu satırları `keysFor(surface)`'dan türetilir; tabloda olmayan bir tuş duyurulamaz.
+
+**Bilinen sapma** (kayıt): `live` kapısının arkasında durmayan global dinleyiciler vardır — App, Onboarding ve Memory kendi `keydown`'larını doğrudan işler. Bu dinleyiciler `keys.ts`'ten değil, kendi yüzeylerinin yerel mantığından beslenir. Kısayol sözü verilmedikleri sürece §1.1'i ihlal etmezler; ilk kısayol eklendiğinde kapıya bağlanmaları gerekir. Bu fark, klavye tekliğinin bilinen bir borcudur ve ayrı bir iş konusudur.
 
 **Değişmez kurallar:**
 
@@ -96,13 +98,14 @@ Uygulamanın tek klavye haritası `src/lib/keys.ts`'tir. Her global `keydown` di
 
 ## 6. Sessiz disabled'lar
 
-Bir kontrol `disabled` olduğunda, neden kapalı olduğu kullanıcıya **sessizce** bırakılmaz. Üç kabul edilebilir desen vardır:
+Bir kontrol `disabled` olduğunda, neden kapalı olduğu kullanıcıya **sessizce** bırakılmaz. Dört kabul edilebilir desen vardır:
 
 1. **Etiket durumu söyler.** Uçuş hâlindeki disabled'lar (ör. "Send" → "Sending…", "Check for updates" → "Checking…") etiketi değişiyorsa sessiz sayılmaz.
 2. **Gerekçe satırı.** Kontrolün yanında neden kapalı olduğunu söyleyen kısa bir metin ("Paste something first", "Answer the question first", "Type a model name to continue").
 3. **Cümle.** Düğme yerine durumu anlatan bir cümle ("ships with Verba").
+4. **Sınıra dayandı.** Kontrol bir değer aralığının ucunda kapandığında (ör. Prompter'ın hız düğmeleri `WPM_MIN`/`WPM_MAX`'ta), kapanan değer yanında görünürse gerekçe satırı gerekmez — durum sayıdan anlaşılır. Değer görünmüyorsa bu desen geçerli değildir.
 
-**Değişmez kural:** Bir disabled kontrolün neden kapalı olduğu, ya etiketinden ya yanındaki bir gerekçeden anlaşılır. İkisi de yoksa o kontrol sessizdir ve düzeltilmesi gerekir.
+**Değişmez kural:** Bir disabled kontrolün neden kapalı olduğu, ya etiketinden ya yanındaki bir gerekçeden yanındaki değerden anlaşılır. İkisi de yoksa o kontrol sessizdir ve düzeltilmesi gerekir.
 
 ---
 
@@ -111,27 +114,27 @@ Bir kontrol `disabled` olduğunda, neden kapalı olduğu kullanıcıya **sessizc
 Aşağıdakiler her zaman doğru olmalıdır. Bunlar test edilebilir iddialardır.
 
 **Klavye**
-1. Ekranda ilan edilen kısayol sayısı === çalışan kısayol sayısı.
-2. Aynı yüzeyde bir tuş iki farklı eylem taşımaz.
-3. Topbar'daki her rakam, bulunulan ekranda yazdığı yere gider; gitmediği ekranda yazmaz.
-4. `Esc` her yüzeyde "bir seviye yukarı" anlamındadır.
-5. Fareyle yapılan her eylemin bir klavye karşılığı vardır.
+- [ ] Ekranda ilan edilen kısayol sayısı === çalışan kısayol sayısı.
+- [ ] Aynı yüzeyde bir tuş iki farklı eylem taşımaz.
+- [ ] Topbar'daki her rakam, bulunulan ekranda yazdığı yere gider; gitmediği ekranda yazmaz.
+- [ ] `Esc` her yüzeyde "bir seviye yukarı" anlamındadır.
+- [ ] Fareyle yapılan her eylemin bir klavye karşılığı vardır.
 
 **Ekran okuyucu**
-6. Her etkileşimli öğenin erişilebilir bir adı vardır.
-7. Form alanları placeholder ile değil, etiketle adlandırılır.
-8. Asenkron durum değişiklikleri ekran okuyucuya duyurulur.
+- [ ] Her etkileşimli öğenin erişilebilir bir adı vardır.
+- [ ] Form alanları placeholder ile değil, etiketle adlandırılır.
+- [ ] Asenkron durum değişiklikleri ekran okuyucuya duyurulur.
 
 **Kontrast ve renk**
-9. Normal metin kontrastı en az 4.5:1'dir.
-10. Hiçbir bilgi yalnızca renkle iletilmez.
+- [ ] Normal metin kontrastı en az 4.5:1'dir.
+- [ ] Hiçbir bilgi yalnızca renkle iletilmez.
 
 **Hareket**
-11. Animasyonlar `prefers-reduced-motion`'a saygı duyar.
-12. Otomatik oynatma kullanıcı kontrolünde başlar.
+- [ ] Animasyonlar `prefers-reduced-motion`'a saygı duyar.
+- [ ] Otomatik oynatma kullanıcı kontrolünde başlar.
 
 **Disabled'lar**
-13. Hiçbir disabled kontrol sessiz değildir; nedeni etiketten veya gerekçeden anlaşılır.
+- [ ] Hiçbir disabled kontrol sessiz değildir; nedeni etiketten, gerekçeden veya yanındaki değerden anlaşılır.
 
 ---
 

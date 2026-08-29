@@ -387,7 +387,13 @@ export default function Talk({
               >
                 ◉
               </button>
-              {/* The in-flight disabled is not silent (#42): the label says what is happening. */}
+              {/* Both disabled reasons are covered, not silent (#42): the label
+                  says the in-flight one, this line says the empty-box one. */}
+              {!talk.busy && !talk.input.trim() && (
+                <span className="model" style={{ color: "var(--ink3)", fontSize: 11, marginRight: 8 }}>
+                  type a line first
+                </span>
+              )}
               <button className="send" onClick={() => void talk.send(talk.input)} disabled={talk.busy || !talk.input.trim()}>
                 {talk.busy ? "Sending…" : "Send"}
               </button>
