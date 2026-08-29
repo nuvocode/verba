@@ -7,7 +7,7 @@ import { buildDailyPlan, themeForDate } from "./learn.ts";
 import { BUNDLED_PACKS } from "./packs/bundled.ts";
 import { COMMUNITY_PACKS } from "./packs/community.ts";
 import { validatePack } from "./packs/schema.ts";
-import { langName } from "./langs.ts";
+import { endonym, langCode, langName, langNameIn, UI_LANGUAGES } from "./langs.ts";
 import type { CEFRLevel } from "./model.ts";
 
 const s = (patch: Partial<Settings> = {}): Settings => ({ ...defaultSettings, ...patch });
@@ -19,8 +19,8 @@ assert.equal(langName("tr-TR"), "Turkish", "tr-TR resolves to Turkish");
 assert.equal(langName("ja"), "Japanese", "a bare code resolves too");
 assert.notEqual(defaultSettings.profile.nativeLanguage, "", "there is always a native language");
 
-// ---- skip from step 2: the A2 fallback, 20 min, no interests ----
-assert.deepEqual(SKIP_DEFAULTS, { level: "A2", dailyMinutes: 20, interests: [] }, "documented skip defaults");
+// ---- skip: the middle session length, B1, and the system language, no interests ----
+assert.deepEqual(SKIP_DEFAULTS, { level: "B1", dailyMinutes: 45, interests: [] }, "documented skip defaults");
 
 // ---- every bucket builds a valid plan (level no longer flows into the plan —
 //      it is read through levelOf(profile) at prompt time) ----
@@ -44,5 +44,13 @@ const order = [...BUNDLED_PACKS, ...COMMUNITY_PACKS].map((p) => p.id);
 for (const id of ["en", "es", "fr", "de", "it", "pt", "ja"]) assert(order.includes(id), `${id} pack ships`);
 for (const p of [...BUNDLED_PACKS, ...COMMUNITY_PACKS])
   assert(validatePack(p).ok, `${p.id} pack is valid: ${validatePack(p).errors.join(", ")}`);
+
+// ---- screen 0: the interface language list, and the seed it gives ----
+for (const code of UI_LANGUAGES as readonly string[]) assert(endonym(code).length > 0, `${code} has an endonym`);
+assert.notEqual(endonym("tr"), endonym("en"), "Intl is really answering the endonyms");
+assert.equal(langCode("Turkish"), "tr", "Turkish resolves back to tr");
+assert.equal(langCode("Klingon"), "", "an unknown name has no code");
+assert.equal(langName(langCode("Spanish")), "Spanish", "the code→name round trip holds");
+assert(langNameIn("es", "tr").length > 0, "Spanish names itself in Turkish");
 
 console.log("onboarding.check ✓");

@@ -479,7 +479,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       <div className="shell">
         <Onboarding
           settings={settings}
-          only={{ step: 2, back: "settings" }}
+          only={{ step: 4, back: "settings" }}
           onDone={(patch) => {
             update(patch);
             setLevelTest(false);

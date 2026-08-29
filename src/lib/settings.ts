@@ -91,6 +91,11 @@ export interface Settings {
   sttTier: Tier;
   onboarded: boolean; // false → the welcome flow runs instead of the app
   dailyMinutes: number; // how long a session should be, from onboarding
+  /** The language the interface is asked for on screen 0, as a BCP-47 code.
+   *  "" until the learner has answered — the interface itself is not translated
+   *  yet, so this is the record of the choice and the seed for the native
+   *  language, nothing more. */
+  uiLanguage: string;
   theme: "light" | "dark";
   correctionTiming: CorrectionTiming;
   offline: boolean; // hard-forces local providers; cloud options are disabled
@@ -111,9 +116,9 @@ export interface Settings {
   memoryPaused: boolean;
 }
 
-/** What "Skip setup" from step 2 onward leaves behind: the A2 fallback (the old
- *  "unset level" now reads as A2 directly), a short session, no interests. */
-export const SKIP_DEFAULTS = { level: "A2" as CEFRLevel, dailyMinutes: 20, interests: [] as string[] };
+/** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
+ *  system language, which `defaultSettings.profile.nativeLanguage` already is. */
+export const SKIP_DEFAULTS = { level: "B1" as CEFRLevel, dailyMinutes: 45, interests: [] as string[] };
 
 /**
  * Replaying onboarding starts the setup over: language, level, rhythm and interests are
@@ -180,6 +185,7 @@ export const defaultSettings: Settings = {
   sttTier: "auto",
   onboarded: false,
   dailyMinutes: 45,
+  uiLanguage: "",
   theme: "light",
   correctionTiming: "adaptive",
   offline: true,

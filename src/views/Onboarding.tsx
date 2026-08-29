@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SKIP_DEFAULTS, type ProviderId, type Settings } from "../lib/settings";
-import { getPack, listPacks, packOrigin, originLabel } from "../lib/packs";
-import { languages } from "../lib/langs";
+import { getPack, listPacks, packOrigin, originLabel, type PackOrigin } from "../lib/packs";
+import { endonym, langCode, langName, langNameIn, languages, UI_LANGUAGES } from "../lib/langs";
+import { sameLanguage } from "../lib/rules";
 import { listModels, type LocalProvider } from "../lib/models";
 import { getProvider } from "../lib/providers";
 import { CEFR_LEVELS, type CEFRLevel } from "../lib/model";
@@ -27,9 +28,7 @@ const AI: { id: LocalProvider; name: string; desc: string; host: string }[] = [
   },
 ];
 
-const INTERESTS = ["Travel", "Work", "Family & friends", "Books & film"];
-
-const STEP_LABELS = ["Setup · 1 of 4", "Setup · 2 of 4", "Setup · 3 of 4", "Setup · 4 of 4", "Your plan"];
+const STEP_LABELS = ["Before we start", "Setup · 1 of 4", "Setup · 2 of 4", "Setup · 3 of 4", "Setup · 4 of 4", "Your plan"];
 
 type LevelMode = "intro" | "busy" | "test" | "manual" | "result";
 
@@ -39,6 +38,7 @@ function NativePicker({
   onChange,
   exclude,
   prefix,
+  defaultOpen,
 }: {
   value: string;
   onChange: (name: string) => void;
@@ -46,12 +46,14 @@ function NativePicker({
    *  be the same, and a list that offers the pair is a route to a refusal. */
   exclude?: string;
   prefix?: string;
+  /** Open straight away. Screen 1's clash button remounts this with it set. */
+  defaultOpen?: boolean;
 }) {
   const all = useMemo(
     () => languages().filter((l) => l.name.toLowerCase() !== (exclude ?? "").trim().toLowerCase()),
     [exclude],
   );
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [q, setQ] = useState("");
 
   if (!open)
@@ -104,6 +106,21 @@ function NativePicker({
       </div>
     </div>
   );
+}
+
+/** Why a pack's origin tag reads the way it does — the title on the origin chip. */
+const PACK_ORIGIN_NOTE: Record<PackOrigin, string> = {
+  official:
+    "Official packs are written and maintained by the Verba team, with grammar and pronunciation notes. Community packs are written by volunteers and may cover less.",
+  community:
+    "Official packs are written and maintained by the Verba team, with grammar and pronunciation notes. Community packs are written by volunteers and may cover less.",
+  imported: "A pack you pasted in yourself. Nobody has reviewed it.",
+};
+
+/** The offered interface language that matches the OS locale, or English. */
+function pickUi(locale: string): string {
+  const base = (locale.split("-")[0] || "").toLowerCase();
+  return (UI_LANGUAGES as readonly string[]).includes(base) ? base : "en";
 }
 
 export default function Onboarding({
@@ -184,7 +201,12 @@ export default function Onboarding({
   const [nativeLang, setNativeLang] = useState(settings.profile.nativeLanguage);
   const [cefr, setCefr] = useState<CEFRLevel>(settings.profile.level);
   const [minutes, setMinutes] = useState(settings.dailyMinutes);
-  const [interests, setInterests] = useState<string[]>(settings.profile.interests);
+  const [ui, setUi] = useState(
+    settings.uiLanguage || pickUi(typeof navigator === "undefined" ? "" : navigator.language),
+  );
+  // Bumped each time screen 1's clash says "change my native language" — it
+  // remounts NativePicker with defaultOpen so the picker is already up.
+  const [forceNative, setForceNative] = useState(0);
 
   // ---- level test (step 2) ----
   const [mode, setMode] = useState<LevelMode>("intro");
@@ -205,12 +227,12 @@ export default function Onboarding({
     lmstudioHost: hosts.lmstudio,
     lmstudioModel: models.lmstudio,
     packId,
+    uiLanguage: ui,
     profile: {
       ...settings.profile,
       targetLanguage: lang,
       nativeLanguage: nativeLang,
       level: cefr,
-      interests,
     },
     dailyMinutes: minutes,
   });
@@ -266,8 +288,7 @@ export default function Onboarding({
   const skip = () => {
     setCefr(SKIP_DEFAULTS.level);
     setMinutes(SKIP_DEFAULTS.dailyMinutes);
-    setInterests(SKIP_DEFAULTS.interests);
-    setStep(4);
+    setStep(5);
   };
 
   // ---- keyboard: the whole flow is drivable without a mouse ----
@@ -276,7 +297,7 @@ export default function Onboarding({
   let onEnter: (() => void) | undefined;
 
   const back = () => {
-    if (step === 2 && mode !== "intro") return setMode("intro"); // out of the test, not out of the step
+    if (step === 4 && mode !== "intro") return setMode("intro"); // out of the test, not out of the step
     if (step > 0) return setStep(step - 1);
     onExit?.();
   };
@@ -317,7 +338,7 @@ export default function Onboarding({
 
   const stepAi = () => {
     AI.forEach((p, i) => (picks[i] = () => setProv(p.id)));
-    onEnter = model.trim() ? () => setStep(1) : undefined;
+    onEnter = model.trim() ? () => setStep(4) : undefined;
     return (
       <>
         <h1>Where should the AI run?</h1>
@@ -388,7 +409,7 @@ export default function Onboarding({
           )}
         </div>
 
-        <button className="btn" style={{ marginTop: 32 }} disabled={!model.trim()} onClick={() => setStep(1)}>
+        <button className="btn" style={{ marginTop: 32 }} disabled={!model.trim()} onClick={() => setStep(4)}>
           Continue →
         </button>
         {/* Not a silent disabled (#42): the field is empty, so there is no model to continue with. */}
@@ -397,9 +418,22 @@ export default function Onboarding({
             Type a model name to continue
           </div>
         )}
+      </>
+    );
+  };
 
+  const stepUi = () => {
+    UI_LANGUAGES.forEach((code, i) => {
+      picks[i] = () => {
+        setUi(code);
+        setNativeLang(langName(code));
+      };
+    });
+    onEnter = () => setStep(1); // always available; one option is always selected
+    return (
+      <>
         {!settings.onboarded && (
-          <div className="native" style={{ marginTop: 26 }}>
+          <div className="native">
             <strong>Used Verba before?</strong> If you keep your data in a synced folder — iCloud Drive, Google Drive, a
             drive you carry — point Verba at it and your words, history and setup come back. Nothing here to answer
             again.
@@ -415,46 +449,95 @@ export default function Onboarding({
             )}
           </div>
         )}
+        <h1>Which language should Verba speak to you in?</h1>
+        <div className="sub">
+          You can change this later in Settings. It is also the language your corrections will be written in.
+        </div>
+        <div className="grid3">
+          {UI_LANGUAGES.map((code, i) => (
+            <button key={code} className={`pick ${ui === code ? "on" : ""}`} onClick={() => { setUi(code); setNativeLang(langName(code)); }}>
+              <span className="tag">{i + 1}</span>
+              <div className="big">{endonym(code)}</div>
+              <div className="small">{langName(code)}</div>
+            </button>
+          ))}
+        </div>
+        <button className="btn" style={{ marginTop: 32 }} onClick={() => setStep(1)}>
+          Continue →
+        </button>
       </>
     );
   };
 
   const stepLanguage = () => {
-    // The language you already speak is not one you are learning (§3). Filtered
-    // once: the number keys and the grid have to offer the same list, or the
-    // shortcut lands on a card that isn't there.
-    const offered = packs.filter((p) => p.name.trim().toLowerCase() !== nativeLang.trim().toLowerCase());
-    offered.forEach((p, i) => {
+    packs.forEach((p, i) => {
       if (i < 9)
         picks[i] = () => {
           setPackId(p.id);
-          setStep(2);
         };
     });
-    onEnter = packId ? () => setStep(2) : undefined;
+    // §6: the same two languages can never stand together — and the clash is a
+    // question, not a dead end (the patch below would be refused and the learner
+    // would never learn why). There is no "yes, both English" branch.
+    const clash = pack ? sameLanguage(pack.name, nativeLang) : false;
+    onEnter = packId && !clash ? () => setStep(2) : undefined;
     return (
       <>
         <h1>Which language are you learning?</h1>
         <div className="grid3">
-          {offered.map((p) => {
+          {packs.map((p) => {
             const origin = packOrigin(p.id);
             return (
               <button
                 key={p.id}
                 className={`pick ${packId === p.id ? "on" : ""}`}
-                onClick={() => {
-                  setPackId(p.id);
-                  setStep(2);
-                }}
+                onClick={() => setPackId(p.id)}
               >
-                {origin && <span className="tag">{originLabel(origin)}</span>}
+                {origin && (
+                  <span className="tag" title={PACK_ORIGIN_NOTE[origin]}>
+                    {originLabel(origin)}
+                  </span>
+                )}
                 <div className="big">{p.nativeName}</div>
-                <div className="small">{p.name}</div>
+                <div className="small">{langNameIn(p.id, langCode(nativeLang) || "en")}</div>
               </button>
             );
           })}
         </div>
-        <NativePicker value={nativeLang} onChange={setNativeLang} exclude={lang} prefix="Native language: " />
+        {clash ? (
+          <div className="native" style={{ marginTop: 26 }}>
+            You already speak {nativeLang} — so which is it?
+            <div style={{ marginTop: 10 }}>
+              <button className="btn sm" onClick={() => setForceNative((n) => n + 1)}>
+                I'm learning {nativeLang}. Change my native language
+              </button>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <button className="btn sm ghost" onClick={() => setPackId("")}>
+                Pick a different language to learn
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button className="btn" style={{ marginTop: 32 }} disabled={!packId} onClick={() => setStep(2)}>
+              Continue →
+            </button>
+            {!packId && (
+              <div className="native" style={{ marginTop: 26 }}>
+                Pick a language to continue
+              </div>
+            )}
+          </>
+        )}
+        <NativePicker
+          key={forceNative}
+          value={nativeLang}
+          onChange={setNativeLang}
+          exclude={lang}
+          defaultOpen={forceNative > 0}
+          prefix="Explanations and corrections will be written in "
+        />
       </>
     );
   };
@@ -508,7 +591,7 @@ export default function Onboarding({
       LEVELS.forEach(([l], i) => {
         picks[i] = () => {
           setCefr(l);
-          advance(3, l);
+          advance(5, l);
         };
       });
       return (
@@ -525,7 +608,7 @@ export default function Onboarding({
                 className={`pick ${cefr === l ? "on" : ""}`}
                 onClick={() => {
                   setCefr(l);
-                  advance(3, l);
+                  advance(5, l);
                 }}
               >
                 <span className="tag">{i + 1}</span>
@@ -569,7 +652,7 @@ export default function Onboarding({
     }
 
     // result — proposed, never imposed
-    onEnter = () => advance(3);
+    onEnter = () => advance(5);
     return (
       <>
         <h1>You're around {cefr}.</h1>
@@ -584,7 +667,7 @@ export default function Onboarding({
             </button>
           ))}
         </div>
-        <button className="btn" onClick={() => advance(3)}>
+        <button className="btn" onClick={() => advance(5)}>
           {only ? "Save this level →" : "Continue →"}
         </button>
       </>
@@ -593,7 +676,7 @@ export default function Onboarding({
 
   const stepRhythm = () => {
     TIMES.forEach(([n], i) => (picks[i] = () => setMinutes(n)));
-    onEnter = () => setStep(4);
+    onEnter = () => setStep(3);
     return (
       <>
         <h1>How much time, most days?</h1>
@@ -613,22 +696,8 @@ export default function Onboarding({
             </button>
           ))}
         </div>
-        <div className="eyebrow" style={{ marginBottom: 14 }}>
-          Mostly for <span className="opt">optional</span>
-        </div>
-        <div className="row" style={{ flexWrap: "wrap", gap: 10, marginBottom: 40 }}>
-          {INTERESTS.map((g) => (
-            <button
-              key={g}
-              className={`chip ${interests.includes(g) ? "on" : ""}`}
-              onClick={() => setInterests((gs) => (gs.includes(g) ? gs.filter((x) => x !== g) : [...gs, g]))}
-            >
-              {g}
-            </button>
-          ))}
-        </div>
-        <button className="btn" onClick={() => setStep(4)}>
-          Build my plan →
+        <button className="btn" style={{ marginTop: 32 }} onClick={() => setStep(3)}>
+          Continue →
         </button>
       </>
     );
@@ -648,7 +717,7 @@ export default function Onboarding({
                 {aiName} · {model}
               </strong>{" "}
               — {found === null && !probing ? "not answering yet; start it and Verba will connect." : "runs locally, nothing leaves your machine."}{" "}
-              {changeLink(0)}
+              {changeLink(3)}
             </div>
           </div>
           <div className="plan-row">
@@ -674,10 +743,10 @@ export default function Onboarding({
             <div className="val">
               {cefr ? (
                 <>
-                  Starting at <strong>{cefr}</strong>. {changeLink(2)}
+                  Starting at <strong>{cefr}</strong>. {changeLink(4)}
                 </>
               ) : (
-                <>Unset — your first conversation places you. {changeLink(2)}</>
+                <>Unset — your first conversation places you. {changeLink(4)}</>
               )}
             </div>
           </div>
@@ -685,7 +754,7 @@ export default function Onboarding({
             <div className="key">RHYTHM</div>
             <div className="val">
               About <strong>{minutes} minutes</strong> a day, conversation-first. Every session is planned fresh each
-              morning from what you struggled with the day before. {changeLink(3)}
+              morning from what you struggled with the day before. {changeLink(2)}
             </div>
           </div>
         </div>
@@ -696,7 +765,7 @@ export default function Onboarding({
     );
   };
 
-  const body = [stepAi, stepLanguage, stepLevel, stepRhythm, stepPlan][step]();
+  const body = [stepUi, stepLanguage, stepRhythm, stepAi, stepLevel, stepPlan][step]();
 
   return (
     <div className="onb">
@@ -708,8 +777,12 @@ export default function Onboarding({
         {/* Skip needs a language and a model first — without them there is nothing to
             generate. On a single-step run there is no setup to skip: the learner
             came here to answer one question and already has everything else. */}
-        {!only && (step === 2 || step === 3) && (
-          <button className="skip" onClick={skip} title="Level: placed in your first conversation · 20 min a day">
+        {!only && (step === 1 || step === 2 || step === 4) && (
+          <button
+            className="skip"
+            onClick={skip}
+            title="Level: B1 · 45 minutes a day · your system language"
+          >
             Skip setup →
           </button>
         )}
