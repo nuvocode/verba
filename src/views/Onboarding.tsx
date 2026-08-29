@@ -666,11 +666,7 @@ export default function Onboarding({
             >
               <div className="big" style={{ fontSize: 19 }}>
                 {prettyModel(r.id)}
-                {r.recommended && (
-                  <span className="chip on" style={{ marginLeft: 8 }}>
-                    Recommended
-                  </span>
-                )}
+                {r.recommended && <span className="rec">Recommended</span>}
               </div>
               <div className="small" style={{ lineHeight: 1.5 }}>{r.hint}</div>
               {r.warning && <div className="warn" style={{ marginTop: 6 }}>{r.warning}</div>}
@@ -694,11 +690,7 @@ export default function Onboarding({
                 >
                   <div className="big" style={{ fontSize: 19 }}>
                     {prettyModel(r.id)}
-                    {r.recommended && (
-                      <span className="chip on" style={{ marginLeft: 8 }}>
-                        Recommended
-                      </span>
-                    )}
+                    {r.recommended && <span className="rec">Recommended</span>}
                   </div>
                   <div className="small" style={{ lineHeight: 1.5 }}>{r.hint}</div>
                   {r.warning && <div className="warn" style={{ marginTop: 6 }}>{r.warning}</div>}
