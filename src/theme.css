@@ -505,3 +505,11 @@ input { font: inherit; }
 .confirm h2 { font-family: var(--serif); font-size: 26px; font-weight: 500; margin: 0 0 12px; }
 .confirm p { font-size: 13.5px; line-height: 1.65; color: var(--ink2); margin: 0 0 24px; }
 .confirm .btn .kbd { background: transparent; border-color: currentColor; opacity: .5; }
+
+/* Today's folded setup summary — the "your plan is ready" screen, demoted to a
+   line you can open when you want it (§5, screen 5). */
+.setup { margin: 0 0 30px; max-width: 640px; font-size: 13px; color: var(--ink2); }
+.setup summary { cursor: pointer; font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink3); }
+.setup summary:hover { color: var(--ink); }
+.setup .row2 { display: flex; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line2); }
+.setup .row2 .k { font-family: var(--mono); font-size: 11px; color: var(--ink3); width: 96px; flex: none; padding-top: 2px; }

@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SKIP_DEFAULTS, type ProviderId, type Settings } from "../lib/settings";
 import { getPack, listPacks, packOrigin, originLabel, type PackOrigin } from "../lib/packs";
 import { endonym, langCode, langName, langNameIn, languages, UI_LANGUAGES } from "../lib/langs";
-import { sameLanguage } from "../lib/rules";
+import { AT, sameLanguage } from "../lib/rules";
+import { buildDailyPlan, daySummary } from "../lib/learn";
+import { todayKey } from "../lib/useDay";
+import { getSpeech, mic, micTrouble } from "../lib/speech";
+import { appDataDir } from "@tauri-apps/api/path";
 import {
   gb,
   INSTALLS,
@@ -30,7 +34,7 @@ import { attach, detach, pickFolder, pull } from "../lib/vault";
 import { live } from "../lib/keys";
 import Hints from "./Hints";
 
-const STEP_LABELS = ["Before we start", "Setup · 1 of 4", "Setup · 2 of 4", "Setup · 3 of 4", "Setup · 4 of 4", "Your plan"];
+const STEP_LABELS = ["Before we start", "Setup · 1 of 4", "Setup · 2 of 4", "Setup · 3 of 4", "Setup · 4 of 4", "Ready"];
 
 type LevelMode = "pick" | "busy" | "test" | "result";
 
@@ -262,7 +266,6 @@ export default function Onboarding({
   }, [mode]);
 
   const host = hosts[prov];
-  const model = models[prov];
   const pack = packs.find((p) => p.id === packId);
   const lang = pack?.name ?? settings.profile.targetLanguage;
 
@@ -285,6 +288,23 @@ export default function Onboarding({
 
   /** The settings the placement test itself must run under — the ones just chosen, not the saved ones. */
   const draft = (): Settings => ({ ...settings, ...patch() } as Settings);
+
+  // The preview sentence on the last screen is measured from the real plan, so
+  // the promise and the plan cannot drift (§6).
+  const preview = useMemo(
+    () => buildDailyPlan(draft(), { date: todayKey(), dayIndex: 1, dueVocab: 0 }),
+    [packId, cefr, minutes, nativeLang],
+  );
+  // The speech adapter for the last screen's two buttons — built once, from the
+  // settings as they stand.
+  const speech = useMemo(() => getSpeech(draft(), () => {}), [settings]);
+  // The last screen's microphone test result — null until it has been asked.
+  const [micMsg, setMicMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // Where the app's data lives, for the last screen's one-line promise.
+  const [dataDir, setDataDir] = useState("");
+  useEffect(() => {
+    void appDataDir().then(setDataDir).catch(() => setDataDir(""));
+  }, []);
 
   // The poll: once a second while on step 3, ask both local servers what they
   // serve. §5 3a — no refresh button; the screen moves on by itself.
@@ -421,12 +441,6 @@ export default function Onboarding({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
-
-  const changeLink = (to: number) => (
-    <button className="link" onClick={() => setStep(to)}>
-      change
-    </button>
-  );
 
   // ---- step bodies (each one registers its number keys and its Enter action) ----
 
@@ -990,60 +1004,53 @@ export default function Onboarding({
     );
   };
 
-  const stepPlan = () => {
+  const stepReady = () => {
     onEnter = () => onDone(patch());
-    const aiName = INSTALLS.find((p) => p.id === prov)!.name;
+    const line = pack?.id === "es" ? "Hola. Empezamos cuando quieras." : "This is the voice Verba will use.";
+    const testMic = async () => {
+      try {
+        const stream = await mic(settings.micDeviceId);
+        stream.getTracks().forEach((t) => t.stop());
+        setMicMsg({ ok: true, text: "Microphone works." });
+      } catch (e) {
+        setMicMsg({ ok: false, text: micTrouble(e) });
+      }
+    };
     return (
       <>
-        <h1 style={{ lineHeight: 1.15, marginBottom: 28 }}>Your plan is ready.</h1>
-        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 8 }}>
-          <div className="plan-row">
-            <div className="key">AI</div>
-            <div className={`val ${served[prov] === null ? "warn" : ""}`}>
-              <strong>
-                {aiName} · {model}
-              </strong>{" "}
-              — {served[prov] === null ? "not answering yet; start it and Verba will connect." : "runs locally."}{" "}
-              {changeLink(3)}
-            </div>
+        <h1>Day 1 starts now.</h1>
+        {/* daySummary ends in a full stop of its own — a second one reads as a typo. */}
+        <div className="sub">{daySummary(preview)}</div>
+        {speech.canSpeak && (
+          <button className="btn" style={{ marginTop: 20 }} onClick={() => void speech.speak(line, { locale: pack?.speech.locale })}>
+            Hear the coach
+          </button>
+        )}
+        {speech.canListen && (
+          <button className="btn" style={{ marginTop: 20 }} onClick={() => void testMic()}>
+            Test your microphone
+          </button>
+        )}
+        {micMsg && (
+          <div className={micMsg.ok ? "native" : "err"} style={{ marginTop: 12 }}>
+            {micMsg.text}
           </div>
-          <div className="plan-row">
-            <div className="key">LANGUAGE</div>
-            <div className="val">
-              <strong>{lang}</strong> — the {lang} pack ships with the app. Grammar and pronunciation notes are fed
-              straight into every conversation. {changeLink(1)}
-            </div>
-          </div>
-          <div className="plan-row">
-            <div className="key">NATIVE LANGUAGE</div>
-            <div className="val">
-              <NativePicker
-                value={nativeLang}
-                onChange={setNativeLang}
-                exclude={lang}
-                prefix="Corrections and explanations are written in "
-              />
-            </div>
-          </div>
-          <div className="plan-row">
-            <div className="key">LEVEL</div>
-            <div className="val">
-              {cefr ? (
-                <>
-                  Starting at <strong>{cefr}</strong>. {changeLink(4)}
-                </>
-              ) : (
-                <>Unset — your first conversation places you. {changeLink(4)}</>
-              )}
-            </div>
-          </div>
-          <div className="plan-row">
-            <div className="key">RHYTHM</div>
-            <div className="val">
-              About <strong>{minutes} minutes</strong> a day, conversation-first. Every session is planned fresh each
-              morning from what you struggled with the day before. {changeLink(2)}
-            </div>
-          </div>
+        )}
+        <div className="native" style={{ marginTop: 26 }}>
+          {dataDir ? `Everything you do stays in ${dataDir} on this machine.` : "Everything you do stays on this machine."}{" "}
+          {/* Not a bare href: App switches space on hashchange, so a plain link out of
+              here abandons setup with nothing written and every answer lost. Setup is
+              finished first, then the panel opens — `onDone`'s destination exists for
+              exactly this. */}
+          <button
+            className="link"
+            onClick={() => {
+              window.location.hash = AT.privacy;
+              onDone(patch(), "settings");
+            }}
+          >
+            Keep a copy in a folder you choose
+          </button>
         </div>
         <button className="btn" style={{ marginTop: 32 }} onClick={() => onDone(patch())}>
           Start Day 1 →
@@ -1052,7 +1059,7 @@ export default function Onboarding({
     );
   };
 
-  const body = [stepUi, stepLanguage, stepRhythm, stepModel, stepLevel, stepPlan][step]();
+  const body = [stepUi, stepLanguage, stepRhythm, stepModel, stepLevel, stepReady][step]();
 
   return (
     <div className="onb">

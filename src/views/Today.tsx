@@ -10,7 +10,9 @@ import { isLocalProvider, type Settings } from "../lib/settings";
 import type { ActivityKind } from "../lib/model";
 import type { Day } from "../lib/useDay";
 import { activityStatus, daySummary, progressLine, shortfallNote, traceLine } from "../lib/learn";
-import { listModels, modelTrouble, PROVIDERS, type Installed } from "../lib/models";
+import { listModels, modelTrouble, PROVIDERS, prettyModel, type Installed } from "../lib/models";
+import { levelOf } from "../lib/model";
+import { timeName } from "../lib/choices";
 import { AT } from "../lib/rules";
 import Hints from "./Hints";
 
@@ -104,6 +106,8 @@ export default function Today({
   const shortfall = shortfallNote(plan, settings.dailyMinutes);
   const trace = traceLine(day.trace);
   const finished = plan.activities.every((a) => day.isDone(a.kind));
+  const provider = PROVIDERS.find((p) => p.id === settings.provider);
+  const modelId = String(settings[provider?.model ?? "ollamaModel"] ?? "");
 
   return (
     <div className="today fade">
@@ -113,6 +117,57 @@ export default function Today({
       <h1 className="display">{greeting()}.</h1>
 
       <ModelWarning settings={settings} />
+
+      {/* The "your plan is ready" screen, demoted to a line you can open when you
+          want it (§5, screen 5). Closed by default — the whole of the folding. */}
+      <details className="setup">
+        <summary>Your setup</summary>
+        <div className="row2">
+          <div className="k">Model</div>
+          <div>
+            {provider?.name} · {prettyModel(modelId)}{" "}
+            <a href={AT.advanced} style={{ color: "var(--accent-ink)" }}>
+              change
+            </a>
+          </div>
+        </div>
+        <div className="row2">
+          <div className="k">Learning</div>
+          <div>
+            {settings.profile.targetLanguage}{" "}
+            <a href={AT.learning} style={{ color: "var(--accent-ink)" }}>
+              change
+            </a>
+          </div>
+        </div>
+        <div className="row2">
+          <div className="k">Explained in</div>
+          <div>
+            {settings.profile.nativeLanguage}{" "}
+            <a href={AT.learning} style={{ color: "var(--accent-ink)" }}>
+              change
+            </a>
+          </div>
+        </div>
+        <div className="row2">
+          <div className="k">Level</div>
+          <div>
+            {levelOf(settings.profile)}{" "}
+            <a href={AT.learning} style={{ color: "var(--accent-ink)" }}>
+              change
+            </a>
+          </div>
+        </div>
+        <div className="row2">
+          <div className="k">Each day</div>
+          <div>
+            {settings.dailyMinutes} minutes · {timeName(settings.dailyMinutes)}{" "}
+            <a href={AT.learning} style={{ color: "var(--accent-ink)" }}>
+              change
+            </a>
+          </div>
+        </div>
+      </details>
 
       {/* invariant 26: nothing measured is claimed before measurement begins. */}
       {day.levelEstimate.sampleSize === 0 && (

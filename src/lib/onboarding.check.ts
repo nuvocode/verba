@@ -3,7 +3,8 @@
 // Run: node --experimental-strip-types src/lib/onboarding.check.ts
 import assert from "node:assert";
 import { defaultSettings, SKIP_DEFAULTS, type Settings } from "./settings.ts";
-import { buildDailyPlan, themeForDate } from "./learn.ts";
+import { buildDailyPlan, daySummary, themeForDate } from "./learn.ts";
+import { TIMES } from "./choices.ts";
 import { BUNDLED_PACKS } from "./packs/bundled.ts";
 import { COMMUNITY_PACKS } from "./packs/community.ts";
 import { validatePack } from "./packs/schema.ts";
@@ -52,5 +53,16 @@ assert.equal(langCode("Turkish"), "tr", "Turkish resolves back to tr");
 assert.equal(langCode("Klingon"), "", "an unknown name has no code");
 assert.equal(langName(langCode("Spanish")), "Spanish", "the code→name round trip holds");
 assert(langNameIn("es", "tr").length > 0, "Spanish names itself in Turkish");
+
+// ---- screen 5: the preview sentence and the plan are the same number (§6) ----
+// For each of the three session lengths, the plan's daySummary must contain the
+// plan's own estimatedMinutes — the promised duration is a measured one.
+for (const [minutes] of TIMES) {
+  const plan = buildDailyPlan(s({ dailyMinutes: minutes }), { date: "2026-07-12", dayIndex: 1, dueVocab: 0 });
+  assert(
+    daySummary(plan).includes(String(plan.estimatedMinutes)),
+    `${minutes} min: the preview sentence carries the plan's own ${plan.estimatedMinutes} minutes`,
+  );
+}
 
 console.log("onboarding.check ✓");
