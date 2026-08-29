@@ -213,6 +213,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
   );
 
   const paletteItems = useCallback((): PaletteItem[] => {
+    const q = query.trim();
     const items: PaletteItem[] = [
       { section: "Go to", label: "Today — your session plan", kbd: "1", run: () => go("today") },
       { label: "Talk — conversation with the coach", kbd: "2", run: () => go("talk") },
@@ -223,16 +224,22 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       { label: "Settings — providers, packs, offline", kbd: ",", run: () => go("settings") },
       // Every settings row, from the one index — the same list the Settings
       // search reads, so the palette and the search cannot describe a setting
-      // differently (#29). Picking one opens Settings on its section.
-      ...SETTINGS_INDEX.map((row) => ({
-        section: "Settings",
-        label: row.title,
-        desc: row.desc,
-        run: () => {
-          go("settings");
-          window.location.hash = hashOf(row);
-        },
-      })),
+      // differently (#29). They join only once a query is typed: the palette is
+      // a launcher, and a bare ⌘K should not dump the whole settings catalog
+      // (§4.4). Picking one opens Settings on its section.
+      ...(q
+        ? SETTINGS_INDEX.map((row) => ({
+            section: "Settings",
+            label: row.title,
+            desc: row.desc,
+            run: () => {
+              go("settings");
+              // The id rides the hash so Settings highlights the row, not just
+              // the section — the same arrival the search box gives (#29).
+              window.location.hash = `${hashOf(row)}@${row.id}`;
+            },
+          }))
+        : []),
       {
         section: "Do",
         label: "Begin the next activity in today's session",
@@ -279,7 +286,6 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       },
     ];
 
-    const q = query.trim();
     if (!q) return items;
     const hits: PaletteItem[] = items
       .filter((i) => (i.label + " " + (i.desc ?? "")).toLowerCase().includes(q.toLowerCase()))

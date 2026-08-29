@@ -45,7 +45,7 @@ export const SETTINGS_INDEX: SettingRow[] = [
   { id: "delete-everything", title: "Delete everything", desc: "Empty this machine and start over — it counts what you would give up first.", panel: "privacy" },
 
   // ---- About me (§5.6) ----
-  { id: "about-me", title: "About me", desc: "What the coach has written down about you, and what you have told it yourself.", panel: "about" },
+  { id: "about-me", title: "About me", desc: "What the coach has written down about you, and what you can strike out.", panel: "about" },
 
   // ---- Advanced (§5.7) ----
   { id: "model", title: "Model", desc: "Which model answers, where it runs, and whether it answers at all.", panel: "advanced" },

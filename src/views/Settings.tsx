@@ -55,6 +55,14 @@ export function tabFromHash(): Tab | undefined {
   return t ? resolve(t) : undefined;
 }
 
+/** The row a `#settings/<tab>@<id>` hash names, if it names one. The id rides
+ *  the hash so the palette and the search land on the same row — a link is the
+ *  one thing both can hand to Settings. Ids carry hyphens (delete-everything),
+ *  so the id class is `[\w-]`, not `\w`. */
+function rowFromHash(): string | undefined {
+  return /^#settings\/\w+@([\w-]+)/.exec(window.location.hash)?.[1];
+}
+
 /** Deep link first, then wherever they were last. A learner who left Settings on
  *  Speech comes back to Speech. */
 function initialTab(): Tab {
@@ -95,10 +103,14 @@ export default function SettingsView({
   }, [tab]);
 
   // …and a link followed while Settings is already open still moves the panel.
+  // A `@<id>` suffix names a row to highlight — the palette and the search both
+  // hand it over this way, so both land on the same row.
   useEffect(() => {
     const onHash = () => {
       const t = tabFromHash();
       if (t) setTab(t);
+      const id = rowFromHash();
+      if (id) setHighlight(id);
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -122,12 +134,42 @@ export default function SettingsView({
   const hits = q
     ? SETTINGS_INDEX.filter((r) => (r.title + " " + r.desc).toLowerCase().includes(q))
     : [];
+  // The result the arrow keys point at — the search box is a list like the
+  // palette's, so it is driven the same way (§9: keyboard and mouse both work).
+  const [active, setActive] = useState(0);
 
   const jump = (id: string, panel: keyof typeof AT) => {
     setQuery("");
     setTab(panel);
     setHighlight(id);
+    // The id rides the hash, so the palette's link to the same row lands here
+    // too — one way in, one arrival.
+    window.history.replaceState(null, "", `#settings/${panel}@${id}`);
   };
+
+  // The search box's own keys: ↑↓ move the highlight, Enter opens the row it
+  // points at. The section-walk keys below stand down while a query is up, so
+  // the two lists never fight over the same arrows.
+  useEffect(() => {
+    if (!q) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!/^(INPUT|TEXTAREA|SELECT)$/.test(el?.tagName ?? "") || el?.isContentEditable) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActive((i) => Math.min(i + 1, hits.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActive((i) => Math.max(i - 1, 0));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const r = hits[Math.min(active, hits.length - 1)];
+        if (r) jump(r.id, r.panel);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [q, hits, active]);
 
   // Up/down or [ ] walks the sections — the same keys the palette uses, and Esc
   // still leaves for Today (App owns that). Typing in a field is never a shortcut.
@@ -171,18 +213,34 @@ export default function SettingsView({
           onChange={(e) => {
             setQuery(e.target.value);
             setHighlight("");
+            setActive(0);
           }}
           placeholder="Search settings — voice, microphone, delete, language…"
           aria-label="Search settings"
         />
         {hits.length > 0 && (
           <div className="search-results">
-            {hits.map((r) => (
-              <button key={r.id} className="pitem" onClick={() => jump(r.id, r.panel)}>
+            {hits.map((r, i) => (
+              <button
+                key={r.id}
+                className={`pitem ${i === active ? "on" : ""}`}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => jump(r.id, r.panel)}
+              >
                 <span>{r.title}</span>
                 <span className="desc">{r.desc}</span>
               </button>
             ))}
+          </div>
+        )}
+        {/* §6: a query that matches nothing has a designed answer, not a silent
+            box. The section walk is the way out — every setting is one key away. */}
+        {q && hits.length === 0 && (
+          <div className="search-results">
+            <div className="pitem" style={{ cursor: "default" }}>
+              <span>No setting matches “{query.trim()}”.</span>
+              <span className="desc">Try a word from a setting's name or description.</span>
+            </div>
           </div>
         )}
       </div>
