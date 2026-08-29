@@ -104,4 +104,8 @@ assert(extract.includes("5. Lives in Ankara"), "the known facts are numbered wit
 assert(extract.includes("Spanish"), "…and it knows which language it is recording for");
 assert(memoryPrompt(s, []).includes("Nothing is recorded yet"), "an empty record says so, rather than showing a blank list");
 
+// --- the pause switch: a setting, not a second table, and off by default ---
+assert("memoryPaused" in defaultSettings, "the pause lives on Settings, read by the About me page and the wrap-up alike");
+assert(defaultSettings.memoryPaused === false, "the coach writes new facts until the learner says otherwise");
+
 console.log("memory.check.ts — all assertions passed");

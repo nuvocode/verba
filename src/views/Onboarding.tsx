@@ -8,6 +8,8 @@ import { CEFR_LEVELS, type CEFRLevel } from "../lib/model";
 import { LEVELS, TIMES } from "../lib/choices";
 import { parsePlacement, placementPrompt, scorePlacement, type PlacementQ } from "../lib/placement";
 import { attach, detach, pickFolder, pull } from "../lib/vault";
+import { live } from "../lib/keys";
+import Hints from "./Hints";
 
 /** Every CEFR level is selectable — the test only proposes one. */
 const AI: { id: LocalProvider; name: string; desc: string; host: string }[] = [
@@ -286,6 +288,7 @@ export default function Onboarding({
         if (e.key === "Escape") (el as HTMLInputElement).blur();
         return;
       }
+      if (!live("onboarding", e.key)) return; // the table is the gate
       if (e.key === "Escape") {
         e.preventDefault();
         return back();
@@ -388,6 +391,12 @@ export default function Onboarding({
         <button className="btn" style={{ marginTop: 32 }} disabled={!model.trim()} onClick={() => setStep(1)}>
           Continue →
         </button>
+        {/* Not a silent disabled (#42): the field is empty, so there is no model to continue with. */}
+        {!model.trim() && (
+          <div className="model" style={{ color: "var(--ink3)", marginTop: 8 }}>
+            Type a model name to continue
+          </div>
+        )}
 
         {!settings.onboarded && (
           <div className="native" style={{ marginTop: 26 }}>
@@ -716,19 +725,19 @@ export default function Onboarding({
         {body}
 
         <div className="hints" style={{ marginTop: 40 }}>
-          {picks.length > 0 && (
-            <span>
-              <span className="kbd">1–{Math.min(picks.length, 9)}</span> choose
-            </span>
-          )}
-          {onEnter && (
-            <span>
-              <span className="kbd">↵</span> continue
-            </span>
-          )}
-          <span>
-            <span className="kbd">esc</span> {step === 0 && !onExit ? "leave a field" : "back"}
-          </span>
+          <Hints
+            settings={settings}
+            surface="onboarding"
+            has={[
+              // `picks` gates the row; `picks:N` feeds the label's real count.
+              picks.length > 0 ? "picks" : "",
+              picks.length > 0 ? `picks:${picks.length}` : "",
+              onEnter ? "enter" : "",
+              // Esc on the first step of a fresh install has nothing to go back
+              // to — it leaves the field instead. The label follows the state.
+              step === 0 && !onExit ? "field" : "back",
+            ]}
+          />
         </div>
       </div>
     </div>

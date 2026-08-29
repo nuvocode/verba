@@ -1,4 +1,4 @@
-import Database from "@tauri-apps/plugin-sql";
+import Database, { type QueryResult } from "@tauri-apps/plugin-sql";
 import { newCard, schedule, type Grade } from "./srs";
 import { worthLearning } from "./vocab";
 import { planMemory, type Memory, type MemoryWrite } from "./prompts";
@@ -24,7 +24,7 @@ export function getDb(): Promise<Database> {
  * Schema migrations in `init` deliberately do *not* come through here: they run
  * before `getDb` has resolved, and a table shape is not the learner's data.
  */
-async function write(sql: string, params: unknown[] = []) {
+async function write(sql: string, params: unknown[] = []): Promise<QueryResult> {
   const db = await getDb();
   const r = await db.execute(sql, params);
   markDirty();
@@ -735,6 +735,35 @@ export async function saveMemories(lang: string, writes: MemoryWrite[], sessionI
 /** The learner striking a line out. Nothing else in the app deletes a memory. */
 export async function deleteMemory(id: number): Promise<void> {
   await write("DELETE FROM memories WHERE id = $1", [id]);
+}
+
+/** The learner rewriting a line. The fact is what steers the prompts, so the
+ *  edit is a replace of the fact text, not a new row — the date stays the
+ *  original one, because that is when the coach learned it. */
+export async function updateMemory(id: number, fact: string): Promise<void> {
+  await write("UPDATE memories SET fact = $1 WHERE id = $2", [fact, id]);
+}
+
+/** The learner adding a line by hand. No source session — it was not learned in
+ *  a conversation, it was told outright. Same shape as a learned fact, so it
+ *  steers sessions identically.
+ *
+ *  Returns the rows affected: 1 when the line is new, 0 when it is already on
+ *  file (UNIQUE(lang, fact) is the last word on "told twice"). The caller shows
+ *  the difference — a silent no-op reads as a lost keystroke. */
+export async function addMemory(lang: string, fact: string): Promise<number> {
+  const r = await write("INSERT OR IGNORE INTO memories (lang, fact, source_session_id, created_at) VALUES ($1, $2, NULL, $3)", [
+    lang,
+    fact,
+    Date.now(),
+  ]);
+  return r.rowsAffected;
+}
+
+/** The learner wiping the whole record for a language. Counts nothing here —
+ *  the caller shows what is lost before this runs. */
+export async function clearMemories(lang: string): Promise<void> {
+  await write("DELETE FROM memories WHERE lang = $1", [lang]);
 }
 
 // ---- Phase 3: weekly coaching stats ----

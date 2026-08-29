@@ -498,7 +498,7 @@ function MicTest({ settings, onChange }: SectionProps) {
   return (
     <div style={{ padding: "4px 4px 0" }}>
       {devices.length > 1 && (
-        <div className="field">
+        <div className="field" data-setting="microphone">
           <label>Microphone</label>
           <select value={settings.micDeviceId} onChange={(e) => onChange({ micDeviceId: e.target.value })}>
             <option value="">System default</option>
@@ -644,12 +644,14 @@ export default function Speech({ settings, onChange }: SectionProps) {
       <div className="sec">Voice</div>
       <div className="desc" style={{ maxWidth: 460, lineHeight: 1.5, marginBottom: 4 }}>How Verba speaks.</div>
 
-      <ToggleRow
-        title="Read replies aloud"
-        desc="The coach speaks each turn as it arrives."
-        on={settings.speak}
-        onClick={() => onChange({ speak: !settings.speak })}
-      />
+      <div data-setting="speak">
+        <ToggleRow
+          title="Read replies aloud"
+          desc="The coach speaks each turn as it arrives."
+          on={settings.speak}
+          onClick={() => onChange({ speak: !settings.speak })}
+        />
+      </div>
 
       {statusLine(usingTts(ttsNow))}
       {engineLine()}
@@ -657,7 +659,7 @@ export default function Speech({ settings, onChange }: SectionProps) {
       {!loaded ? (
         <div className="desc" style={{ padding: "12px 4px" }}>Checking what is installed…</div>
       ) : (
-        <div style={{ paddingTop: 8 }}>
+        <div style={{ paddingTop: 8 }} data-setting="voice">
           <div className="desc" style={{ maxWidth: 460, lineHeight: 1.5, paddingBottom: 6 }}>
             Every voice can be heard before you keep it. Pressing <em>hear it</em> on one that is not here yet
             downloads it first — the size is on the button.
@@ -698,7 +700,9 @@ export default function Speech({ settings, onChange }: SectionProps) {
       <div className="sec" style={{ marginTop: 44 }}>Dictation</div>
       <div className="desc" style={{ maxWidth: 460, lineHeight: 1.5, marginBottom: 4 }}>How Verba hears you.</div>
 
-      <MicTest settings={settings} onChange={onChange} />
+      <div data-setting="dictation">
+        <MicTest settings={settings} onChange={onChange} />
+      </div>
 
       {statusLine(usingStt(sttNow))}
       {engineLine()}

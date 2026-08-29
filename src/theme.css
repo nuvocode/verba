@@ -38,26 +38,31 @@ input { font: inherit; }
 .body { flex: 1; overflow: auto; position: relative; }
 .fade { animation: vfade .4s ease both; }
 
-.topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--bg); }
+/* The bar grew a Settings entry (#28), so on a narrow window it can want more
+   room than there is. Nothing in it is optional — the sections, the visible way
+   into Settings, and the plain-language work location are all spec — so it
+   scrolls rather than dropping a control off the right edge. */
+.topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--bg); overflow-x: auto; scrollbar-width: none; }
+.topbar::-webkit-scrollbar { display: none; }
 .logo { font-family: var(--serif); font-weight: 600; font-size: 19px; letter-spacing: -.01em; cursor: pointer; }
 .logo b { color: var(--accent); font-weight: 600; }
-.nav { display: flex; align-items: center; gap: 4px; }
-.nav-item { display: flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 7px; font-size: 13px; color: var(--ink3); }
+.nav { display: flex; align-items: center; gap: 2px; flex: none; }
+.nav-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 7px; font-size: 13px; color: var(--ink3); }
 .nav-item:hover { color: var(--ink); }
 .nav-item.on { color: var(--ink); background: var(--bg2); font-weight: 500; }
 .nav-item .k { font-family: var(--mono); font-size: 9.5px; color: var(--ink3); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; opacity: .6; }
 .nav-item.on .k { opacity: 1; }
+/* Memory's due count — a counter, not a shortcut, so it is styled apart from `.k`
+   and always says what it counts (the title). */
+.nav-item .count { font-family: var(--mono); font-size: 9.5px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; }
 .spacer { flex: 1; }
-.dots { display: flex; align-items: center; gap: 8px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); border: 1px solid var(--ink3); }
-.dot.done { background: var(--good); border-color: var(--good); }
-.status { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 11px; color: var(--ink3); padding: 5px 10px; border-radius: 6px; }
+.status { display: flex; align-items: center; gap: 7px; white-space: nowrap; font-family: var(--mono); font-size: 11px; color: var(--ink3); padding: 5px 10px; border-radius: 6px; }
 .status:hover { background: var(--bg2); color: var(--ink2); }
 .status .led { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
 .status .led.cloud { background: var(--warn); }
 .icon-btn { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 7px; display: flex; align-items: center; justify-content: center; color: var(--ink2); font-size: 13px; }
 .icon-btn:hover { background: var(--surface); }
-.anything { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; color: var(--ink3); font-size: 12px; background: var(--surface); }
+.anything { display: flex; flex: none; white-space: nowrap; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; color: var(--ink3); font-size: 12px; background: var(--surface); }
 .anything:hover { border-color: var(--ink3); }
 .anything .k { font-family: var(--mono); font-size: 10px; }
 
@@ -421,6 +426,19 @@ input { font: inherit; }
 .field input:focus, .set textarea:focus { border-color: var(--ink3); }
 .set textarea { width: 100%; min-height: 90px; font-family: var(--mono); font-size: 12px; resize: vertical; }
 
+/* ---------- settings search (§5.2) ---------- */
+/* The search box sits in a .field; the results drop below the input, over the
+   page, and picking one opens the section and highlights the row in place. */
+.field.search { position: relative; display: block; }
+.field.search input { width: 100%; }
+.search-results { position: absolute; top: calc(100% - 4px); left: 4px; right: 4px; z-index: 20; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 6px; max-height: 40vh; overflow: auto; }
+.search-results .pitem { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.search-results .pitem .desc { font-size: 12px; color: var(--ink3); }
+.search-results .pitem:hover, .search-results .pitem.on { background: var(--bg2); }
+/* A row the search landed on, marked for a moment after it is scrolled to. */
+.hl { animation: hlflash 1.8s ease; border-radius: 8px; }
+@keyframes hlflash { 0%, 100% { background: transparent; } 20%, 60% { background: var(--accent-soft); } }
+
 /* ---------- command palette ---------- */
 .scrim { position: fixed; inset: 0; background: rgba(20,15,5,.35); display: flex; justify-content: center; align-items: flex-start; padding-top: 14vh; z-index: 50; }
 .palette { width: 600px; max-width: 92vw; background: var(--surface); border: 1px solid var(--line); border-radius: 13px; box-shadow: var(--shadow); overflow: hidden; animation: vfade .18s ease both; }
@@ -430,6 +448,7 @@ input { font: inherit; }
 .pitem { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13.5px; width: 100%; text-align: left; color: var(--ink); }
 .pitem.on { background: var(--bg2); }
 .pitem .k { font-family: var(--mono); font-size: 10px; color: var(--ink3); }
+.pitem .desc { display: block; font-size: 11.5px; color: var(--ink3); margin-top: 2px; }
 .palette .foot { display: flex; gap: 16px; padding: 10px 16px; border-top: 1px solid var(--line2); font-size: 10.5px; color: var(--ink3); font-family: var(--mono); }
 
 /* ---------- escape: the way out is always visible ---------- */

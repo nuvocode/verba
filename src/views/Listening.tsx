@@ -5,6 +5,7 @@ import type { Day } from "../lib/useDay";
 import { listenSignals } from "../lib/signals";
 import type { Listening as ListeningState } from "../lib/useListening";
 import QuestionCard from "./QuestionCard";
+import Hints from "./Hints";
 
 /**
  * The listening screen: a chaptered story you hear, not read, with a comprehension
@@ -139,9 +140,17 @@ export default function Listening({
           </div>
 
           {!stepChecked ? (
-            <button className="btn" disabled={!currentAnswered} onClick={() => void listening.check()}>
-              Check answer
-            </button>
+            <>
+              <button className="btn" disabled={!currentAnswered} onClick={() => void listening.check()}>
+                Check answer
+              </button>
+              {/* Not a silent disabled (#42): the question is unanswered, so there is nothing to check yet. */}
+              {!currentAnswered && (
+                <span className="model" style={{ color: "var(--ink3)", marginLeft: 8 }}>
+                  Answer the question first
+                </span>
+              )}
+            </>
           ) : !allChecked ? (
             <button className="btn" onClick={listening.nextQuestion}>
               Next question →
@@ -169,6 +178,10 @@ export default function Listening({
           )}
         </>
       )}
+
+      {/* Listening is a media surface: Space plays and stops the chapter. The label
+          says what it does — "stop", not "pause", because the surface stops (§6). */}
+      <Hints settings={settings} surface="listening" has={[listening.playing ? "playing" : "idle"]} />
     </div>
   );
 }

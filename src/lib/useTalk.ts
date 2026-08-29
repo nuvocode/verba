@@ -339,16 +339,20 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
 
       // What the learner told us about themselves. Best-effort like the rest of the
       // wrap-up: a coach that fails to take a note is a coach that took no note, not
-      // a conversation that failed.
-      try {
-        const known = await recentMemories(settings.profile.targetLanguage);
-        const memRaw = await provider.chat(
-          [...history.current, { role: "user", content: memoryPrompt(settings, known) }],
-          { json: true },
-        );
-        await saveMemories(settings.profile.targetLanguage, parseMemory(memRaw), sessionId.current);
-      } catch {
-        /* memory is best-effort */
+      // a conversation that failed. Paused in Settings → About me: the learner asked
+      // the coach to stop writing new facts, and a wrap-up is exactly where they
+      // would otherwise be written.
+      if (!settings.memoryPaused) {
+        try {
+          const known = await recentMemories(settings.profile.targetLanguage);
+          const memRaw = await provider.chat(
+            [...history.current, { role: "user", content: memoryPrompt(settings, known) }],
+            { json: true },
+          );
+          await saveMemories(settings.profile.targetLanguage, parseMemory(memRaw), sessionId.current);
+        } catch {
+          /* memory is best-effort */
+        }
       }
 
       // Measured level signal (v2) — from the learner's own messages only, cut

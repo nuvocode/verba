@@ -292,7 +292,7 @@ export default function DataPanel({
       )}
       {err && <div className="err">{err}</div>}
 
-      <div className="sec">Where your data is</div>
+      <div className="sec" data-setting="data-location">Where your data is</div>
       <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "14px 4px 10px" }}>
         Your conversations, saved words and their review schedule, the passages and listening pieces you have worked
         through, your daily plans, what the coach has written down about you, and your settings. All of it is in one
@@ -329,7 +329,7 @@ export default function DataPanel({
         </div>
       )}
 
-      <div className="sec" style={{ marginTop: 36 }}>
+      <div className="sec" style={{ marginTop: 36 }} data-setting="export">
         A copy you keep
       </div>
       <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "14px 4px 16px" }}>
@@ -361,7 +361,7 @@ export default function DataPanel({
         </div>
       </div>
 
-      <div className="sec">Sync folder</div>
+      <div className="sec" data-setting="sync-folder">Sync folder</div>
       {!dir ? (
         <>
           <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "14px 4px 12px" }}>
@@ -482,7 +482,7 @@ export default function DataPanel({
         </>
       )}
 
-      <div className="sec" style={{ marginTop: 36 }}>
+      <div className="sec" style={{ marginTop: 36 }} data-setting="delete-everything">
         Delete everything
       </div>
       <div className="desc" style={{ maxWidth: 480, lineHeight: 1.6, padding: "14px 4px 16px" }}>

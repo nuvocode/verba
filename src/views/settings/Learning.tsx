@@ -136,7 +136,7 @@ export default function Learning({
     <>
       <div className="sec">Language</div>
 
-      <div className="field" style={{ marginTop: 10 }}>
+      <div className="field" style={{ marginTop: 10 }} data-setting="native-language">
         <label>I speak</label>
         <select
           value={settings.profile.nativeLanguage}
@@ -168,18 +168,21 @@ export default function Learning({
         </div>
       )}
 
-      {shown.map((p) => {
-        const origin = packOrigin(p.id);
-        const label = origin ? originLabel(origin) : "";
-        const mine = inMyLanguage(p.id);
-        const line = progressLine(p.name);
-        return (
-          <div key={p.id}>
-            <button
-              className="srow"
-              style={{ borderBottom: "none" }}
-              onClick={() => onChange({ packId: p.id, profile: { ...settings.profile, targetLanguage: p.name } })}
-            >
+      {/* The anchor sits on the group, not on each row — a search landing here
+          must mark the section, not whichever language happens to be first. */}
+      <div data-setting="target-language">
+        {shown.map((p) => {
+          const origin = packOrigin(p.id);
+          const label = origin ? originLabel(origin) : "";
+          const mine = inMyLanguage(p.id);
+          const line = progressLine(p.name);
+          return (
+            <div key={p.id}>
+              <button
+                className="srow"
+                style={{ borderBottom: "none" }}
+                onClick={() => onChange({ packId: p.id, profile: { ...settings.profile, targetLanguage: p.name } })}
+              >
               <div className={`radio ${settings.packId === p.id ? "on" : ""}`} />
               <div style={{ flex: 1 }}>
                 <div className="name">
@@ -238,6 +241,7 @@ export default function Learning({
           No language here matches “{filter.trim()}”. Language packs can be added under Advanced.
         </div>
       )}
+      </div>
 
       {/* The selected language's markdown docs — the long-form guide a pack's three
           bullet points have no room for. Docs marked for the tutor also ride along
@@ -292,65 +296,73 @@ export default function Learning({
       )}
 
       <div className="sec" style={{ marginTop: 44 }}>My level</div>
-      {LEVELS.map(([l, title, desc]) => (
-        <button
-          key={l}
-          className="srow"
-          onClick={() => onChange({ profile: { ...settings.profile, level: l } })}
-        >
-          <div className={`radio ${settings.profile.level === l ? "on" : ""}`} />
-          <div style={{ flex: 1 }}>
-            <div className="name">
-              {title} <span>{l}</span>
+      <div data-setting="level">
+        {LEVELS.map(([l, title, desc]) => (
+          <button
+            key={l}
+            className="srow"
+            onClick={() => onChange({ profile: { ...settings.profile, level: l } })}
+          >
+            <div className={`radio ${settings.profile.level === l ? "on" : ""}`} />
+            <div style={{ flex: 1 }}>
+              <div className="name">
+                {title} <span>{l}</span>
+              </div>
+              <div className="desc">{desc}</div>
             </div>
-            <div className="desc">{desc}</div>
-          </div>
-        </button>
-      ))}
-      <div className="desc" style={{ padding: "14px 4px 0" }}>
-        <button className="model" style={linkish} onClick={onLevelTest}>
-          I'm not sure — take a short test
-        </button>
+          </button>
+        ))}
+        <div className="desc" style={{ padding: "14px 4px 0" }}>
+          <button className="model" style={linkish} onClick={onLevelTest}>
+            I'm not sure — take a short test
+          </button>
+        </div>
       </div>
 
       <div className="sec" style={{ marginTop: 44 }}>Minutes a day</div>
-      {TIMES.map(([n, name, desc]) => (
-        <button key={n} className="srow" onClick={() => onChange({ dailyMinutes: n })}>
-          <div className={`radio ${settings.dailyMinutes === n ? "on" : ""}`} />
-          <div style={{ flex: 1 }}>
-            <div className="name">
-              {name} <span>about {n} minutes</span>
+      <div data-setting="daily-minutes">
+        {TIMES.map(([n, name, desc]) => (
+          <button key={n} className="srow" onClick={() => onChange({ dailyMinutes: n })}>
+            <div className={`radio ${settings.dailyMinutes === n ? "on" : ""}`} />
+            <div style={{ flex: 1 }}>
+              <div className="name">
+                {name} <span>about {n} minutes</span>
+              </div>
+              <div className="desc">{desc}</div>
             </div>
-            <div className="desc">{desc}</div>
-          </div>
-        </button>
-      ))}
+          </button>
+        ))}
+      </div>
 
       <div className="sec" style={{ marginTop: 44 }}>Coaching</div>
-      {TIMINGS.map(([id, name, desc, sketch]) => (
-        <button key={id} className="srow" onClick={() => onChange({ correctionTiming: id })}>
-          <div className={`radio ${settings.correctionTiming === id ? "on" : ""}`} />
-          <div style={{ flex: 1 }}>
-            <div className="name">{name}</div>
-            <div className="desc">{desc}</div>
-            {/* What it looks like, so the choice can be understood without trying it. */}
-            <div
-              className="desc"
-              style={{ marginTop: 6, padding: "7px 10px", background: "var(--accent-soft)", borderRadius: 7, maxWidth: 440 }}
-            >
-              {sketch}
+      <div data-setting="coaching">
+        {TIMINGS.map(([id, name, desc, sketch]) => (
+          <button key={id} className="srow" onClick={() => onChange({ correctionTiming: id })}>
+            <div className={`radio ${settings.correctionTiming === id ? "on" : ""}`} />
+            <div style={{ flex: 1 }}>
+              <div className="name">{name}</div>
+              <div className="desc">{desc}</div>
+              {/* What it looks like, so the choice can be understood without trying it. */}
+              <div
+                className="desc"
+                style={{ marginTop: 6, padding: "7px 10px", background: "var(--accent-soft)", borderRadius: 7, maxWidth: 440 }}
+              >
+                {sketch}
+              </div>
             </div>
-          </div>
-        </button>
-      ))}
+          </button>
+        ))}
+      </div>
 
       <div className="sec" style={{ marginTop: 44 }}>Interface</div>
-      <ToggleRow
-        title="Keyboard hints"
-        desc="The small shortcut lines under each screen."
-        on={settings.showHints}
-        onClick={() => onChange({ showHints: !settings.showHints })}
-      />
+      <div data-setting="keyboard-hints">
+        <ToggleRow
+          title="Keyboard hints"
+          desc="The small shortcut lines under each screen."
+          on={settings.showHints}
+          onClick={() => onChange({ showHints: !settings.showHints })}
+        />
+      </div>
     </>
   );
 }

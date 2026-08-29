@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadSettings, saveSettings, isLocalProvider, onboardingReset, type Settings } from "./lib/settings";
 import { applyPatch, type Applied } from "./lib/rules";
 import { catalogModel, installed } from "./lib/bundled";
@@ -8,6 +8,9 @@ import { useDay } from "./lib/useDay";
 import { useTalk } from "./lib/useTalk";
 import { useRead } from "./lib/useRead";
 import { useListening } from "./lib/useListening";
+import { live as keyLive, navLive } from "./lib/keys";
+import { PROVIDERS } from "./lib/models";
+import { SETTINGS_INDEX, hashOf } from "./lib/settingsIndex";
 import Onboarding from "./views/Onboarding";
 import Today from "./views/Today";
 import Talk from "./views/Talk";
@@ -35,20 +38,13 @@ const NAV: [string, Space, string][] = [
   ["Coach", "coach", "6"],
 ];
 
-const PROVIDER_NAMES: Record<string, string> = {
-  ollama: "Ollama",
-  lmstudio: "LM Studio",
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  gemini: "Gemini",
-  openrouter: "OpenRouter",
-};
-
 const isSettingsHash = () => window.location.hash.startsWith("#settings");
 
 interface PaletteItem {
   section?: string;
   label: string;
+  /** A searchable description — the settings rows carry theirs from the index. */
+  desc?: string;
   kbd?: string;
   run: () => void;
 }
@@ -217,6 +213,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
   );
 
   const paletteItems = useCallback((): PaletteItem[] => {
+    const q = query.trim();
     const items: PaletteItem[] = [
       { section: "Go to", label: "Today — your session plan", kbd: "1", run: () => go("today") },
       { label: "Talk — conversation with the coach", kbd: "2", run: () => go("talk") },
@@ -225,13 +222,33 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       { label: "Memory — everything you've met", kbd: "5", run: () => go("memory") },
       { label: "Coach — your weekly report", kbd: "6", run: () => go("coach") },
       { label: "Settings — providers, packs, offline", kbd: ",", run: () => go("settings") },
+      // Every settings row, from the one index — the same list the Settings
+      // search reads, so the palette and the search cannot describe a setting
+      // differently (#29). They join only once a query is typed: the palette is
+      // a launcher, and a bare ⌘K should not dump the whole settings catalog
+      // (§4.4). Picking one opens Settings on its section.
+      ...(q
+        ? SETTINGS_INDEX.map((row) => ({
+            section: "Settings",
+            label: row.title,
+            desc: row.desc,
+            run: () => {
+              go("settings");
+              // The id rides the hash so Settings highlights the row, not just
+              // the section — the same arrival the search box gives (#29).
+              window.location.hash = `${hashOf(row)}@${row.id}`;
+            },
+          }))
+        : []),
       {
         section: "Do",
         label: "Begin the next activity in today's session",
         kbd: "↵",
         run: () => day.next && begin(day.next),
       },
-      { label: "Resurface the words that are due", kbd: "R", run: () => begin("memory") },
+      // No R badge: there is no global R — Memory's own R is a surface key, and a
+      // badge here would announce a shortcut that does not work from this screen.
+      { label: "Resurface the words that are due", run: () => begin("memory") },
       {
         label: "Generate a new reading passage",
         run: () => {
@@ -249,7 +266,8 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       },
       {
         label: "Read the passage out loud — the teleprompter",
-        kbd: "P",
+        // P is a Read surface key, so the badge only shows where it works.
+        kbd: space === "read" ? "P" : undefined,
         run: () => {
           go("read");
           update({ readView: "prompter" });
@@ -268,10 +286,9 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       },
     ];
 
-    const q = query.trim();
     if (!q) return items;
     const hits: PaletteItem[] = items
-      .filter((i) => i.label.toLowerCase().includes(q.toLowerCase()))
+      .filter((i) => (i.label + " " + (i.desc ?? "")).toLowerCase().includes(q.toLowerCase()))
       .map((i) => ({ ...i, section: undefined }));
     // Anything the palette can't route becomes a question for the coach.
     hits.push({
@@ -285,7 +302,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       },
     });
     return hits;
-  }, [query, go, begin, day, read, talk, listening, settings.theme, update]);
+  }, [query, go, begin, day, read, talk, listening, settings.theme, update, space]);
 
   // The one thing Esc does on this screen. The key and the visible pill run it, so nobody
   // has to know the shortcut exists. Memory's review owns its own Esc while it's captured.
@@ -300,6 +317,15 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
           : space !== "today" && space !== "onboarding"
             ? { label: "back to Today", run: () => go("today") }
             : null;
+
+  // What a surface key is claiming from navigation right now. Talk's 1–3 send a
+  // suggestion only while suggestions are on screen; the scenario picker and the
+  // reflection offer none, so there the numbers are the nav numbers again. The
+  // topbar badge and the handler read this same value, so they cannot disagree.
+  const claimed = useMemo(
+    () => (space === "talk" && !talk.reflecting && talk.suggestions.length > 0 ? ["suggestions"] : []),
+    [space, talk.reflecting, talk.suggestions.length],
+  );
 
   // ---- keyboard: every screen is reachable without the mouse ----
   useEffect(() => {
@@ -347,6 +373,12 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       }
       if (typing || captured || space === "onboarding") return;
 
+      // From here down the table is the gate (#30): a key lib/keys does not list
+      // on this surface does nothing at all. Esc and ⌘K sit above this line on
+      // purpose — they are global, and the escape pill and the Anything button
+      // announce them, not the hint line.
+      if (!keyLive(space, e.key)) return;
+
       if (space === "talk" && !talk.reflecting && /^[1-3]$/.test(e.key)) {
         const s = talk.suggestions[Number(e.key) - 1];
         if (s) return void talk.send(s, true);
@@ -373,21 +405,46 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       }
       if (space === "today" && e.key === "Enter" && day.next) return begin(day.next);
 
-      const nav: Record<string, Space> = {
-        "1": "today",
-        "2": "talk",
-        "3": "read",
-        "4": "listening",
-        "5": "memory",
-        "6": "coach",
-        ",": "settings",
-      };
-      if (nav[e.key]) go(nav[e.key]);
+      // Memory's R starts the resurfacing — the same action the "Resurface due"
+      // button promises, so the badge and the key agree. Review mode owns its own
+      // keys (App stands down while it is captured), so this is the collection only.
+      if (space === "memory" && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        setReviewSignal((n) => n + 1);
+        return;
+      }
+
+      // Listening is a media surface: Space plays and stops the chapter. The label
+      // says what it does — "stop", not "pause", because the surface stops (§6).
+      if (space === "listening" && e.key === " ") {
+        e.preventDefault();
+        if (listening.playing) listening.stop();
+        else void listening.play();
+        return;
+      }
+
+      // The nav keys come from the one table, and only where they are actually
+      // live: on Talk, 1–3 are suggestions *while suggestions are on screen*, and
+      // plain nav keys before and after that.
+      if (navLive(space, e.key, claimed)) {
+        const dest: Record<string, Space> = {
+          "1": "today",
+          "2": "talk",
+          "3": "read",
+          "4": "listening",
+          "5": "memory",
+          "6": "coach",
+          ",": "settings",
+        };
+        const to = dest[e.key];
+        if (to) go(to);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
     space,
+    claimed,
     paletteOpen,
     pIdx,
     paletteItems,
@@ -403,7 +460,6 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
     update,
     settings.readView,
   ]);
-
   useEffect(() => {
     if (paletteOpen) paletteInput.current?.focus();
   }, [paletteOpen]);
@@ -453,6 +509,13 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
   const local = isLocalProvider(settings.provider);
   const items = paletteItems();
   const active = Math.min(pIdx, items.length - 1);
+  // The provider's name, host and model are the detail behind the status — the
+  // badge itself says only where the AI runs (§4.3: the commercial name does not
+  // sit in the bar, it is a hover away).
+  const provider = PROVIDERS.find((p) => p.id === settings.provider);
+  const statusTitle = provider
+    ? `${provider.name} · ${local ? "runs on this computer" : "online"} · ${String(settings[provider.model] ?? "")}`
+    : "Where the AI runs — open Settings";
 
   return (
     <div className="shell">
@@ -464,25 +527,31 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
           {NAV.map(([label, key, kbd]) => (
             <button key={key} className={`nav-item ${space === key ? "on" : ""}`} onClick={() => go(key)}>
               <span>{label}</span>
-              <span className="k">{kbd}</span>
+              {/* The badge is the shortcut, and only where the shortcut is live: on
+                  Talk, 1–3 are suggestions, so the bar shows no numbers there. */}
+              {navLive(space, kbd, claimed) && <span className="k">{kbd}</span>}
+              {/* Memory's due count is a *counter*, not a shortcut — a separate badge
+                  that says what it counts, so a bare number never stands alone. */}
+              {key === "memory" && day.due > 0 && (
+                <span className="count" title={`${day.due} ${day.due === 1 ? "word" : "words"} due for resurfacing`}>
+                  {day.due}
+                </span>
+              )}
             </button>
           ))}
+          {/* Settings is not one of the six sections, so it sits apart from them —
+              a separate entry at the end of the bar, not a seventh nav item. */}
+          <button className={`nav-item ${space === "settings" ? "on" : ""}`} onClick={() => go("settings")}>
+            <span>Settings</span>
+            {navLive(space, ",", claimed) && <span className="k">,</span>}
+          </button>
         </div>
         <div className="spacer" />
-        <div className="dots" title="Today's session">
-          {(day.plan?.activities ?? []).map((b) => (
-            <div
-              key={b.kind}
-              className={`dot ${day.isDone(b.kind) ? "done" : ""}`}
-              title={`${b.title}${day.isDone(b.kind) ? " — done" : ""}`}
-            />
-          ))}
-        </div>
-        <button className="status" onClick={() => go("settings")} title="Where the AI runs — open Settings">
+        {/* The day's plan, as a sentence — Today already says it; a second, unlabelled
+            strip would be a second language for the same fact (§4.3). */}
+        <button className="status" onClick={() => go("settings")} title={statusTitle}>
           <span className={`led ${local ? "" : "cloud"}`} />
-          <span>
-            {PROVIDER_NAMES[settings.provider] ?? settings.provider} · {local ? "local" : "cloud"}
-          </span>
+          <span>{local ? "On this computer" : "Online"}</span>
         </button>
         <button
           className="icon-btn"
@@ -608,7 +677,10 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
                     onMouseEnter={() => setPIdx(i)}
                     onClick={item.run}
                   >
-                    <span style={{ flex: 1 }}>{item.label}</span>
+                    <span style={{ flex: 1 }}>
+                      {item.label}
+                      {item.desc && <span className="desc">{item.desc}</span>}
+                    </span>
                     <span className="k">{item.kbd}</span>
                   </button>
                 </div>

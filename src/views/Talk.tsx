@@ -7,6 +7,7 @@ import type { Talk as TalkState } from "../lib/useTalk";
 import { talkSignals } from "../lib/signals";
 import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
 import Face from "./talk/Face";
+import Hints from "./Hints";
 
 // Where the reflection sends them, named by what the plan has next. The wording is the
 // day's, not this screen's — Talk never decides that reading (or anything) comes after.
@@ -386,16 +387,32 @@ export default function Talk({
               >
                 ◉
               </button>
+              {/* Both disabled reasons are covered, not silent (#42): the label
+                  says the in-flight one, this line says the empty-box one. */}
+              {!talk.busy && !talk.input.trim() && (
+                <span className="model" style={{ color: "var(--ink3)", fontSize: 11, marginRight: 8 }}>
+                  type a line first
+                </span>
+              )}
               <button className="send" onClick={() => void talk.send(talk.input)} disabled={talk.busy || !talk.input.trim()}>
-                Send
+                {talk.busy ? "Sending…" : "Send"}
               </button>
             </div>
-            {settings.showHints && (
-              <div style={{ maxWidth: 640, margin: "10px auto 0", fontSize: 11, color: "var(--ink3)" }}>
-                Type freely, press <span style={{ fontFamily: "var(--mono)" }}>1–3</span> to use a suggestion, or click ◉
-                to speak. <span style={{ fontFamily: "var(--mono)" }}>Esc</span> to end the session.
-              </div>
-            )}
+            {/* The keyboard half comes from the one table; the mouse half — click ◉
+                to speak — is a pointer instruction, so it stays beside it (§5.4). */}
+            <div style={{ maxWidth: 640, margin: "10px auto 0", fontSize: 11, color: "var(--ink3)" }}>
+              <Hints
+                settings={settings}
+                surface="talk"
+                // 1–3 are announced only while there is something to pick with them.
+                has={talk.suggestions.length > 0 && !talk.reflecting ? ["suggestions"] : []}
+              />
+              {settings.showHints && (
+                <span style={{ marginLeft: 22 }}>
+                  or click <span style={{ fontFamily: "var(--mono)" }}>◉</span> to speak
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

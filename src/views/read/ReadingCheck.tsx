@@ -48,9 +48,17 @@ export default function ReadingCheck({
       </div>
 
       {!stepChecked ? (
-        <button className="btn" disabled={!currentAnswered} onClick={() => void read.gradeCheck()}>
-          Check answer
-        </button>
+        <>
+          <button className="btn" disabled={!currentAnswered} onClick={() => void read.gradeCheck()}>
+            Check answer
+          </button>
+          {/* Not a silent disabled (#42): the question is unanswered, so there is nothing to check yet. */}
+          {!currentAnswered && (
+            <span className="model" style={{ color: "var(--ink3)", marginLeft: 8 }}>
+              Answer the question first
+            </span>
+          )}
+        </>
       ) : !lastStep ? (
         <button className="btn" onClick={read.nextCheckQuestion}>
           Next question →

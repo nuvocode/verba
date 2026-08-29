@@ -17,8 +17,9 @@ import { isRemoteModel } from "./models.ts";
  */
 export const AT = {
   learning: "#settings/learning",
-  privacy: "#settings/privacy",
   speech: "#settings/speech",
+  privacy: "#settings/privacy",
+  about: "#settings/about",
   advanced: "#settings/advanced",
 } as const;
 

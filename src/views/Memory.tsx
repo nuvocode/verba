@@ -6,6 +6,8 @@ import { getPack } from "../lib/packs";
 import { memorySignals } from "../lib/signals";
 import { strength, type Grade } from "../lib/srs";
 import { suspect } from "../lib/vocab";
+import { live } from "../lib/keys";
+import Hints from "./Hints";
 
 const GRADES: [string, Grade, string][] = [
   ["Slipped", 0, "1"],
@@ -153,8 +155,11 @@ export default function Memory({
   useEffect(() => {
     if (!reviewing) return;
     const onKey = (e: KeyboardEvent) => {
+      if (!live("review", e.key)) return; // the table is the gate
       if (e.key === "Escape") return setReviewing(false);
-      if (e.key === " ") {
+      // Enter is the primary action — revealing the card in front of them. Space is
+      // not: it is the media key, and a card is not media (§3.1).
+      if (e.key === "Enter") {
         e.preventDefault();
         if (!revealed) setRevealed(true);
         return;
@@ -202,7 +207,7 @@ export default function Memory({
 
               {!revealed ? (
                 <button className="btn ghost" onClick={() => setRevealed(true)}>
-                  Reveal the meaning <span className="kbd">space</span>
+                  Reveal the meaning <span className="kbd">↵</span>
                 </button>
               ) : (
                 <div style={{ borderTop: "1px solid var(--line)", paddingTop: 24, animation: "vfade .25s ease both" }}>
@@ -242,6 +247,7 @@ export default function Memory({
             </div>
           )}
           {error && <div className="err">{error}</div>}
+          <Hints settings={settings} surface="review" />
         </div>
       </div>
     );
@@ -323,6 +329,8 @@ export default function Memory({
           })}
         </div>
       ))}
+
+      <Hints settings={settings} surface="memory" />
     </div>
   );
 }
