@@ -1,8 +1,8 @@
 ---
 id: PLAN-004
 title: Setup screen 5 — no summary screen, straight into Day 1
-branch: plan/004-setup-screen-5-day-one
-base: plan/003-setup-screen-4-level
+branch: plan/m3-onboarding
+base: feat/m2-nav-keymap
 status: ready
 executor: unassigned
 created: 2026-08-29
@@ -26,7 +26,8 @@ and where the data lives is stated once.
 infrastructure in the app, and storing a reminder time that nothing ever fires
 would be a promise the product does not keep. It is a separate issue.
 
-Depends on PLAN-003. The screen being replaced is `stepPlan`, index **5**.
+Depends on PLAN-003. The screen being replaced is `stepPlan`, index **5**. Work
+on `plan/m3-onboarding`, on top of PLAN-003's commit.
 
 ## Repo conventions
 

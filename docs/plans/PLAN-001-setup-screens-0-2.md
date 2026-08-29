@@ -1,7 +1,7 @@
 ---
 id: PLAN-001
 title: Setup screens 0-2 — interface language, target language, daily time
-branch: plan/001-setup-screens-0-2
+branch: plan/m3-onboarding
 base: feat/m2-nav-keymap
 status: ready
 executor: unassigned

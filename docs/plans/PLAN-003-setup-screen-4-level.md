@@ -1,8 +1,8 @@
 ---
 id: PLAN-003
 title: Setup screen 4 — level by default, test on request
-branch: plan/003-setup-screen-4-level
-base: plan/002-setup-screen-3-model
+branch: plan/m3-onboarding
+base: feat/m2-nav-keymap
 status: ready
 executor: unassigned
 created: 2026-08-29
@@ -23,7 +23,8 @@ waiting state, and copy that matches what it actually does — a fixed eight
 questions, not an adaptive ladder.
 
 Depends on PLAN-002: `primePlacement` / `placementPending` / `clearPlacement`
-exist in `src/lib/placement.ts`, and the level step is index **4**.
+exist in `src/lib/placement.ts`, and the level step is index **4**. Work on
+`plan/m3-onboarding`, on top of PLAN-002's commit.
 
 ## Repo conventions
 

@@ -1,8 +1,8 @@
 ---
 id: PLAN-002
 title: Setup screen 3 — model setup, the fragile step
-branch: plan/002-setup-screen-3-model
-base: plan/001-setup-screens-0-2
+branch: plan/m3-onboarding
+base: feat/m2-nav-keymap
 status: ready
 executor: unassigned
 created: 2026-08-29
@@ -28,7 +28,9 @@ the missing pure pieces and rewrites the screen to use them. Do not reimplement
 what is already there.
 
 Depends on PLAN-001: the model step is index **3** and the level step is index
-**4**. Branch off PLAN-001's branch after it is merged.
+**4**. All five plans of this milestone run in order on the one branch
+`plan/m3-onboarding`, each ending in its own commit — PLAN-001 is already
+committed there.
 
 ## Repo conventions
 

@@ -1,8 +1,8 @@
 ---
 id: PLAN-005
 title: Rules that hold across the whole setup
-branch: plan/005-setup-rules
-base: plan/004-setup-screen-5-day-one
+branch: plan/m3-onboarding
+base: feat/m2-nav-keymap
 status: ready
 executor: unassigned
 created: 2026-08-29
@@ -23,7 +23,7 @@ heading does not move between steps.
 It is the last plan of the milestone and it must not introduce new screens or new
 copy beyond what is listed. Its job is to close gaps.
 
-Depends on PLAN-004.
+Depends on PLAN-004. Work on `plan/m3-onboarding`, on top of PLAN-004's commit.
 
 ## Repo conventions
 
@@ -106,7 +106,10 @@ The `.onb-esc` block keeps its position. The condition on the skip button is
 removed: it renders on **every** step. Its behaviour depends on the step:
 
 - Steps 0, 1, 2, 4: as today — `skip()` applies `SKIP_DEFAULTS` and jumps to 5.
-  Note that `skip()` must **not** skip the model step: if there is no verified
+  **This is the hole this plan closes.** Since PLAN-001 reordered the steps,
+  skipping from screen 1 or 2 lands on screen 5 and walks straight past the model
+  step — verified in the browser on the PLAN-001 commit. `skip()` must **not**
+  skip the model step: if there is no verified
   model, jump to 3 instead of 5. Write it as:
   ```ts
   const skip = () => {
