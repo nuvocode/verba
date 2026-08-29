@@ -22,17 +22,17 @@ import {
   type Probe,
   type PullProgress,
 } from "../lib/models";
-import { getProvider } from "../lib/providers";
 import { CEFR_LEVELS, type CEFRLevel } from "../lib/model";
 import { LEVELS, TIMES } from "../lib/choices";
-import { parsePlacement, placementPrompt, primePlacement, scorePlacement, type PlacementQ } from "../lib/placement";
+import { primePlacement, placementPending, clearPlacement, scorePlacement, type PlacementQ } from "../lib/placement";
+import { poolFor } from "../lib/packs/pools";
 import { attach, detach, pickFolder, pull } from "../lib/vault";
 import { live } from "../lib/keys";
 import Hints from "./Hints";
 
 const STEP_LABELS = ["Before we start", "Setup · 1 of 4", "Setup · 2 of 4", "Setup · 3 of 4", "Setup · 4 of 4", "Your plan"];
 
-type LevelMode = "intro" | "busy" | "test" | "manual" | "result";
+type LevelMode = "pick" | "busy" | "test" | "result";
 
 /** "Native language: Turkish — change", where change opens a searchable list in place. */
 function NativePicker({
@@ -241,11 +241,25 @@ export default function Onboarding({
   const [forceNative, setForceNative] = useState(0);
 
   // ---- level test (step 2) ----
-  const [mode, setMode] = useState<LevelMode>("intro");
+  const [mode, setMode] = useState<LevelMode>("pick");
   const [quiz, setQuiz] = useState<PlacementQ[]>([]);
   const [qi, setQi] = useState(0);
   const [answers, setAnswers] = useState<number[]>([]);
   const [testErr, setTestErr] = useState("");
+  const [waitedAt, setWaitedAt] = useState(0);
+  const [now, setNow] = useState(0);
+  // Guards the busy screen's resolution: if the learner left "busy" before the
+  // promise settled, do not land them in a test they no longer asked for.
+  const cancelled = useRef(false);
+
+  // The busy screen's live clock — a 1 s tick that runs only while the mode is
+  // "busy", so the elapsed line never goes stale and never ticks on another step.
+  useEffect(() => {
+    if (mode !== "busy") return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [mode]);
 
   const host = hosts[prov];
   const model = models[prov];
@@ -330,24 +344,32 @@ export default function Onboarding({
   }, []);
 
   const startTest = useCallback(async () => {
-    setMode("busy");
     setTestErr("");
+    const pool = poolFor(packId);
+    if (pool) {
+      setQuiz(pool);
+      setQi(0);
+      setAnswers([]);
+      return setMode("test"); // official languages: instant
+    }
+    const primed = placementPending();
+    setMode("busy");
+    setWaitedAt(Date.now());
+    cancelled.current = false;
     try {
-      const s = draft();
-      const raw = await getProvider(s).chat([{ role: "user", content: placementPrompt(s, getPack(s.packId)) }], {
-        json: true,
-      });
-      const qs = parsePlacement(raw);
+      const qs = await (primed ?? (primePlacement(draft(), getPack(packId)), placementPending()!));
       if (!qs) throw new Error("The model didn't return a usable test.");
+      if (cancelled.current) return; // the learner left "busy" while the model wrote
       setQuiz(qs);
       setQi(0);
       setAnswers([]);
       setMode("test");
     } catch (e: any) {
-      setTestErr(`${String(e?.message ?? e)} — pick your level by hand instead.`);
-      setMode("manual");
+      clearPlacement();
+      setTestErr(`${String(e?.message ?? e)} — pick your level below instead.`);
+      setMode("pick");
     }
-  }, [prov, host, model, packId, nativeLang]);
+  }, [packId, prov, host]);
 
   const answer = (choice: number) => {
     const next = [...answers, choice];
@@ -369,7 +391,7 @@ export default function Onboarding({
   let onEnter: (() => void) | undefined;
 
   const back = () => {
-    if (step === 4 && mode !== "intro") return setMode("intro"); // out of the test, not out of the step
+    if (step === 4 && mode !== "pick") return setMode("pick"); // out of the test, not out of the step
     if (step > 0) return setStep(step - 1);
     onExit?.();
   };
@@ -529,7 +551,10 @@ export default function Onboarding({
     const local = rows.filter((r) => !isRemoteModel(r.id));
     const remote = rows.filter((r) => isRemoteModel(r.id));
     const flat = [...local, ...remote]; // local-first, so the number keys and the visual order agree
-    flat.forEach((r, i) => (picks[i] = () => setModels((m) => ({ ...m, [prov]: r.id }))));
+    flat.forEach((r, i) => (picks[i] = () => {
+      setModels((m) => ({ ...m, [prov]: r.id }));
+      clearPlacement(); // a pending test was written for the old model
+    }));
 
     const selected = models[prov];
     const selectedRemote = isRemoteModel(selected);
@@ -540,7 +565,7 @@ export default function Onboarding({
       setProbe(p);
       if (!p.ok) return setVerify("idle");
       setVerify("ok");
-      primePlacement(draft(), getPack(packId)); // §5: the test starts writing itself here
+      if (!poolFor(packId)) primePlacement(draft(), getPack(packId)); // §5: the test starts writing itself here — but not for a language with a curated pool
       // A slow model is a broken experience, so a passing-but-painful probe does
       // not auto-advance — the learner reads the note and chooses to continue.
       if (!slowNote(p.ms)) advanceTimer.current = setTimeout(() => setStep(4), 700);
@@ -563,7 +588,10 @@ export default function Onboarding({
               key={r.id}
               className={`pick ${selected === r.id ? "on" : ""}`}
               title={r.id}
-              onClick={() => setModels((m) => ({ ...m, [prov]: r.id }))}
+              onClick={() => {
+                setModels((m) => ({ ...m, [prov]: r.id }));
+                clearPlacement(); // a pending test was written for the old model
+              }}
             >
               <div className="big" style={{ fontSize: 19 }}>
                 {prettyModel(r.id)}
@@ -588,7 +616,10 @@ export default function Onboarding({
                   key={r.id}
                   className={`pick ${selected === r.id ? "on" : ""}`}
                   title={r.id}
-                  onClick={() => setModels((m) => ({ ...m, [prov]: r.id }))}
+                  onClick={() => {
+                    setModels((m) => ({ ...m, [prov]: r.id }));
+                    clearPlacement(); // a pending test was written for the old model
+                  }}
                 >
                   <div className="big" style={{ fontSize: 19 }}>
                     {prettyModel(r.id)}
@@ -723,6 +754,7 @@ export default function Onboarding({
       if (i < 9)
         picks[i] = () => {
           setPackId(p.id);
+          clearPlacement(); // a pending test was written for the old language
         };
     });
     // §6: the same two languages can never stand together — and the clash is a
@@ -792,62 +824,17 @@ export default function Onboarding({
   };
 
   const stepLevel = () => {
-    if (mode === "intro") {
-      picks[0] = () => void startTest();
-      picks[1] = () => setMode("manual");
-      onEnter = () => void startTest();
-      return (
-        <>
-          <h1>Let's find your level.</h1>
-          <div className="sub">
-            {quiz.length || 8} short questions in {lang}, written by your own model and graded on this machine. It takes
-            two minutes, and you can overrule the result on the next screen.
-          </div>
-          {testErr && <div className="err">{testErr}</div>}
-          <div className="col">
-            <button className="pick" onClick={() => void startTest()}>
-              <span className="tag">1</span>
-              <div className="big" style={{ fontSize: 20 }}>
-                Take the test
-              </div>
-              <div className="small" style={{ lineHeight: 1.5 }}>
-                Multiple choice, from A1 up to C2. We stop where you stop.
-              </div>
-            </button>
-            <button className="pick" onClick={() => setMode("manual")}>
-              <span className="tag">2</span>
-              <div className="big" style={{ fontSize: 20 }}>
-                I'll pick it myself
-              </div>
-              <div className="small" style={{ lineHeight: 1.5 }}>
-                You already know where you are. A1 through C2, your call.
-              </div>
-            </button>
-          </div>
-        </>
-      );
-    }
-
-    if (mode === "busy")
-      return (
-        <>
-          <h1>Writing your test…</h1>
-          <div className="sub">{model} is drafting eight questions in {lang}. This is the slowest part of setup.</div>
-        </>
-      );
-
-    if (mode === "manual") {
+    if (mode === "pick") {
       LEVELS.forEach(([l], i) => {
-        picks[i] = () => {
-          setCefr(l);
-          advance(5, l);
-        };
+        picks[i] = () => setCefr(l); // selecting a card sets the level, does not advance
       });
+      onEnter = () => advance(5, cefr);
       return (
         <>
           <h1>Where are you starting from?</h1>
           <div className="sub">
-            Your conversations keep calibrating this, so a rough answer is fine.
+            Your conversations keep calibrating this, so a rough answer is fine — and you can change it any time in
+            Settings.
           </div>
           {testErr && <div className="err">{testErr}</div>}
           <div className="col">
@@ -855,10 +842,7 @@ export default function Onboarding({
               <button
                 key={l}
                 className={`pick ${cefr === l ? "on" : ""}`}
-                onClick={() => {
-                  setCefr(l);
-                  advance(5, l);
-                }}
+                onClick={() => setCefr(l)}
               >
                 <span className="tag">{i + 1}</span>
                 <div className="big" style={{ fontSize: 20 }}>
@@ -870,6 +854,51 @@ export default function Onboarding({
               </button>
             ))}
           </div>
+          <button className="btn" style={{ marginTop: 32 }} onClick={() => advance(5, cefr)}>
+            Continue →
+          </button>
+          <div style={{ marginTop: 16 }}>
+            <button className="link" onClick={() => void startTest()}>
+              Not sure? Take a short test →
+            </button>
+          </div>
+        </>
+      );
+    }
+
+    if (mode === "busy") {
+      onEnter = undefined; // Esc already goes back (see back())
+      return (
+        <>
+          <h1>Writing your test…</h1>
+          <div className="sub">
+            {prettyModel(models[prov])} is writing eight questions in {lang}. This is the slowest part of setup —
+            usually well under a minute.
+          </div>
+          <div className="native">
+            {Math.round((now - waitedAt) / 1000)}s so far
+          </div>
+          <div className="row" style={{ marginTop: 24, gap: 12 }}>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                cancelled.current = true;
+                clearPlacement();
+                setMode("pick");
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                cancelled.current = true;
+                setMode("pick");
+              }}
+            >
+              I'll pick my level myself
+            </button>
+          </div>
         </>
       );
     }
@@ -877,6 +906,7 @@ export default function Onboarding({
     if (mode === "test") {
       const q = quiz[qi];
       q.options.forEach((_, i) => (picks[i] = () => answer(i)));
+      picks[q.options.length] = () => answer(-1); // the skip has a number key too
       return (
         <>
           <div className="meter" style={{ margin: "18px 0 26px" }}>
@@ -894,20 +924,28 @@ export default function Onboarding({
             ))}
           </div>
           <div className="native">
-            Question {qi + 1} of {quiz.length} · guessing is fine — a wrong answer just sets your ceiling.
+            Question {qi + 1} of {quiz.length} · Skip if you do not know it. You can change your level any time.
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <button className="link" onClick={() => answer(-1)}>
+              Skip this one →
+            </button>
           </div>
         </>
       );
     }
 
     // result — proposed, never imposed
-    onEnter = () => advance(5);
+    onEnter = () => advance(5, cefr);
     return (
       <>
         <h1>You're around {cefr}.</h1>
         <div className="sub">
-          You answered {answers.filter((a, i) => a === quiz[i]?.answer).length} of {quiz.length} correctly. Day 1 starts
-          here — change it if it feels wrong, and the coach keeps adjusting either way.
+          You answered {answers.filter((a, i) => a === quiz[i]?.answer).length} of {quiz.length} correctly. That is
+          where Day 1 will start. Change it here if it feels wrong — the coach keeps adjusting either way.
+        </div>
+        <div className="native" style={{ marginBottom: 12 }}>
+          Start me at
         </div>
         <div className="row" style={{ flexWrap: "wrap", gap: 10, marginBottom: 36 }}>
           {CEFR_LEVELS.map((l) => (
@@ -916,7 +954,7 @@ export default function Onboarding({
             </button>
           ))}
         </div>
-        <button className="btn" onClick={() => advance(5)}>
+        <button className="btn" onClick={() => advance(5, cefr)}>
           {only ? "Save this level →" : "Continue →"}
         </button>
       </>

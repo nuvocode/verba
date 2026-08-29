@@ -13,6 +13,7 @@ import {
   scorePlacement,
   type PlacementQ,
 } from "./placement.ts";
+import { poolFor, pooled } from "./packs/pools.ts";
 
 const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "Turkish" } };
 
@@ -64,5 +65,34 @@ primePlacement({ ...s, ollamaHost: "http://127.0.0.1:1" });
 assert(placementPending() instanceof Promise, "priming starts a promise");
 clearPlacement();
 assert.equal(placementPending(), null, "clearing leaves nothing pending");
+
+// ---- the curated pools: every one held to the same shape a generated test is ----
+assert(poolFor("es") !== null, "es has a curated pool");
+assert.equal(poolFor("kl"), null, "a language with no pool returns null");
+assert.equal(poolFor(""), null, "an empty id returns null");
+
+for (const id of pooled()) {
+  const pool = poolFor(id)!;
+  assert.deepEqual(
+    pool.map((q) => q.level),
+    PLACEMENT_LADDER,
+    `${id}: the pool follows the ladder exactly`,
+  );
+  for (const q of pool) {
+    assert.equal(q.options.length, 3, `${id}: exactly three options`);
+    assert.equal(new Set(q.options).size, 3, `${id}: options are distinct`);
+    assert(q.options.every((o) => o.trim().length > 0), `${id}: no empty option`);
+    assert(Number.isInteger(q.answer) && q.answer >= 0 && q.answer < q.options.length, `${id}: answer in range`);
+    assert(q.prompt.trim().length > 0, `${id}: prompt is non-empty`);
+  }
+  assert(new Set(pool.map((q) => q.answer)).size >= 2, `${id}: the right answer moves around`);
+  assert.equal(
+    parsePlacement(JSON.stringify({ questions: pool }))?.length,
+    pool.length,
+    `${id}: the pool parses whole, like a generated test`,
+  );
+  assert.equal(scorePlacement(pool, pool.map((q) => q.answer)), "C2", `${id}: all right → the top`);
+  assert.equal(scorePlacement(pool, pool.map(() => -1)), "A1", `${id}: all skipped → the floor`);
+}
 
 console.log("placement.check ✓");
