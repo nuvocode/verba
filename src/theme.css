@@ -38,11 +38,16 @@ input { font: inherit; }
 .body { flex: 1; overflow: auto; position: relative; }
 .fade { animation: vfade .4s ease both; }
 
-.topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--bg); }
+/* The bar grew a Settings entry (#28), so on a narrow window it can want more
+   room than there is. Nothing in it is optional — the sections, the visible way
+   into Settings, and the plain-language work location are all spec — so it
+   scrolls rather than dropping a control off the right edge. */
+.topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--bg); overflow-x: auto; scrollbar-width: none; }
+.topbar::-webkit-scrollbar { display: none; }
 .logo { font-family: var(--serif); font-weight: 600; font-size: 19px; letter-spacing: -.01em; cursor: pointer; }
 .logo b { color: var(--accent); font-weight: 600; }
-.nav { display: flex; align-items: center; gap: 4px; }
-.nav-item { display: flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 7px; font-size: 13px; color: var(--ink3); }
+.nav { display: flex; align-items: center; gap: 2px; flex: none; }
+.nav-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 7px; font-size: 13px; color: var(--ink3); }
 .nav-item:hover { color: var(--ink); }
 .nav-item.on { color: var(--ink); background: var(--bg2); font-weight: 500; }
 .nav-item .k { font-family: var(--mono); font-size: 9.5px; color: var(--ink3); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; opacity: .6; }
@@ -51,13 +56,13 @@ input { font: inherit; }
    and always says what it counts (the title). */
 .nav-item .count { font-family: var(--mono); font-size: 9.5px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; }
 .spacer { flex: 1; }
-.status { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 11px; color: var(--ink3); padding: 5px 10px; border-radius: 6px; }
+.status { display: flex; align-items: center; gap: 7px; white-space: nowrap; font-family: var(--mono); font-size: 11px; color: var(--ink3); padding: 5px 10px; border-radius: 6px; }
 .status:hover { background: var(--bg2); color: var(--ink2); }
 .status .led { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
 .status .led.cloud { background: var(--warn); }
 .icon-btn { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 7px; display: flex; align-items: center; justify-content: center; color: var(--ink2); font-size: 13px; }
 .icon-btn:hover { background: var(--surface); }
-.anything { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; color: var(--ink3); font-size: 12px; background: var(--surface); }
+.anything { display: flex; flex: none; white-space: nowrap; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; color: var(--ink3); font-size: 12px; background: var(--surface); }
 .anything:hover { border-color: var(--ink3); }
 .anything .k { font-family: var(--mono); font-size: 10px; }
 

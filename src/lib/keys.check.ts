@@ -5,6 +5,8 @@
 // cannot fire, and a shortcut that is in the table is shown — so the two lists
 // cannot drift. Issues #28, #30.
 import assert from "node:assert";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { extname } from "node:path";
 import { KEYS, keysFor, live, navLive, type Shortcut, type Surface } from "./keys.ts";
 
 const SURFACES: Surface[] = [
@@ -61,7 +63,7 @@ for (const surf of SURFACES) {
 // the flag that shows them.
 const HINT_SURFACES: [Surface, string[]][] = [
   ["today", []],
-  ["talk", []],
+  ["talk", ["suggestions"]],
   ["read", ["bilingual"]],
   ["prompter", ["idle"]],
   ["listening", ["idle"]],
@@ -89,23 +91,64 @@ for (const surf of SURFACES) {
   assert(!live(surf, "k"), `bare "k" is not a shortcut — live() must refuse it on ${surf}`);
 }
 
-// --- nav keys are a subset of live keys ---------------------------------------
-// A topbar badge is only shown where the nav key actually works. On Talk, 1–3
-// are suggestions, so they are not nav keys there.
+// --- a nav key is live unless something is using it right now -----------------
+// The topbar badge is shown exactly where the nav key works. With no conditional
+// key claiming it, every nav key on a surface is live there.
 for (const surf of SURFACES) {
   for (const s of KEYS) {
     if (!s.nav || !s.on.includes(surf)) continue;
     for (const k of s.keys) assert(navLive(surf, k), `navLive() must accept "${k}" on ${surf}`);
   }
 }
-assert(!navLive("talk", "1"), "on Talk, 1 is a suggestion, not a nav key");
+// Talk is the case this rule exists for, and it swings both ways: while there are
+// suggestions on screen 1–3 belong to them, and the rest of the time — the scenario
+// picker, the reflection — they are the nav numbers the topbar promises.
+assert(!navLive("talk", "1", ["suggestions"]), "with suggestions up, 1 picks one rather than navigating");
+assert(navLive("talk", "1"), "with no suggestions on screen, 1 is a nav key on Talk");
 assert(navLive("today", "1"), "on Today, 1 is a nav key");
+// The comma is never claimed by anything, so it navigates everywhere nav does.
+assert(navLive("talk", ",", ["suggestions"]), "the comma is not a suggestion key");
 
 // --- nav keys never leak into a hint line -------------------------------------
 // A nav key is a topbar badge, not a hint-line item — `keysFor` must not offer
 // it, or the hint line would announce a shortcut the badge already shows.
 for (const surf of SURFACES) {
   for (const s of keysFor(surf)) assert(!s.nav, `keysFor(${surf}) must not return a nav shortcut`);
+}
+
+// --- every global key handler stands behind the gate --------------------------
+// The table can only be the one map if nothing takes a key without asking it.
+// Three handlers were reading raw `e.key` while the table claimed to govern them,
+// which is how a row for a key no handler implemented stayed green. The scan is
+// static, like settingsIndex.check's walk: it reads the source.
+//
+// ponytail: presence of a `live(` call in the file, not proof that every branch
+// is behind it. That is the cheap half of the guarantee and it catches the whole
+// file being outside the gate, which is the failure that actually happened. A
+// per-branch proof needs a parser; write one when a file passes this and is still
+// wrong.
+function walk(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const p = `${dir}/${entry}`;
+    const st = statSync(p);
+    if (st.isDirectory()) out.push(...walk(p));
+    else if (st.isFile() && (extname(p) === ".tsx" || extname(p) === ".ts")) out.push(p);
+  }
+  return out;
+}
+
+for (const f of [...walk("src/views"), "src/App.tsx"]) {
+  const text = readFileSync(f, "utf8");
+  if (!text.includes('addEventListener("keydown"')) continue;
+  // `live` may arrive under a local name — App already has a `live` ref of its own.
+  const imported = text.match(/import\s*\{[^}]*\blive\b(?:\s+as\s+(\w+))?[^}]*\}\s*from\s*"[^"]*keys"/);
+  assert(imported, `${f} installs a global keydown listener but does not import the gate from lib/keys`);
+  const gate = imported[1] ?? "live";
+  assert(
+    new RegExp(`\\b${gate}\\(`).test(text),
+    `${f} imports the gate but never calls it — a handler outside lib/keys is a key nobody announced`,
+  );
 }
 
 // --- the self-test: a deliberately broken table is caught ---------------------

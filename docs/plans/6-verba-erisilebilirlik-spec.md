@@ -23,15 +23,15 @@ Verba bir dil öğrenme **döngüsüdür** (bkz. `3-verba-activity-layer-spec.md
 
 ### 1.1 Tek harita
 
-Uygulamanın tek klavye haritası `src/lib/keys.ts`'tir. Her global `keydown` dinleyicisi `live(surface, key)` kapısının arkasında durmalıdır; tabloda olmayan bir tuş ateşleyemez. İpucu satırları `keysFor(surface)`'dan türetilir; tabloda olmayan bir tuş duyurulamaz.
+Uygulamanın tek klavye haritası `src/lib/keys.ts`'tir. Her global `keydown` dinleyicisi `live(surface, key)` kapısının arkasında durur; tabloda olmayan bir tuş ateşleyemez. İpucu satırları `keysFor(surface)`'dan türetilir; tabloda olmayan bir tuş duyurulamaz.
 
-**Bilinen sapma** (kayıt): `live` kapısının arkasında durmayan global dinleyiciler vardır — App, Onboarding ve Memory kendi `keydown`'larını doğrudan işler. Bu dinleyiciler `keys.ts`'ten değil, kendi yüzeylerinin yerel mantığından beslenir. Kısayol sözü verilmedikleri sürece §1.1'i ihlal etmezler; ilk kısayol eklendiğinde kapıya bağlanmaları gerekir. Bu fark, klavye tekliğinin bilinen bir borcudur ve ayrı bir iş konusudur.
+Bu bir gelenek değil, `keys.check.ts`'in kaynak taramasıyla tutulan bir kuraldır: `keydown` dinleyen ama kapıyı çağırmayan bir dosya CI'ı düşürür. Kapının kendisi yalnızca yüzey tuşlarını kapsar — `Esc` ve `⌘K` her yüzeyde geçerli olduklarından kapının üstünde durur ve ipucu satırıyla değil, kaçış hapı ve *Anything* düğmesiyle duyurulurlar.
 
 **Değişmez kurallar:**
 
 - Aynı yüzeyde bir tuş iki farklı eylem taşımaz. (Örnek: `Space` uygulamanın tamamında tek bir şey demektir — medya yüzeylerinde oynat/duraklat.)
 - Bir yüzeyin ipucu satırı yalnızca o yüzeyde gerçekten canlı olan kısayolları gösterir. Koşullu kısayollar (`when`) yalnızca koşul sağlandığında duyurulur.
-- Topbar'daki her rakam, bulunulan ekranda yazdığı yere gider; gitmediği ekranda yazmaz. (Talk'ta `1`–`3` öneri gönderir, dolayısıyla topbar orada rakam göstermez.)
+- Topbar'daki her rakam, bulunulan ekranda yazdığı yere gider; gitmediği ekranda yazmaz. Bir rakamı navigasyondan alan şey, o an gerçekten canlı olan bir yüzey tuşudur — bir ekranın tamamı değil. (Talk'ta `1`–`3` yalnızca ekranda öneri varken öneri seçer; senaryo seçiminde ve değerlendirmede yine nav rakamıdır ve topbar'da yeniden görünür.)
 - `Esc` her yüzeyde "bir seviye yukarı" anlamındadır; bir üst seviye yoksa (ör. onboarding'in ilk adımı) odaktan çıkar.
 
 ### 1.2 Odak sırası
@@ -105,7 +105,7 @@ Bir kontrol `disabled` olduğunda, neden kapalı olduğu kullanıcıya **sessizc
 3. **Cümle.** Düğme yerine durumu anlatan bir cümle ("ships with Verba").
 4. **Sınıra dayandı.** Kontrol bir değer aralığının ucunda kapandığında (ör. Prompter'ın hız düğmeleri `WPM_MIN`/`WPM_MAX`'ta), kapanan değer yanında görünürse gerekçe satırı gerekmez — durum sayıdan anlaşılır. Değer görünmüyorsa bu desen geçerli değildir.
 
-**Değişmez kural:** Bir disabled kontrolün neden kapalı olduğu, ya etiketinden ya yanındaki bir gerekçeden yanındaki değerden anlaşılır. İkisi de yoksa o kontrol sessizdir ve düzeltilmesi gerekir.
+**Değişmez kural:** Bir disabled kontrolün neden kapalı olduğu ya etiketinden, ya yanındaki bir gerekçeden, ya da yanında görünen değerden anlaşılır. Hiçbiri yoksa o kontrol sessizdir ve düzeltilmesi gerekir.
 
 ---
 

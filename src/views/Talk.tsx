@@ -401,7 +401,12 @@ export default function Talk({
             {/* The keyboard half comes from the one table; the mouse half — click ◉
                 to speak — is a pointer instruction, so it stays beside it (§5.4). */}
             <div style={{ maxWidth: 640, margin: "10px auto 0", fontSize: 11, color: "var(--ink3)" }}>
-              <Hints settings={settings} surface="talk" />
+              <Hints
+                settings={settings}
+                surface="talk"
+                // 1–3 are announced only while there is something to pick with them.
+                has={talk.suggestions.length > 0 && !talk.reflecting ? ["suggestions"] : []}
+              />
               {settings.showHints && (
                 <span style={{ marginLeft: 22 }}>
                   or click <span style={{ fontFamily: "var(--mono)" }}>◉</span> to speak

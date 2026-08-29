@@ -8,6 +8,7 @@ import { CEFR_LEVELS, type CEFRLevel } from "../lib/model";
 import { LEVELS, TIMES } from "../lib/choices";
 import { parsePlacement, placementPrompt, scorePlacement, type PlacementQ } from "../lib/placement";
 import { attach, detach, pickFolder, pull } from "../lib/vault";
+import { live } from "../lib/keys";
 import Hints from "./Hints";
 
 /** Every CEFR level is selectable — the test only proposes one. */
@@ -287,6 +288,7 @@ export default function Onboarding({
         if (e.key === "Escape") (el as HTMLInputElement).blur();
         return;
       }
+      if (!live("onboarding", e.key)) return; // the table is the gate
       if (e.key === "Escape") {
         e.preventDefault();
         return back();

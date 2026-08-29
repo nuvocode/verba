@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadSettings, saveSettings, isLocalProvider, onboardingReset, type Settings } from "./lib/settings";
 import { applyPatch, type Applied } from "./lib/rules";
 import { catalogModel, installed } from "./lib/bundled";
@@ -318,6 +318,15 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
             ? { label: "back to Today", run: () => go("today") }
             : null;
 
+  // What a surface key is claiming from navigation right now. Talk's 1–3 send a
+  // suggestion only while suggestions are on screen; the scenario picker and the
+  // reflection offer none, so there the numbers are the nav numbers again. The
+  // topbar badge and the handler read this same value, so they cannot disagree.
+  const claimed = useMemo(
+    () => (space === "talk" && !talk.reflecting && talk.suggestions.length > 0 ? ["suggestions"] : []),
+    [space, talk.reflecting, talk.suggestions.length],
+  );
+
   // ---- keyboard: every screen is reachable without the mouse ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -364,6 +373,12 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       }
       if (typing || captured || space === "onboarding") return;
 
+      // From here down the table is the gate (#30): a key lib/keys does not list
+      // on this surface does nothing at all. Esc and ⌘K sit above this line on
+      // purpose — they are global, and the escape pill and the Anything button
+      // announce them, not the hint line.
+      if (!keyLive(space, e.key)) return;
+
       if (space === "talk" && !talk.reflecting && /^[1-3]$/.test(e.key)) {
         const s = talk.suggestions[Number(e.key) - 1];
         if (s) return void talk.send(s, true);
@@ -393,7 +408,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       // Memory's R starts the resurfacing — the same action the "Resurface due"
       // button promises, so the badge and the key agree. Review mode owns its own
       // keys (App stands down while it is captured), so this is the collection only.
-      if (space === "memory" && keyLive("memory", e.key) && e.key.toLowerCase() === "r") {
+      if (space === "memory" && e.key.toLowerCase() === "r") {
         e.preventDefault();
         setReviewSignal((n) => n + 1);
         return;
@@ -401,16 +416,17 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
 
       // Listening is a media surface: Space plays and stops the chapter. The label
       // says what it does — "stop", not "pause", because the surface stops (§6).
-      if (space === "listening" && keyLive("listening", e.key) && e.key === " ") {
+      if (space === "listening" && e.key === " ") {
         e.preventDefault();
         if (listening.playing) listening.stop();
         else void listening.play();
         return;
       }
 
-      // The nav keys come from the one table, and only where they are actually live:
-      // on Talk, 1–3 are suggestions, so the topbar shows no badges and no nav fires.
-      if (navLive(space, e.key)) {
+      // The nav keys come from the one table, and only where they are actually
+      // live: on Talk, 1–3 are suggestions *while suggestions are on screen*, and
+      // plain nav keys before and after that.
+      if (navLive(space, e.key, claimed)) {
         const dest: Record<string, Space> = {
           "1": "today",
           "2": "talk",
@@ -428,6 +444,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
     return () => window.removeEventListener("keydown", onKey);
   }, [
     space,
+    claimed,
     paletteOpen,
     pIdx,
     paletteItems,
@@ -512,7 +529,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
               <span>{label}</span>
               {/* The badge is the shortcut, and only where the shortcut is live: on
                   Talk, 1–3 are suggestions, so the bar shows no numbers there. */}
-              {navLive(space, kbd) && <span className="k">{kbd}</span>}
+              {navLive(space, kbd, claimed) && <span className="k">{kbd}</span>}
               {/* Memory's due count is a *counter*, not a shortcut — a separate badge
                   that says what it counts, so a bare number never stands alone. */}
               {key === "memory" && day.due > 0 && (
@@ -526,7 +543,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
               a separate entry at the end of the bar, not a seventh nav item. */}
           <button className={`nav-item ${space === "settings" ? "on" : ""}`} onClick={() => go("settings")}>
             <span>Settings</span>
-            {navLive(space, ",") && <span className="k">,</span>}
+            {navLive(space, ",", claimed) && <span className="k">,</span>}
           </button>
         </div>
         <div className="spacer" />

@@ -6,6 +6,7 @@ import { getPack } from "../lib/packs";
 import { memorySignals } from "../lib/signals";
 import { strength, type Grade } from "../lib/srs";
 import { suspect } from "../lib/vocab";
+import { live } from "../lib/keys";
 import Hints from "./Hints";
 
 const GRADES: [string, Grade, string][] = [
@@ -154,6 +155,7 @@ export default function Memory({
   useEffect(() => {
     if (!reviewing) return;
     const onKey = (e: KeyboardEvent) => {
+      if (!live("review", e.key)) return; // the table is the gate
       if (e.key === "Escape") return setReviewing(false);
       // Enter is the primary action — revealing the card in front of them. Space is
       // not: it is the media key, and a card is not media (§3.1).

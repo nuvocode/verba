@@ -29,11 +29,10 @@ export interface Shortcut {
   when?: string;
 }
 
-// Navigation works on every screen except Talk (where 1–3 are suggestions) and
-// the flows that own their keys (onboarding, review). The comma → Settings is
-// not a suggestion on Talk, so it stays live there.
-const NAV: Surface[] = ["today", "read", "prompter", "listening", "memory", "coach", "settings"];
-const NAV_ALL: Surface[] = [...NAV, "talk"];
+// Navigation works on every screen except the flows that own their keys
+// (onboarding, review). Talk is on this list: 1–3 belong to navigation there too,
+// and only stand down while suggestions are actually on screen — see `navLive`.
+const NAV: Surface[] = ["today", "talk", "read", "prompter", "listening", "memory", "coach", "settings"];
 const SURFACES: Surface[] = [
   "today", "talk", "read", "prompter", "listening",
   "memory", "review", "coach", "settings", "onboarding",
@@ -47,7 +46,7 @@ export const KEYS: Shortcut[] = [
   { keys: ["4"], label: "4", does: "Listen", on: NAV, nav: true },
   { keys: ["5"], label: "5", does: "Memory", on: NAV, nav: true },
   { keys: ["6"], label: "6", does: "Coach", on: NAV, nav: true },
-  { keys: [","], label: ",", does: "Settings", on: NAV_ALL, nav: true },
+  { keys: [","], label: ",", does: "Settings", on: NAV, nav: true },
 
   // ---- today ----
   { keys: ["Enter"], label: "↵", does: "begin next", on: ["today"] },
@@ -56,7 +55,10 @@ export const KEYS: Shortcut[] = [
   { keys: ["k"], label: "⌘K", does: "anything — ask, jump, search", on: SURFACES, global: true },
 
   // ---- talk ----
-  { keys: ["1", "2", "3"], label: "1–3", does: "use a suggestion", on: ["talk"] },
+  // Only while there are suggestions to use. Before the scenario is picked, and
+  // during the reflection, nothing is on offer — so 1–3 go back to being nav keys
+  // and the topbar says so again.
+  { keys: ["1", "2", "3"], label: "1–3", does: "use a suggestion", on: ["talk"], when: "suggestions" },
   { keys: ["Enter"], label: "↵", does: "send", on: ["talk"] },
   { keys: ["Escape"], label: "esc", does: "end the session", on: ["talk"] },
 
@@ -122,10 +124,17 @@ export function live(surface: Surface, key: string): boolean {
   return KEYS.some((s) => !s.global && s.on.includes(surface) && s.keys.some((x) => x.toLowerCase() === k));
 }
 
-/** Is this key a live *navigation* shortcut on the surface? The topbar badge
- *  and the nav handler both ask this — a key that is a suggestion on Talk is
- *  not a nav key there, whatever `live` says. */
-export function navLive(surface: Surface, key: string): boolean {
+/** Is this key a live *navigation* shortcut right now? The topbar badge and the
+ *  nav handler both ask this, so the number shown and the number that works are
+ *  the same fact.
+ *
+ *  A surface key takes the number away from navigation only while it is itself
+ *  live: Talk's 1–3 are suggestions once suggestions are on screen, and nav keys
+ *  again the moment they are not. Withdrawing the numbers from the whole of Talk
+ *  would strand the scenario picker, which offers nothing for 1–3 to pick. */
+export function navLive(surface: Surface, key: string, has: string[] = []): boolean {
   const k = key.toLowerCase();
-  return KEYS.some((s) => s.nav && s.on.includes(surface) && s.keys.some((x) => x.toLowerCase() === k));
+  const claims = (s: Shortcut) => s.on.includes(surface) && s.keys.some((x) => x.toLowerCase() === k);
+  if (!KEYS.some((s) => s.nav && claims(s))) return false;
+  return !KEYS.some((s) => !s.nav && !s.global && claims(s) && (!s.when || has.includes(s.when)));
 }
