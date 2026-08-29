@@ -479,7 +479,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       <div className="shell">
         <Onboarding
           settings={settings}
-          only={{ step: 2, back: "settings" }}
+          only={{ step: 4, back: "settings" }}
           onDone={(patch) => {
             update(patch);
             setLevelTest(false);
@@ -499,6 +499,10 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
             update({ ...patch, onboarded: true });
             go(dest);
           }}
+          // Persist every answer as setup progresses, so closing the app resumes
+          // where it left off rather than starting over (§6). Not passed on the
+          // single-step level-test run — that answers one question and returns.
+          onSave={(patch) => update(patch)}
           // Only a learner who already finished setup has somewhere to escape to.
           onExit={settings.onboarded ? () => go("today") : undefined}
         />

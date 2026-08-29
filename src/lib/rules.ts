@@ -62,7 +62,7 @@ export interface Applied {
 const LOCAL_FALLBACK: ProviderId = "ollama";
 
 /** Two language names are the same language if they differ only in case or padding. */
-const sameLanguage = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+export const sameLanguage = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /**
  * §3: the native language and the target language can never be equal, by any

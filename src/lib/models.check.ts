@@ -4,7 +4,21 @@
 // big for this machine, and what a row says about itself. All of it is one pure
 // function so the claims a learner reads are claims a check can hold.
 import assert from "node:assert";
-import { CLOUD_MODELS, gb, isRemoteModel, localChoices, modelTrouble, PROVIDERS, type Installed } from "./models.ts";
+import {
+  CLOUD_MODELS,
+  gb,
+  INSTALLS,
+  isRemoteModel,
+  localChoices,
+  modelTrouble,
+  prettyModel,
+  PROVIDERS,
+  pullCommand,
+  slowNote,
+  suggestedModel,
+  troubleFrom,
+  type Installed,
+} from "./models.ts";
 import { defaultSettings, isLocalProvider } from "./settings.ts";
 
 const GB = 1024 ** 3;
@@ -135,5 +149,47 @@ for (const p of PROVIDERS) {
   assert(p.name.trim(), `${p.id} must have a name`);
   assert(isLocalProvider(p.id) ? !!p.host : !!p.key, `${p.id} must name the field that makes it usable`);
 }
+
+// ---- screen 3: what a bare machine is told, and how a failed probe reads ----
+
+// A readable name, with the raw id still recoverable from the title attribute.
+assert.equal(prettyModel("gemma4:e2b-mlx"), "Gemma 4 · e2b-mlx", "a family:tag id reads as a name");
+assert.equal(prettyModel("llama"), "Llama", "a bare family is capitalised");
+assert.equal(prettyModel(""), "", "an empty id comes back unchanged");
+
+// The copyable command, and the suggestion it is built from.
+assert.equal(pullCommand("x"), "ollama pull x", "the command names the model");
+assert(pullCommand().includes(suggestedModel()), "the default command pulls the suggested model");
+
+// 3a is the screen that must never be blank: two installs, each with a real
+// download, a size, a time and at least two steps.
+assert.equal(INSTALLS.length, 2, "two local providers are offered");
+for (const i of INSTALLS) {
+  assert(i.url.trim(), `${i.name} must say where to download it`);
+  assert(i.size.trim(), `${i.name} must say how big it is`);
+  assert(i.time.trim(), `${i.name} must say how long it takes`);
+  assert(i.steps.length >= 2, `${i.name} must have at least two steps`);
+}
+
+// A passing probe is not trouble.
+assert.equal(troubleFrom({ ok: true, ms: 10 }, "Ollama", "h", "m"), null, "a passing probe has no trouble");
+
+// Every failure case leaves the learner with a cause and a next action (§6).
+const cases: [string, string][] = [
+  ["timeout", "The model did not answer in time."],
+  ["refused", "Ollama stopped answering at h."],
+  ["404", "Ollama is running, but it is not serving m."],
+  ["something else entirely", "something else entirely"],
+];
+for (const [err, why] of cases) {
+  const t = troubleFrom({ ok: false, ms: 5, error: err }, "Ollama", "h", "m")!;
+  assert(t.why.trim(), `a ${err} failure must say why`);
+  assert(t.next.trim(), `a ${err} failure must say what to do next`);
+  assert.equal(t.why, why, `a ${err} failure reads as expected`);
+}
+
+// Honesty about a passing but painful probe.
+assert.equal(slowNote(900), "", "a fast probe says nothing");
+assert(slowNote(30000).length > 0, "a slow probe says so");
 
 console.log(`models.check ✓ ${rows.length} local rows, ${Object.keys(CLOUD_MODELS).length} cloud lists`);

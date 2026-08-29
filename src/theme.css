@@ -89,10 +89,15 @@ input { font: inherit; }
 .toggle.on span { transform: translateX(17px); }
 
 /* ---------- onboarding ---------- */
-.onb { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 24px; position: relative; }
+/* The one scrolling box in setup: .shell is overflow:hidden and onboarding has no
+   .body wrapper, so a step taller than the window — the model list — was simply
+   cut off. flex:1 + min-height:0 is what lets a flex child scroll at all. */
+.onb { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 96px 24px 60px; position: relative; }
 .onb .skip { position: absolute; top: 24px; right: 32px; font-size: 12px; color: var(--ink3); }
 .onb .skip:hover { color: var(--ink); }
-.onb .mark { position: absolute; top: 24px; left: 32px; font-family: var(--serif); font-weight: 600; font-size: 20px; }
+/* Fixed rather than absolute: .onb is now the scroller, and chrome that scrolls
+   away is chrome that is not "in the same place on every screen" (§6). */
+.onb .mark { position: fixed; top: 24px; left: 32px; font-family: var(--serif); font-weight: 600; font-size: 20px; }
 .onb .sheet { width: 640px; max-width: 100%; animation: vfade .5s ease both; }
 .onb h1 { font-family: var(--serif); font-size: 42px; font-weight: 500; letter-spacing: -.015em; line-height: 1.1; margin: 18px 0 36px; }
 .onb .sub { font-size: 14px; color: var(--ink2); margin: -24px 0 32px; line-height: 1.6; }
@@ -114,6 +119,9 @@ input { font: inherit; }
 /* pack provenance, corner of the card */
 .pick { position: relative; }
 .pick .tag { position: absolute; top: 10px; right: 10px; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
+/* The same badge idiom as .tag, but inline: reusing .chip here put a 40px-tall
+   tap target inside a 19px title and pushed it into the line below. */
+.pick .rec { display: inline-block; margin-left: 9px; padding: 2px 8px; border: 1px solid var(--accent); border-radius: 20px; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); vertical-align: middle; }
 .pick.on .tag { color: var(--accent); }
 /* the quiet native-language line + its inline picker */
 .native { margin-top: 22px; font-size: 13.5px; color: var(--ink2); }
@@ -454,7 +462,7 @@ input { font: inherit; }
 /* ---------- escape: the way out is always visible ---------- */
 .escape { position: fixed; bottom: 18px; right: 18px; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 8px 13px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); color: var(--ink3); font-size: 12px; box-shadow: var(--shadow); }
 .escape:hover { color: var(--ink); border-color: var(--ink3); }
-.onb .onb-esc { position: absolute; top: 24px; right: 32px; display: flex; align-items: center; gap: 18px; }
+.onb .onb-esc { position: fixed; top: 24px; right: 32px; display: flex; align-items: center; gap: 18px; }
 .onb .onb-esc .skip { position: static; display: flex; align-items: center; gap: 7px; }
 .onb .native .warn strong { color: var(--accent); }
 
@@ -505,3 +513,11 @@ input { font: inherit; }
 .confirm h2 { font-family: var(--serif); font-size: 26px; font-weight: 500; margin: 0 0 12px; }
 .confirm p { font-size: 13.5px; line-height: 1.65; color: var(--ink2); margin: 0 0 24px; }
 .confirm .btn .kbd { background: transparent; border-color: currentColor; opacity: .5; }
+
+/* Today's folded setup summary — the "your plan is ready" screen, demoted to a
+   line you can open when you want it (§5, screen 5). */
+.setup { margin: 0 0 30px; max-width: 640px; font-size: 13px; color: var(--ink2); }
+.setup summary { cursor: pointer; font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink3); }
+.setup summary:hover { color: var(--ink); }
+.setup .row2 { display: flex; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line2); }
+.setup .row2 .k { font-family: var(--mono); font-size: 11px; color: var(--ink3); width: 96px; flex: none; padding-top: 2px; }

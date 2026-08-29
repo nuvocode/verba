@@ -90,7 +90,15 @@ export interface Settings {
   ttsTier: Tier;
   sttTier: Tier;
   onboarded: boolean; // false → the welcome flow runs instead of the app
+  /** How far setup got, so closing the app mid-setup does not start it over (§6).
+   *  Meaningless once `onboarded` is true, and reset to 0 by `onboardingReset`. */
+  setupStep: number;
   dailyMinutes: number; // how long a session should be, from onboarding
+  /** The language the interface is asked for on screen 0, as a BCP-47 code.
+   *  "" until the learner has answered — the interface itself is not translated
+   *  yet, so this is the record of the choice and the seed for the native
+   *  language, nothing more. */
+  uiLanguage: string;
   theme: "light" | "dark";
   correctionTiming: CorrectionTiming;
   offline: boolean; // hard-forces local providers; cloud options are disabled
@@ -111,9 +119,15 @@ export interface Settings {
   memoryPaused: boolean;
 }
 
-/** What "Skip setup" from step 2 onward leaves behind: the A2 fallback (the old
- *  "unset level" now reads as A2 directly), a short session, no interests. */
-export const SKIP_DEFAULTS = { level: "A2" as CEFRLevel, dailyMinutes: 20, interests: [] as string[] };
+/** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
+ *  system language, which `defaultSettings.profile.nativeLanguage` already is. */
+export const SKIP_DEFAULTS = { level: "B1" as CEFRLevel, dailyMinutes: 45, interests: [] as string[] };
+
+/** What "Skip setup" leaves behind, in a sentence. §6: skipping has to say what it
+ *  assumes, and it has to say the same thing on every screen — so it is written
+ *  once, here, next to the values it describes. */
+export const skipNote = (nativeLanguage: string): string =>
+  `Skipping assumes ${SKIP_DEFAULTS.level}, ${SKIP_DEFAULTS.dailyMinutes} minutes a day, and explanations in ${nativeLanguage}. All three can be changed in Settings.`;
 
 /**
  * Replaying onboarding starts the setup over: language, level, rhythm and interests are
@@ -125,6 +139,7 @@ export const onboardingReset = (): Partial<Settings> => ({
   packId: defaultSettings.packId,
   profile: { ...defaultSettings.profile, interests: [] },
   dailyMinutes: defaultSettings.dailyMinutes,
+  setupStep: 0,
 });
 
 const KEY = "verba.settings";
@@ -179,7 +194,9 @@ export const defaultSettings: Settings = {
   ttsTier: "auto",
   sttTier: "auto",
   onboarded: false,
+  setupStep: 0,
   dailyMinutes: 45,
+  uiLanguage: "",
   theme: "light",
   correctionTiming: "adaptive",
   offline: true,

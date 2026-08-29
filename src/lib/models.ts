@@ -3,7 +3,7 @@
 // Spec: docs/plans/2-verba-ana-ekran-ve-ayarlar-spec.md §5.7 — the model is
 // picked from a list rather than typed, every row says what it is like to use,
 // and a row too big for this machine says so.
-import { isLocalProvider, type ProviderId, type Settings } from "./settings.ts";
+import { defaultSettings, isLocalProvider, type ProviderId, type Settings } from "./settings.ts";
 
 // Both reached lazily, so this module's pure half — the sizing rules and the
 // cloud lists — stays loadable by plain node (models.check.ts). Import either
@@ -227,6 +227,48 @@ export const PROVIDERS: {
   },
 ];
 
+/** What screen 3a offers when no provider is running. Sizes and times are written
+ *  as ranges rather than figures: the installer's exact size changes with every
+ *  release, and a number that is wrong is worse than a range that is right. */
+export interface Install {
+  id: LocalProvider;
+  name: string;
+  what: string; // one sentence: what this thing is
+  url: string; // where to download it
+  size: string; // how big the download is
+  time: string; // how long it takes
+  steps: string[]; // what to do after installing, in order
+}
+
+export const INSTALLS: Install[] = [
+  {
+    id: "ollama",
+    name: "Ollama",
+    what: "A small app that runs language models on your own machine. Free, and it starts itself.",
+    url: "https://ollama.com/download",
+    size: "A few hundred megabytes for the app. The model you then download is the bigger part — usually 2 to 5 GB.",
+    time: "A couple of minutes to install, longer for the model — that part depends on your connection.",
+    steps: [
+      "Download Ollama and open it. It puts an icon in your menu bar and keeps running.",
+      "Download a model — Ollama's own window can do it, or paste the command below into a terminal.",
+      "Come back here. Verba is watching, and this screen moves on by itself.",
+    ],
+  },
+  {
+    id: "lmstudio",
+    name: "LM Studio",
+    what: "A desktop app for downloading and running models, with a window for browsing them.",
+    url: "https://lmstudio.ai",
+    size: "Around half a gigabyte for the app, plus the model you choose — usually 2 to 5 GB.",
+    time: "A few minutes to install, longer for the model.",
+    steps: [
+      "Download LM Studio and open it.",
+      "Search for a model in its Discover tab and download it.",
+      "Open the Developer tab and start the local server.",
+      "Come back here. Verba is watching, and this screen moves on by itself.",
+    ],
+  },
+];
 
 /**
  * Is there anything to talk to? §7 row 2 — "Model yanıt vermiyor → ana ekranda
@@ -324,4 +366,118 @@ export async function testConnection(s: Settings): Promise<Probe> {
   } catch (e: any) {
     return { ok: false, ms: Date.now() - started, error: String(e?.message ?? e) };
   }
+}
+
+// ---- what a bare machine is told, and how a failed probe reads -------
+
+/** The model setup tells a bare machine to download.
+ *  ponytail: it is `defaultSettings.ollamaModel` rather than a second list, so the
+ *  suggestion and the app's own default can never disagree. Change one, both move. */
+export const suggestedModel = (): string => defaultSettings.ollamaModel;
+
+/** The command that downloads it. Shown to be copied, never run by the app. */
+export const pullCommand = (model = suggestedModel()): string => `ollama pull ${model}`;
+
+export interface PullProgress {
+  /** Ollama's own word for what it is doing ("pulling manifest", "downloading…"). */
+  status: string;
+  done: number; // bytes so far, 0 when it does not say
+  total: number; // bytes in all, 0 when it does not say
+}
+
+/**
+ * Ask Ollama to download a model, reporting progress as it arrives.
+ *
+ * The whole reason this exists: §5 3b promises a learner with no terminal a way
+ * through, and a copyable command is not one. LM Studio has no equivalent API, so
+ * that provider gets the command alone.
+ */
+export async function pullModel(
+  host: string,
+  model: string,
+  onProgress: (p: PullProgress) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await (await http())(`${host.replace(/\/$/, "")}/api/pull`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model, stream: true }),
+    signal,
+  });
+  if (!res.ok) throw new Error(`Ollama refused the download (${res.status}).`);
+  // A stream that is not a stream still means the download happened — there was
+  // just nothing to report, so drain it and move on.
+  if (!res.body || !res.body.getReader) {
+    await res.text();
+    return;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? ""; // the trailing partial line stays for the next chunk
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let obj: any;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue; // a line that is not JSON is skipped, never fatal
+      }
+      if (obj?.error) throw new Error(String(obj.error));
+      onProgress({
+        status: String(obj?.status ?? ""),
+        done: Number(obj?.completed) || 0,
+        total: Number(obj?.total) || 0,
+      });
+    }
+  }
+}
+
+/** "gemma4:e2b-mlx" → "Gemma 4 · e2b-mlx". The raw id is never lost — the picker
+ *  keeps it in a title attribute — but it is not what a learner should have to read. */
+export function prettyModel(id: string): string {
+  const trimmed = id.trim();
+  if (!trimmed) return id;
+  const [familyRaw, ...rest] = trimmed.split(":");
+  const tag = rest.join(":");
+  const family = familyRaw
+    .replace(/[-_]/g, " ")
+    .replace(/([a-z])(\d)/gi, "$1 $2")
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+  return tag ? `${family} · ${tag}` : family;
+}
+
+export interface Trouble {
+  why: string; // what went wrong, in the learner's words
+  next: string; // what to do about it — never absent
+}
+
+/** Turn a failed probe into a cause and a next action. `null` when the probe passed. */
+export function troubleFrom(probe: Probe, providerName: string, host: string, model: string): Trouble | null {
+  if (probe.ok) return null;
+  const err = (probe.error ?? "").toLowerCase();
+  if (/timeout|abort/.test(err))
+    return { why: "The model did not answer in time.", next: "It may still be loading. Try again, or choose a smaller model." };
+  if (/refused|network|failed to fetch|connect/.test(err))
+    return { why: `${providerName} stopped answering at ${host}.`, next: "Check that it is still running, then try again." };
+  if (/404|not found|no such model/.test(err))
+    return {
+      why: `${providerName} is running, but it is not serving ${model}.`,
+      next: "Choose another model from the list, or download this one first.",
+    };
+  return { why: probe.error ?? "", next: "Try again, or choose another model." };
+}
+
+/** A probe that passed but took long enough to change the experience. "" when it didn't. */
+export function slowNote(ms: number): string {
+  if (ms < 10000) return "";
+  return `That took ${Math.round(ms / 1000)} seconds. It will feel like this in every conversation — a smaller model is worth trying.`;
 }

@@ -25,7 +25,14 @@ src/lib/packs/
       pronunciation.md optional — long-form docs, as many as you like
       grammar.md
       register.md      optional — with `prompt: true`, the tutor reads it too
+      placement.ts     optional — eight hand-written placement questions
 ```
+
+`placement.ts` — optional. Eight hand-written multiple-choice questions, one per
+rung of `PLACEMENT_LADDER`, that place a new learner. Without it the app asks the
+local model to write a test instead, which works but varies with the model. Add
+the file, add one import line to `src/lib/packs/pools.ts`, and the language stops
+depending on that. `placement.check.ts` holds every pool to the same shape.
 
 [`langs/es/`](./src/lib/packs/langs/es/) is the reference example — copy it.
 Official packs are held to the same bar: every language, including the core
