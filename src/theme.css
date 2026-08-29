@@ -89,7 +89,7 @@ input { font: inherit; }
 .toggle.on span { transform: translateX(17px); }
 
 /* ---------- onboarding ---------- */
-.onb { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 24px; position: relative; }
+.onb { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 96px 24px 60px; position: relative; }
 .onb .skip { position: absolute; top: 24px; right: 32px; font-size: 12px; color: var(--ink3); }
 .onb .skip:hover { color: var(--ink); }
 .onb .mark { position: absolute; top: 24px; left: 32px; font-family: var(--serif); font-weight: 600; font-size: 20px; }

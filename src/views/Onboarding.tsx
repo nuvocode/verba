@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SKIP_DEFAULTS, type ProviderId, type Settings } from "../lib/settings";
+import { SKIP_DEFAULTS, skipNote, type ProviderId, type Settings } from "../lib/settings";
 import { getPack, listPacks, packOrigin, originLabel, type PackOrigin } from "../lib/packs";
 import { endonym, langCode, langName, langNameIn, languages, UI_LANGUAGES } from "../lib/langs";
 import { AT, sameLanguage } from "../lib/rules";
@@ -14,6 +14,7 @@ import {
   listModels,
   localChoices,
   machineRam,
+  PROVIDERS,
   prettyModel,
   pullCommand,
   pullModel,
@@ -150,12 +151,16 @@ export default function Onboarding({
   settings,
   onDone,
   onExit,
+  onSave,
   only,
 }: {
   settings: Settings;
   onDone: (patch: Partial<Settings>, dest?: "today" | "settings") => void;
   /** Present only on a replay — a first run has nowhere to escape to. */
   onExit?: () => void;
+  /** Write an answer down without leaving setup. §6: every answer is persisted the
+   *  moment it is given, so closing the app resumes where it left off. */
+  onSave?: (patch: Partial<Settings>) => void;
   /**
    * Run one step on its own and hand the answer straight back to where the
    * learner came from. Settings → Learning uses this for "I'm not sure — take a
@@ -165,7 +170,22 @@ export default function Onboarding({
   only?: { step: number; back: "settings" };
 }) {
   const packs = listPacks();
-  const [step, setStep] = useState(only?.step ?? 0);
+  // Resume where setup was left, not from the top — closing the app mid-setup
+  // must not throw the answers away (§6). Clamped so a stored step from an older
+  // build cannot index past the `body` array, and a replay (or a finished setup)
+  // starts at the beginning.
+  const providerModel = PROVIDERS.find((p) => p.id === settings.provider)?.model ?? "ollamaModel";
+  const noModelConfigured = settings[providerModel] === "";
+  const storedStep = settings.onboarded ? 0 : Math.min(Math.max(0, settings.setupStep), 5);
+  // A stored step is not proof the model screen was ever passed: if setup was
+  // left on it (or on Ready, which needs a model) but no model is on file for the
+  // current provider, start at the model screen instead — the one step that
+  // cannot be skipped (§6).
+  const resumedStale = (storedStep === 4 || storedStep === 5) && noModelConfigured;
+  const [step, setStep] = useState(only?.step ?? (resumedStale ? 3 : storedStep));
+  // The model screen's skip shows *why* it cannot be skipped the first time it is
+  // tried, instead of doing nothing at all (§6).
+  const [skipTried, setSkipTried] = useState(false);
 
   /**
    * Walk on through setup, or — on a single-step run — answer and go back.
@@ -205,7 +225,11 @@ export default function Onboarding({
       // Leave no half-attached folder behind: an aborted restore must not turn
       // the next launch into a conflict dialog on an empty install.
       detach();
-      setRestoreErr(String(e?.message ?? e));
+      // The reason alone is not the whole answer — the learner needs to know what
+      // was expected too, or the next folder they try is a guess (§6).
+      setRestoreErr(
+        `${String(e?.message ?? e)} Verba looks for the folder you pointed your other machine at — the one holding your Verba data, not the app itself.`,
+      );
       setRestoring("");
     }
   };
@@ -232,8 +256,12 @@ export default function Onboarding({
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Nothing is pre-selected on a fresh install — a default target language would be a silent
-  // guess. On a replay, the learner's current pack is shown as chosen.
-  const [packId, setPackId] = useState(settings.onboarded ? settings.packId : "");
+  // guess. On a replay, the learner's current pack is shown as chosen. A resumed setup
+  // restores the pack the learner picked before quitting, exactly as it restores the step
+  // (§6: closing the app mid-setup must not throw the answers away).
+  const [packId, setPackId] = useState(
+    settings.onboarded || settings.setupStep > 0 ? settings.packId : "",
+  );
   const [nativeLang, setNativeLang] = useState(settings.profile.nativeLanguage);
   const [cefr, setCefr] = useState<CEFRLevel>(settings.profile.level);
   const [minutes, setMinutes] = useState(settings.dailyMinutes);
@@ -288,6 +316,14 @@ export default function Onboarding({
 
   /** The settings the placement test itself must run under — the ones just chosen, not the saved ones. */
   const draft = (): Settings => ({ ...settings, ...patch() } as Settings);
+
+  // Persist every answer the moment it is given, so closing the app mid-setup
+  // resumes where it left off (§6). A single-step run answers one question and
+  // hands it back itself — there is nothing to persist.
+  useEffect(() => {
+    if (only) return; // a single-step run answers one question and hands it back itself
+    onSave?.({ ...patch(), setupStep: step });
+  }, [step, ui, packId, nativeLang, cefr, minutes, prov, hosts, models]);
 
   // The preview sentence on the last screen is measured from the real plan, so
   // the promise and the plan cannot drift (§6).
@@ -402,7 +438,10 @@ export default function Onboarding({
   const skip = () => {
     setCefr(SKIP_DEFAULTS.level);
     setMinutes(SKIP_DEFAULTS.dailyMinutes);
-    setStep(5);
+    // §6: the model step is the one that cannot be skipped. Once a model is
+    // verified, skip lands on Ready; until then it lands on the model screen
+    // rather than walking straight past it.
+    setStep(verify === "ok" ? 5 : 3);
   };
 
   // ---- keyboard: the whole flow is drivable without a mouse ----
@@ -452,6 +491,12 @@ export default function Onboarding({
       return (
         <>
           <h1>Verba needs a model on this machine.</h1>
+          {skipTried && (
+            <div className="native" style={{ marginBottom: 12 }}>
+              Setup can be skipped, but the model cannot: without one there is nothing to talk to. Everything else is
+              already assumed.
+            </div>
+          )}
           <div className="sub">
             Verba talks to a language model running on your own computer. You set it up once, then forget about it. This
             screen is watching, and moves on by itself the moment it finds one.
@@ -527,6 +572,12 @@ export default function Onboarding({
       return (
         <>
           <h1>{name} is running — there is no model yet.</h1>
+          {skipTried && (
+            <div className="native" style={{ marginBottom: 12 }}>
+              Setup can be skipped, but the model cannot: without one there is nothing to talk to. Everything else is
+              already assumed.
+            </div>
+          )}
           <div className="sub">
             Verba can see it at {hosts[p]}, and it is serving nothing. One download and you are finished.
           </div>
@@ -593,6 +644,12 @@ export default function Onboarding({
         <h1>
           Connected to {name} · {rows.length} {rows.length === 1 ? "model" : "models"}
         </h1>
+        {skipTried && (
+          <div className="native" style={{ marginBottom: 12 }}>
+            Setup can be skipped, but the model cannot: without one there is nothing to talk to. Everything else is
+            already assumed.
+          </div>
+        )}
         <div className="col">
           <div className="native">
             <strong>On this machine</strong> — These run on your computer. Nothing you say leaves it.
@@ -1068,17 +1125,27 @@ export default function Onboarding({
       </div>
 
       <div className="onb-esc">
-        {/* Skip needs a language and a model first — without them there is nothing to
-            generate. On a single-step run there is no setup to skip: the learner
-            came here to answer one question and already has everything else. */}
-        {!only && (step === 1 || step === 2 || step === 4) && (
-          <button
-            className="skip"
-            onClick={skip}
-            title="Level: B1 · 45 minutes a day · your system language"
-          >
-            Skip setup →
-          </button>
+        {/* Skip sits on the same screen, in the same place, on every step (§6). It
+            does not act the same on every step: on the model step it can only say
+            why it cannot skip (there is nothing to talk to without a model), and on
+            a single-step run there is no setup to skip at all. What it assumes is
+            held once, in lib/settings, and read from here. */}
+        {!only && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+            <button
+              className="skip"
+              onClick={() => {
+                if (step === 3) return setSkipTried(true);
+                skip();
+              }}
+              title={skipNote(nativeLang)}
+            >
+              Skip setup →
+            </button>
+            <span className="native" style={{ width: 230, fontSize: 11, lineHeight: 1.4, textAlign: "right" }}>
+              {skipNote(nativeLang)}
+            </span>
+          </div>
         )}
         {onExit && (
           <button className="skip esc" onClick={onExit}>
