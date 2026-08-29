@@ -102,6 +102,13 @@ export interface Settings {
   // whole point is that it outlives the passage — and the session.
   readView: ReadView;
   prompterWpm: number; // the pace they last read out loud at (lib/prompter clamps it)
+  /**
+   * Stop the coach from writing new facts about the learner. What is already on
+   * file keeps steering sessions; only the writing of new ones pauses. Lives in
+   * Settings because it is a setting — the About me page reads it through the
+   * same record every other section reads.
+   */
+  memoryPaused: boolean;
 }
 
 /** What "Skip setup" from step 2 onward leaves behind: the A2 fallback (the old
@@ -182,6 +189,7 @@ export const defaultSettings: Settings = {
   // exercise you opt into, not a new front door.
   readView: "passage",
   prompterWpm: DEFAULT_WPM,
+  memoryPaused: false,
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>
