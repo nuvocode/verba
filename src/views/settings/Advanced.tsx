@@ -441,6 +441,12 @@ function addRow(
           <button className="btn sm ghost" onClick={() => take(kind, pasted)} disabled={!pasted.trim()}>
             Add it
           </button>
+          {/* Not a silent disabled (#42): the box is empty, so there is nothing to add yet. */}
+          {!pasted.trim() && (
+            <span className="model" style={{ color: "var(--ink3)", marginLeft: 8 }}>
+              Paste something first
+            </span>
+          )}
         </div>
       )}
     </div>

@@ -140,9 +140,17 @@ export default function Listening({
           </div>
 
           {!stepChecked ? (
-            <button className="btn" disabled={!currentAnswered} onClick={() => void listening.check()}>
-              Check answer
-            </button>
+            <>
+              <button className="btn" disabled={!currentAnswered} onClick={() => void listening.check()}>
+                Check answer
+              </button>
+              {/* Not a silent disabled (#42): the question is unanswered, so there is nothing to check yet. */}
+              {!currentAnswered && (
+                <span className="model" style={{ color: "var(--ink3)", marginLeft: 8 }}>
+                  Answer the question first
+                </span>
+              )}
+            </>
           ) : !allChecked ? (
             <button className="btn" onClick={listening.nextQuestion}>
               Next question →

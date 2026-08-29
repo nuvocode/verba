@@ -387,8 +387,9 @@ export default function Talk({
               >
                 ◉
               </button>
+              {/* The in-flight disabled is not silent (#42): the label says what is happening. */}
               <button className="send" onClick={() => void talk.send(talk.input)} disabled={talk.busy || !talk.input.trim()}>
-                Send
+                {talk.busy ? "Sending…" : "Send"}
               </button>
             </div>
             {/* The keyboard half comes from the one table; the mouse half — click ◉

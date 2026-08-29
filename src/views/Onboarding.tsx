@@ -389,6 +389,12 @@ export default function Onboarding({
         <button className="btn" style={{ marginTop: 32 }} disabled={!model.trim()} onClick={() => setStep(1)}>
           Continue →
         </button>
+        {/* Not a silent disabled (#42): the field is empty, so there is no model to continue with. */}
+        {!model.trim() && (
+          <div className="model" style={{ color: "var(--ink3)", marginTop: 8 }}>
+            Type a model name to continue
+          </div>
+        )}
 
         {!settings.onboarded && (
           <div className="native" style={{ marginTop: 26 }}>
