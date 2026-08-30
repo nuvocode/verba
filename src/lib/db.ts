@@ -493,27 +493,6 @@ export async function saveMetrics(
   );
 }
 
-export interface MetricsRow {
-  messages: number;
-  words: number;
-  unique_words: number;
-  avg_sentence_len: number;
-  avg_word_len: number;
-  corrections: number;
-  deck_size: number;
-  score: number;
-}
-
-/** The last n sessions' raw metrics, newest first — the Coach re-derives its components from these. */
-export async function recentMetrics(lang: string, n = 2): Promise<MetricsRow[]> {
-  const db = await getDb();
-  return db.select<MetricsRow[]>(
-    `SELECT messages, words, unique_words, avg_sentence_len, avg_word_len, corrections, deck_size, score
-     FROM session_metrics WHERE lang = $1 ORDER BY created_at DESC LIMIT $2`,
-    [lang, n],
-  );
-}
-
 export async function latestMetricScore(lang: string): Promise<number | null> {
   const db = await getDb();
   const rows = await db.select<{ score: number }[]>(
@@ -531,28 +510,6 @@ export async function recentMetricScores(lang: string, n = 12): Promise<number[]
     [lang, n],
   );
   return rows.map((r) => r.score).reverse();
-}
-
-/**
- * Which of the last 7 days had any activity. Index 0 = 6 days ago, index 6 = today.
- * Reads local-midnight boundaries, so "today" means the learner's today.
- */
-export async function activeDays(now = Date.now()): Promise<boolean[]> {
-  const db = await getDb();
-  const midnight = new Date(now);
-  midnight.setHours(0, 0, 0, 0);
-  const start = midnight.getTime() - 6 * 24 * 60 * 60 * 1000;
-  const rows = await db.select<{ t: number }[]>(
-    `SELECT started_at AS t FROM sessions WHERE started_at >= $1
-     UNION ALL SELECT created_at AS t FROM review_log WHERE created_at >= $1`,
-    [start],
-  );
-  const days = [false, false, false, false, false, false, false];
-  for (const r of rows) {
-    const i = Math.floor((r.t - start) / (24 * 60 * 60 * 1000));
-    if (i >= 0 && i < 7) days[i] = true;
-  }
-  return days;
 }
 
 // ---- Phase 3: daily learning sessions ----
