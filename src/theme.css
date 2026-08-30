@@ -407,6 +407,7 @@ input { font: inherit; }
 .weak { border: 1px solid var(--line); background: var(--surface); border-radius: 11px; padding: 20px 22px; }
 .weak h3 { font-family: var(--serif); font-size: 19px; font-weight: 500; margin: 0 0 8px; }
 .weak p { font-size: 13px; color: var(--ink2); line-height: 1.6; margin: 0; }
+.weak .ev { font-size: 12px; color: var(--ink3); letter-spacing: 0.02em; margin: 6px 0 10px; }
 
 /* ---------- settings ---------- */
 .set { max-width: 900px; margin: 0 auto; padding: 64px 32px 90px; display: grid; grid-template-columns: 128px minmax(0, 1fr); column-gap: 40px; align-content: start; }

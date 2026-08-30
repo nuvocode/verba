@@ -6,7 +6,7 @@ import { weeklyReportPrompt, parseWeeklyReport, type WeeklyReport } from "../lib
 import { getPack } from "../lib/packs";
 import { CEFR_LEVELS } from "../lib/level";
 import { levelOf, levelGapNote, progressionSuggested, MIN_WEAKNESS_EVIDENCE, type Signal } from "../lib/model";
-import { addressed } from "../lib/weakness";
+import { addressed, weaknessCard } from "../lib/weakness";
 import { coachPanel, measured, headline, wins, daySeries, type Metric, type MetricPair } from "../lib/coachmetrics";
 import { recentMemories, recentMetricScores, weekStats, signalsSince } from "../lib/db";
 
@@ -108,6 +108,10 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
           .map((s, i) => `${(i / (trend.length - 1)) * 800},${72 - (s / 100) * 60}`)
           .join(" ")
       : "";
+
+  // Titles come from tomorrow's plan through the day, so a card names the activity
+  // the learner will actually see rather than an id from the model.
+  const titles = Object.fromEntries((day.plan?.activities ?? []).map((a) => [a.id, a.title]));
 
   return (
     <div className="coach fade">
@@ -220,15 +224,17 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
       </div>
       {addressed(day.weaknesses).length > 0 ? (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 48 }}>
-          {addressed(day.weaknesses).map((w) => (
-            <div className="weak" key={w.id}>
-              <h3>{w.label}</h3>
-              <p>
-                {w.evidence.length} slips so far. Tomorrow's plan drills it in{" "}
-                {w.addressedBy.map((id) => day.plan?.activities.find((a) => a.id === id)?.title ?? id).join(" and ")}.
-              </p>
-            </div>
-          ))}
+          {addressed(day.weaknesses).map((w) => {
+            const card = weaknessCard(w, titles);
+            return (
+              <div className="weak" key={w.id}>
+                <h3>{w.label}</h3>
+                <p>{card.observed}</p>
+                <p className="ev">{card.evidence}</p>
+                <p>{card.plan}</p>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div style={{ padding: "4px 0 44px", color: "var(--ink3)", fontSize: 13.5 }}>

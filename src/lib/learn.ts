@@ -168,7 +168,9 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
       id: "read",
       kind: "read",
       title: "Reading",
-      rationale: `The passage reuses the words you just used about ${theme}, so you meet them again in someone else's sentences.`,
+      rationale: readGoal
+        ? `The passage works ${readGoal} back in — you keep slipping on it, and reading it in someone else's sentences is the gentlest way to meet it again.`
+        : `The passage reuses the words you just used about ${theme}, so you meet them again in someone else's sentences.`,
       estimatedMinutes: 5,
       dependsOn: "talk",
       goal: readGoal,
@@ -212,7 +214,9 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
         id: "listen",
         kind: "listen",
         title: "Listening",
-        rationale: "Listening closes the day on input, so the last thing you do is understand rather than produce.",
+        rationale: listenGoal
+          ? `Listening closes the day on input, and this one is picked to put ${listenGoal} in your ear rather than in your mouth.`
+          : "Listening closes the day on input, so the last thing you do is understand rather than produce.",
         estimatedMinutes: 6,
         goal: listenGoal,
       }),
@@ -264,7 +268,7 @@ export function daySummary(plan: DailyPlan, weaknesses: Weakness[] = []): string
 }
 
 /** "a, b and c" — the serial list every sentence here needs and none should rebuild. */
-function list(items: string[]): string {
+export function list(items: string[]): string {
   if (items.length < 2) return items[0] ?? "";
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
