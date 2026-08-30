@@ -92,7 +92,7 @@ const LEDGER: Row[] = [
   {
     id: 12,
     claim: "Ekrandaki her sayının bir birimi ve bir tanımı vardır.",
-    pending: "M1+ (Coach metrikleri)",
+    assertedIn: [{ file: "src/lib/coachmetrics.check.ts", marker: "invariant 12" }],
   },
   {
     id: 13,

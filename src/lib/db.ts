@@ -621,7 +621,22 @@ export async function recentSignals(lang: string, n = 200): Promise<Signal[]> {
      WHERE lang = $1 ORDER BY observed_at DESC LIMIT $2`,
     [lang, n],
   );
-  return rows.map((r) => ({
+  return rows.map(mapSignalRow);
+}
+
+/** Every signal since a moment, oldest first — the window Coach measures over. */
+export async function signalsSince(lang: string, since: number): Promise<Signal[]> {
+  const db = await getDb();
+  const rows = await db.select<SignalRow[]>(
+    `SELECT id, activity_id, kind, payload, observed_at FROM signals
+     WHERE lang = $1 AND observed_at >= $2 ORDER BY observed_at ASC`,
+    [lang, since],
+  );
+  return rows.map(mapSignalRow);
+}
+
+function mapSignalRow(r: SignalRow): Signal {
+  return {
     id: r.id,
     activityId: r.activity_id,
     kind: r.kind as SignalKind,
@@ -629,7 +644,7 @@ export async function recentSignals(lang: string, n = 200): Promise<Signal[]> {
     // Unparseable JSON reads as no payload rather than throwing: one bad row
     // must not cost the learner the rest of their evidence. signalLabel says null.
     payload: parseJson(r.payload),
-  }));
+  };
 }
 
 function parseJson(raw: string): unknown {
