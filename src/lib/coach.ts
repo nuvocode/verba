@@ -44,24 +44,21 @@ export function weeklyReportPrompt(s: Settings, w: WeekStats, pack?: LanguagePac
     // No "focus" field: what to drill next is derived from the signals (lib/weakness),
     // not guessed at by the report — asking for it produced a second, softer answer to
     // a question the plan already answers with evidence.
-    `Answer with ONLY a JSON object: { "headline": "one upbeat sentence", "report": "2-4 sentences of substance", "wins": ["short win", ...] }.`,
+    `Do not write a headline, a score, a percentage, or a list of wins — those are measured elsewhere and shown beside your text. Write only the paragraph.`,
+    `Answer with ONLY a JSON object: { "report": "2-4 sentences of substance" }.`,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
 export interface WeeklyReport {
-  headline: string;
   report: string;
-  wins: string[];
 }
 
 export function parseWeeklyReport(raw: string): WeeklyReport {
   const o = extractJson(raw) ?? {};
   return {
-    headline: str(o.headline),
     report: typeof o.report === "string" ? o.report : raw.trim(),
-    wins: arr(o.wins),
   };
 }
 
@@ -107,7 +104,6 @@ function scoreBand(score: number): string {
 }
 
 const str = (x: any) => String(x ?? "");
-const arr = (x: any) => (Array.isArray(x) ? x.map(String).filter(Boolean) : []);
 
 function extractJson(raw: string): any {
   if (!raw) return null;

@@ -138,6 +138,23 @@ export function signalMiss(s: Signal): boolean {
   return correct === false || grade === 0;
 }
 
+/**
+ * The measurement a produced turn carries (§2.6). The third and final structural
+ * payload reader, and it lives here for the same reason the other two do: a reader
+ * somewhere else is a reader nothing can find.
+ *
+ * `null` when the payload is not a measured turn — an older row written before
+ * turns were measured reads as "no measurement", never as a zero-word turn.
+ */
+export function turnStats(s: Signal): { words: number; sentences: number; chars: number } | null {
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { words, sentences, chars } = p as { words?: unknown; sentences?: unknown; chars?: unknown };
+  if (typeof words !== "number" || typeof sentences !== "number" || typeof chars !== "number") return null;
+  if (sentences <= 0) return null;
+  return { words, sentences, chars };
+}
+
 // --- §1.4 VocabItem ------------------------------------------------------------
 
 export type VocabItem = {

@@ -1,6 +1,6 @@
 import Database, { type QueryResult } from "@tauri-apps/plugin-sql";
-import { newCard, schedule, type Grade } from "./srs";
-import { worthLearning } from "./vocab";
+import { newCard, schedule, DAILY_REVIEW_CAP, type Grade } from "./srs";
+import { worthLearning, tooEasyToAutoAdd } from "./vocab";
 import { planMemory, type Memory, type MemoryWrite } from "./prompts";
 import { markDirty } from "./vault";
 import type { Signal, SignalKind } from "./model";
@@ -58,6 +58,11 @@ async function init(): Promise<Database> {
       interval INTEGER NOT NULL,
       due INTEGER NOT NULL,
       reps INTEGER NOT NULL,
+      lapses INTEGER NOT NULL DEFAULT 0,
+      type TEXT NOT NULL DEFAULT 'word',       -- §1.4 VocabItem.type
+      captured_by TEXT NOT NULL DEFAULT 'learner',
+      source_surface TEXT NOT NULL DEFAULT '', -- §1.4 sourceRef.surface
+      level_band TEXT,                         -- CEFR band of the item; NULL = never measured
       created_at INTEGER NOT NULL,
       UNIQUE(lang, term)     -- the same spelling is a different card in a different language
     );
@@ -149,6 +154,17 @@ async function init(): Promise<Database> {
   // The level a passage was written at, so the library can be filtered by it. Older
   // rows keep NULL — their level wasn't recorded — and only show under "All".
   await db.execute("ALTER TABLE reading_sessions ADD COLUMN cefr TEXT").catch(() => {});
+  // A failed card and a card that has never been failed used to look the same:
+  // the schedule tracked reps but threw the lapses away (§2.5). Existing decks
+  // start at 0 — that is "not recorded", and it is the only honest starting count.
+  await db.execute("ALTER TABLE vocab ADD COLUMN lapses INTEGER NOT NULL DEFAULT 0").catch(() => {});
+  // §1.4: a card knows what kind of thing it is, where it was met, who kept it and
+  // roughly how hard it is. Rows written before this keep the defaults — "a word,
+  // kept by the learner, from nowhere in particular" — which is what they were.
+  await db.execute("ALTER TABLE vocab ADD COLUMN type TEXT NOT NULL DEFAULT 'word'").catch(() => {});
+  await db.execute("ALTER TABLE vocab ADD COLUMN captured_by TEXT NOT NULL DEFAULT 'learner'").catch(() => {});
+  await db.execute("ALTER TABLE vocab ADD COLUMN source_surface TEXT NOT NULL DEFAULT ''").catch(() => {});
+  await db.execute("ALTER TABLE vocab ADD COLUMN level_band TEXT").catch(() => {});
   await migrateVocabToPerLanguage(db);
   return db;
 }
@@ -264,6 +280,11 @@ export interface VocabRow {
   interval: number;
   due: number;
   reps: number;
+  lapses: number;
+  type: string;
+  captured_by: string;
+  source_surface: string;
+  level_band: string | null;
 }
 
 // Every read and write below is scoped to one language: a deck belongs to the
@@ -281,14 +302,34 @@ export interface VocabRow {
  */
 export async function addVocab(
   lang: string,
-  item: { term: string; translation: string; example: string },
+  item: { term: string; translation: string; example: string; type?: string; levelBand?: string | null },
+  origin: { capturedBy: "learner" | "coach"; surface: string; learnerLevel: string },
 ): Promise<boolean> {
   if (!worthLearning(item).ok) return false;
+  // invariant 16: the tutor does not put words two bands below the learner in
+  // their deck. They may still add one themselves — that is what asking is.
+  if (origin.capturedBy === "coach" && tooEasyToAutoAdd(item.levelBand, origin.learnerLevel)) return false;
   // INSERT OR IGNORE keeps existing SRS progress if the term was already captured.
   const r = await write(
-    `INSERT OR IGNORE INTO vocab (lang, term, translation, example, ease, interval, due, reps, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [lang, item.term.trim(), item.translation.trim(), item.example, newCard.ease, newCard.interval, Date.now(), newCard.reps, Date.now()],
+    `INSERT OR IGNORE INTO vocab (lang, term, translation, example, ease, interval, due, reps, lapses,
+                                  type, captured_by, source_surface, level_band, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+    [
+      lang,
+      item.term.trim(),
+      item.translation.trim(),
+      item.example,
+      newCard.ease,
+      newCard.interval,
+      Date.now(),
+      newCard.reps,
+      newCard.lapses,
+      item.type ?? "word",
+      origin.capturedBy,
+      origin.surface,
+      item.levelBand ?? null,
+      Date.now(),
+    ],
   );
   return (r.rowsAffected ?? 0) > 0;
 }
@@ -322,11 +363,11 @@ export async function deleteVocabTerm(lang: string, term: string): Promise<void>
  */
 const REVIEWABLE = "TRIM(COALESCE(translation, '')) <> '' AND term NOT GLOB '*[0-9]*'";
 
-export async function dueVocab(lang: string, now = Date.now()): Promise<VocabRow[]> {
+export async function dueVocab(lang: string, now = Date.now(), limit = DAILY_REVIEW_CAP): Promise<VocabRow[]> {
   const db = await getDb();
   return db.select<VocabRow[]>(
-    `SELECT * FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE} ORDER BY due ASC`,
-    [lang, now],
+    `SELECT * FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE} ORDER BY due ASC LIMIT $3`,
+    [lang, now, limit],
   );
 }
 
@@ -335,7 +376,15 @@ export async function allVocab(lang: string): Promise<VocabRow[]> {
   return db.select<VocabRow[]>("SELECT * FROM vocab WHERE lang = $1 ORDER BY created_at DESC", [lang]);
 }
 
-export async function vocabCounts(lang: string, now = Date.now()): Promise<{ total: number; due: number }> {
+/**
+ * What the deck owes and what the learner is asked for. `due` is the whole
+ * backlog; `today` is the capped ask — the number every call to action shows,
+ * because "112 due" is the number that makes a learner close the app (§2.5).
+ */
+export async function vocabCounts(
+  lang: string,
+  now = Date.now(),
+): Promise<{ total: number; due: number; today: number }> {
   const db = await getDb();
   const total = await db.select<{ n: number }[]>(
     `SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND ${REVIEWABLE}`,
@@ -345,16 +394,21 @@ export async function vocabCounts(lang: string, now = Date.now()): Promise<{ tot
     `SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE}`,
     [lang, now],
   );
-  return { total: total[0]?.n ?? 0, due: due[0]?.n ?? 0 };
+  return { total: total[0]?.n ?? 0, due: due[0]?.n ?? 0, today: Math.min(due[0]?.n ?? 0, DAILY_REVIEW_CAP) };
 }
 
 export async function reviewVocab(card: VocabRow, grade: Grade): Promise<void> {
-  const next = schedule({ ease: card.ease, interval: card.interval, reps: card.reps }, grade, Date.now());
-  await write("UPDATE vocab SET ease = $1, interval = $2, reps = $3, due = $4 WHERE id = $5", [
+  const next = schedule(
+    { ease: card.ease, interval: card.interval, reps: card.reps, lapses: card.lapses },
+    grade,
+    Date.now(),
+  );
+  await write("UPDATE vocab SET ease = $1, interval = $2, reps = $3, due = $4, lapses = $5 WHERE id = $6", [
     next.ease,
     next.interval,
     next.reps,
     next.due,
+    next.lapses,
     card.id,
   ]);
   // Log the review so weekly stats can count activity (no per-review timestamp on vocab).
@@ -439,27 +493,6 @@ export async function saveMetrics(
   );
 }
 
-export interface MetricsRow {
-  messages: number;
-  words: number;
-  unique_words: number;
-  avg_sentence_len: number;
-  avg_word_len: number;
-  corrections: number;
-  deck_size: number;
-  score: number;
-}
-
-/** The last n sessions' raw metrics, newest first — the Coach re-derives its components from these. */
-export async function recentMetrics(lang: string, n = 2): Promise<MetricsRow[]> {
-  const db = await getDb();
-  return db.select<MetricsRow[]>(
-    `SELECT messages, words, unique_words, avg_sentence_len, avg_word_len, corrections, deck_size, score
-     FROM session_metrics WHERE lang = $1 ORDER BY created_at DESC LIMIT $2`,
-    [lang, n],
-  );
-}
-
 export async function latestMetricScore(lang: string): Promise<number | null> {
   const db = await getDb();
   const rows = await db.select<{ score: number }[]>(
@@ -477,28 +510,6 @@ export async function recentMetricScores(lang: string, n = 12): Promise<number[]
     [lang, n],
   );
   return rows.map((r) => r.score).reverse();
-}
-
-/**
- * Which of the last 7 days had any activity. Index 0 = 6 days ago, index 6 = today.
- * Reads local-midnight boundaries, so "today" means the learner's today.
- */
-export async function activeDays(now = Date.now()): Promise<boolean[]> {
-  const db = await getDb();
-  const midnight = new Date(now);
-  midnight.setHours(0, 0, 0, 0);
-  const start = midnight.getTime() - 6 * 24 * 60 * 60 * 1000;
-  const rows = await db.select<{ t: number }[]>(
-    `SELECT started_at AS t FROM sessions WHERE started_at >= $1
-     UNION ALL SELECT created_at AS t FROM review_log WHERE created_at >= $1`,
-    [start],
-  );
-  const days = [false, false, false, false, false, false, false];
-  for (const r of rows) {
-    const i = Math.floor((r.t - start) / (24 * 60 * 60 * 1000));
-    if (i >= 0 && i < 7) days[i] = true;
-  }
-  return days;
 }
 
 // ---- Phase 3: daily learning sessions ----
@@ -567,7 +578,22 @@ export async function recentSignals(lang: string, n = 200): Promise<Signal[]> {
      WHERE lang = $1 ORDER BY observed_at DESC LIMIT $2`,
     [lang, n],
   );
-  return rows.map((r) => ({
+  return rows.map(mapSignalRow);
+}
+
+/** Every signal since a moment, oldest first — the window Coach measures over. */
+export async function signalsSince(lang: string, since: number): Promise<Signal[]> {
+  const db = await getDb();
+  const rows = await db.select<SignalRow[]>(
+    `SELECT id, activity_id, kind, payload, observed_at FROM signals
+     WHERE lang = $1 AND observed_at >= $2 ORDER BY observed_at ASC`,
+    [lang, since],
+  );
+  return rows.map(mapSignalRow);
+}
+
+function mapSignalRow(r: SignalRow): Signal {
+  return {
     id: r.id,
     activityId: r.activity_id,
     kind: r.kind as SignalKind,
@@ -575,7 +601,7 @@ export async function recentSignals(lang: string, n = 200): Promise<Signal[]> {
     // Unparseable JSON reads as no payload rather than throwing: one bad row
     // must not cost the learner the rest of their evidence. signalLabel says null.
     payload: parseJson(r.payload),
-  }));
+  };
 }
 
 function parseJson(raw: string): unknown {

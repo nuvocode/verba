@@ -8,7 +8,7 @@
 // under it. Recompute it; it is a group-by over a few hundred rows.
 import { MIN_WEAKNESS_EVIDENCE, signalLabel, signalMiss } from "./model.ts";
 import type { Signal, SignalKind, Weakness } from "./model.ts";
-import { DRILL_SLOTS, drillGoals } from "./learn.ts";
+import { DRILL_SLOTS, drillGoals, list } from "./learn.ts";
 
 /**
  * Which part of the language a signal kind speaks about. `comprehension` under
@@ -94,3 +94,38 @@ export function weaknessesFrom(signals: Signal[]): Weakness[] {
 
 /** What Coach may show: a weakness it can also say tomorrow's plan does something about. */
 export const addressed = (ws: Weakness[]): Weakness[] => ws.filter((w) => w.addressedBy.length > 0);
+
+/**
+ * A weakness card, in the three parts §2.6 asks for: what was observed, what the
+ * evidence is, and what tomorrow does about it.
+ *
+ * Each part is a function of *this* weakness — its category, its trend, its own
+ * count of signals and its own activities. Two cards on one screen therefore
+ * cannot read the same, which is the failure this replaces: one template rendered
+ * three times says nothing about any of the three.
+ */
+export interface WeaknessCard {
+  observed: string; // what is going wrong, in the learner's terms
+  evidence: string; // how many signals, over what
+  plan: string; // which activity tomorrow, named
+}
+
+export function weaknessCard(w: Weakness, activityTitles: Record<string, string>): WeaknessCard {
+  const observedByCategory: Record<Weakness["category"], string> = {
+    grammar: `You are being corrected on ${w.label}.`,
+    lexis: `${w.label} is not landing yet — you meet it and it does not stay.`,
+    pronunciation: `${w.label} is coming out differently from the way it is said.`,
+    fluency: `${w.label} is where your turns slow down.`,
+    pragmatics: `${w.label} is right in form but reads wrong in the situation.`,
+  };
+  const trendClause =
+    w.trend === "worsening" ? " It has been happening more lately." : w.trend === "improving" ? " It is happening less than it was." : "";
+
+  const n = w.evidence.length;
+  const evidence = `${n} ${n === 1 ? "slip" : "slips"} on record${w.trend === "new" ? ", the first of them today" : ""}`;
+
+  const titles = w.addressedBy.map((id) => activityTitles[id] ?? id);
+  const plan = `Tomorrow's ${list(titles)} ${titles.length === 1 ? "is built" : "are built"} around it.`;
+
+  return { observed: observedByCategory[w.category] + trendClause, evidence, plan };
+}

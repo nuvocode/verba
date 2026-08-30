@@ -168,8 +168,11 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
       id: "read",
       kind: "read",
       title: "Reading",
-      rationale: `The passage reuses what you just said about ${theme}, so you meet those words again in someone else's sentences.`,
+      rationale: readGoal
+        ? `The passage works ${readGoal} back in — you keep slipping on it, and reading it in someone else's sentences is the gentlest way to meet it again.`
+        : `The passage reuses the words you just used about ${theme}, so you meet them again in someone else's sentences.`,
       estimatedMinutes: 5,
+      dependsOn: "talk",
       goal: readGoal,
     }),
   ];
@@ -194,7 +197,7 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
         id: "memory",
         kind: "memory",
         title: "Vocabulary review",
-        rationale: `${ctx.dueVocab} cards are due today, and reviewing them after you have used the words is when they stick.`,
+        rationale: `${ctx.dueVocab} cards come back today — reviewing them after you have used the words is when they stick.`,
         // Not capped. A review is the one part of the day whose length is a fact
         // rather than a choice — forty cards are forty cards, and a plan that
         // called them ten minutes would be describing a different afternoon.
@@ -211,7 +214,9 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
         id: "listen",
         kind: "listen",
         title: "Listening",
-        rationale: "Listening closes the day on input, so the last thing you do is understand rather than produce.",
+        rationale: listenGoal
+          ? `Listening closes the day on input, and this one is picked to put ${listenGoal} in your ear rather than in your mouth.`
+          : "Listening closes the day on input, so the last thing you do is understand rather than produce.",
         estimatedMinutes: 6,
         goal: listenGoal,
       }),
@@ -263,7 +268,7 @@ export function daySummary(plan: DailyPlan, weaknesses: Weakness[] = []): string
 }
 
 /** "a, b and c" — the serial list every sentence here needs and none should rebuild. */
-function list(items: string[]): string {
+export function list(items: string[]): string {
   if (items.length < 2) return items[0] ?? "";
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
@@ -300,6 +305,30 @@ export function activityStatus(plan: DailyPlan, done: ActivityKind[], kind: Acti
   return nextActivity(plan, done) === kind ? "next" : "waiting";
 }
 
+/** Has the activity this one leans on actually run yet? */
+export function dependencyMet(plan: DailyPlan, done: ActivityKind[], kind: ActivityKind): boolean {
+  const activity = plan.activities.find((a) => a.kind === kind);
+  if (!activity?.dependsOn) return true;
+  const dep = plan.activities.find((a) => a.id === activity.dependsOn);
+  return !dep || done.includes(dep.kind);
+}
+
+/**
+ * What to say when a learner opens an activity ahead of what it was built on
+ * (§2.1). Not a block — they may work in any order they like. It says what they
+ * will get instead, because the alternative is a passage that quietly does not
+ * do what its own rationale claims.
+ *
+ * `null` when there is nothing to warn about.
+ */
+export function dependencyNote(plan: DailyPlan, done: ActivityKind[], kind: ActivityKind): string | null {
+  if (dependencyMet(plan, done, kind)) return null;
+  const activity = plan.activities.find((a) => a.kind === kind);
+  const dep = plan.activities.find((a) => a.id === activity?.dependsOn);
+  if (!activity || !dep) return null;
+  return `${activity.title} was built to reuse what you say in ${dep.title.toLowerCase()}, and you have not done that yet. This one stands on its own instead — ${dep.title.toLowerCase()} first if you would rather have the version that connects.`;
+}
+
 /** What the last day the learner worked leaves behind. */
 export interface Trace {
   theme: string;
@@ -324,6 +353,25 @@ export function traceLine(prev: Trace | null): string | null {
   if (prev.done >= prev.total) return `Last time you finished the day on ${prev.theme}.`;
   if (prev.done === 0) return `Last time you opened a day on ${prev.theme} and did not get into it.`;
   return `Last time you were on ${prev.theme}, ${prev.done} of ${prev.total} done.`;
+}
+
+/**
+ * The line under a fallback plan (§2.1). It names what went wrong in the learner's
+ * terms and what they are looking at instead — a plan presented as today's when it
+ * was built from nothing is worse than no plan at all.
+ */
+export function fallbackNote(plan: DailyPlan): string {
+  return `Today's plan could not be built from your history, so this is a general ${plan.estimatedMinutes}-minute day on ${plan.theme}. Everything in it still counts.`;
+}
+
+/**
+ * What tomorrow holds, shown when today is finished (§2.1). One sentence off the
+ * real plan for the next date — not a description of one, so the preview and the
+ * day the learner wakes up to cannot disagree.
+ */
+export function tomorrowPreview(plan: DailyPlan): string {
+  const n = plan.activities.length;
+  return `Tomorrow: ${n} ${n === 1 ? "piece" : "pieces"} on ${plan.theme}, about ${plan.estimatedMinutes} minutes.`;
 }
 
 /**

@@ -87,7 +87,7 @@ export function useRead(settings: Settings) {
    * day's theme, which is what keeps the daily flow a single keystroke.
    */
   const generate = useCallback(
-    async (opts: { interests?: string; goal?: string; length?: PassageLength; topic?: string } = {}) => {
+    async (opts: { interests?: string; goal?: string; length?: PassageLength; topic?: string; reuse?: string[] } = {}) => {
       const length = opts.length ?? ask.length;
       const topic = (opts.topic ?? "").trim();
       setAsk({ length, topic });
@@ -107,7 +107,7 @@ export function useRead(settings: Settings) {
               role: "user",
               content: storyPrompt(
                 settings,
-                { interests: opts.interests, goal: opts.goal, topic, sentences: LENGTHS[length], memories },
+                { interests: opts.interests, goal: opts.goal, topic, sentences: LENGTHS[length], memories, reuse: opts.reuse },
                 pack,
               ),
             },
@@ -188,7 +188,11 @@ export function useRead(settings: Settings) {
   const saveWord = useCallback(async () => {
     const p = popover;
     if (!p || !p.lemma || p.gloss === "…") return;
-    await addVocab(settings.profile.targetLanguage, { term: p.lemma, translation: p.gloss, example: p.sentence }).catch(() => {});
+    await addVocab(
+      settings.profile.targetLanguage,
+      { term: p.lemma, translation: p.gloss, example: p.sentence },
+      { capturedBy: "learner", surface: "read", learnerLevel: levelOf(settings.profile) },
+    ).catch(() => {});
     setPopover((cur) => (cur && cur.term === p.term ? { ...cur, saved: true } : cur));
     setSaved((s) => (s.includes(p.term) ? s : [...s, p.term]));
   }, [popover, settings.profile.targetLanguage]);

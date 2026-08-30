@@ -72,47 +72,47 @@ const LEDGER: Row[] = [
   {
     id: 8,
     claim: "Hiçbir delta, metriğin kendi değerine eşit değildir.",
-    pending: "M1+ (Coach metrikleri)",
+    assertedIn: [{ file: "src/lib/coachmetrics.check.ts", marker: "invariant 8" }],
   },
   {
     id: 9,
     claim: "Consistency görselindeki kutu sayısı === 7; işaretli kutu sayısı === bildirilen gün sayısı.",
-    pending: "M1+ (Coach metrikleri)",
+    assertedIn: [{ file: "src/lib/coachmetrics.check.ts", marker: "invariant 9" }],
   },
   {
     id: 10,
     claim: "Başlık metni ile metrik değerleri çelişmez.",
-    pending: "M1+ (Coach metrikleri)",
+    assertedIn: [{ file: "src/lib/coachmetrics.check.ts", marker: "invariant 10" }],
   },
   {
     id: 11,
     claim: 'Her "win" maddesi bir sinyal eşiğine dayanır.',
-    pending: "M1+ (Coach metrikleri)",
+    assertedIn: [{ file: "src/lib/coachmetrics.check.ts", marker: "invariant 11" }],
   },
   {
     id: 12,
     claim: "Ekrandaki her sayının bir birimi ve bir tanımı vardır.",
-    pending: "M1+ (Coach metrikleri)",
+    assertedIn: [{ file: "src/lib/coachmetrics.check.ts", marker: "invariant 12" }],
   },
   {
     id: 13,
     claim: "Due öğe sayısı < toplam öğe sayısı (deck 1 günden eskiyse).",
-    pending: "M1+ (Memory/SRS)",
+    assertedIn: [{ file: "src/lib/srs.check.ts", marker: "invariant 13" }],
   },
   {
     id: 14,
     claim: "Bir tekrar sonrası ilgili öğenin `dueAt` ve `interval` değerleri değişmiştir.",
-    pending: "M1+ (Memory/SRS)",
+    assertedIn: [{ file: "src/lib/srs.check.ts", marker: "invariant 14" }],
   },
   {
     id: 15,
     claim: "`strength` çubuklarının uzunlukları deck içinde çeşitlilik gösterir.",
-    pending: "M1+ (Memory/SRS)",
+    assertedIn: [{ file: "src/lib/deck.check.ts", marker: "invariant 15" }],
   },
   {
     id: 16,
     claim: "Öğrencinin seviyesinin iki bant altındaki öğeler otomatik eklenmez.",
-    pending: "M1+ (Memory/SRS)",
+    assertedIn: [{ file: "src/lib/vocab.check.ts", marker: "invariant 16" }],
   },
   {
     id: 17,
@@ -216,9 +216,9 @@ function checkDependsOn(plan: DailyPlan): string[] {
   return problems;
 }
 
-// The real plan of the day. Today no activity writes `dependsOn`, so this is
-// vacuous — correct and intended; the helper (not a "nobody uses dependsOn"
-// freeze) is the assertion.
+// The real plan of the day. `read` now writes `dependsOn: "talk"` (PLAN-012), so
+// this assertion runs over a real edge — the ledger's own check is no longer
+// vacuous. The helper (not a "nobody uses dependsOn" freeze) is the assertion.
 assert(
   checkDependsOn(buildDailyPlan(defaultSettings, { date: "2026-08-26", dayIndex: 41, dueVocab: 0 })).length === 0,
   "the daily plan's dependsOn graph must be consistent",

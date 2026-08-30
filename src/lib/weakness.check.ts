@@ -3,8 +3,8 @@
 // Run: node --experimental-strip-types src/lib/weakness.check.ts
 import assert from "node:assert";
 import { MIN_WEAKNESS_EVIDENCE, isDeclaredWeakness, signalMiss } from "./model.ts";
-import type { Signal, SignalKind } from "./model.ts";
-import { weaknessesFrom, addressed } from "./weakness.ts";
+import type { Signal, SignalKind, Weakness } from "./model.ts";
+import { weaknessesFrom, addressed, weaknessCard } from "./weakness.ts";
 import { buildDailyPlan, DRILL_SLOTS } from "./learn.ts";
 import { defaultSettings } from "./settings.ts";
 
@@ -26,7 +26,7 @@ assert(!signalMiss(sig("comprehension", { label: "x", correct: true })), "a righ
 assert(signalMiss(sig("lexicalItem", { label: "la cuenta", grade: 0 })), 'a card graded "again" is a miss');
 assert(!signalMiss(sig("lexicalItem", { label: "la cuenta", grade: 2 })), "an easy card is not");
 assert(!signalMiss(sig("lexicalItem", { label: "la cuenta" })), "a word merely met is not a miss");
-assert(!signalMiss(sig("unpromptedTurn", { label: "turns", count: 5 })), "counting turns observes no failure");
+assert(!signalMiss(sig("unpromptedTurn", { label: "unaided turn", words: 5, sentences: 1, chars: 20 })), "a produced turn observes no failure");
 
 // --- the threshold ------------------------------------------------------------
 const below = weaknessesFrom([miss("a"), miss("a"), hit("a")]);
@@ -101,5 +101,61 @@ assert.equal(weaknessesFrom([at("a", 1), at("a", 1), at("a", 1)])[0].trend, "new
 assert.equal(weaknessesFrom([at("a", 1), at("a", 9), at("a", 10)])[0].trend, "worsening", "piling up lately");
 assert.equal(weaknessesFrom([at("a", 1), at("a", 2), at("a", 10)])[0].trend, "improving", "thinning out");
 assert.equal(weaknessesFrom([at("a", 1), at("a", 5), at("a", 6), at("a", 10)])[0].trend, "flat", "same on both sides");
+
+// ---- the round trip: Coach's promise is Today's rationale (invariant 6) ----
+// invariant 6 — one card, one argument
+{
+  // Four weaknesses across four categories, different trends and severities.
+  const ws: Weakness[] = [
+    { id: "correction:ser vs estar", label: "ser vs estar", category: "grammar", evidence: ["a", "b", "c"], severity: 3, addressedBy: ["talk", "read"], trend: "worsening" },
+    { id: "lexicalItem:la cuenta", label: "la cuenta", category: "lexis", evidence: ["d", "e", "f", "g"], severity: 4, addressedBy: ["read"], trend: "improving" },
+    { id: "pronunciation:schwa", label: "schwa", category: "pronunciation", evidence: ["h", "i", "j"], severity: 3, addressedBy: ["talk"], trend: "new" },
+    { id: "pace:word order", label: "word order", category: "fluency", evidence: ["k", "l", "m"], severity: 3, addressedBy: ["listen"], trend: "flat" },
+  ];
+  const titles = { talk: "Conversation", read: "Reading", listen: "Listening" };
+  const cards = ws.map((w) => weaknessCard(w, titles));
+
+  // No two cards read alike — the failure this replaces was one template three times.
+  assert.equal(new Set(cards.map((c) => c.observed)).size, cards.length, "invariant 6: each observed sentence is its own");
+  assert.equal(
+    new Set(cards.map((c) => c.evidence + " " + c.plan)).size,
+    cards.length,
+    "invariant 6: each evidence+plan pair is its own",
+  );
+
+  // Every part is non-empty and free of undefined/NaN/raw ids.
+  for (const c of cards) {
+    assert(c.observed.length > 0 && c.evidence.length > 0 && c.plan.length > 0, "invariant 6: every card part is non-empty");
+    assert(!/undefined|NaN/.test(c.observed + c.evidence + c.plan), "invariant 6: no undefined or NaN leaks into a card");
+    assert(!/talk|read|listen/.test(c.plan), "invariant 6: the plan names titles, not ids");
+  }
+
+  // Evidence counts and the "today" clause.
+  assert.match(weaknessCard(ws[1], titles).evidence, /4 slips/, "invariant 6: three+ signals read as a plural count");
+  assert.match(weaknessCard(ws[2], titles).evidence, /3 slips/, "invariant 6: three signals read as a plural count");
+  assert.match(weaknessCard(ws[2], titles).evidence, /today/, "invariant 6: a new weakness says the first slip was today");
+  assert(!/today/.test(weaknessCard(ws[0], titles).evidence), "invariant 6: a non-new weakness does not mention today");
+
+  // A missing title falls back to the id rather than rendering undefined.
+  const missing = weaknessCard(ws[0], { talk: "Conversation" });
+  assert(missing.plan.includes("read"), "invariant 6: an untitled activity falls back to its id");
+
+  // The round trip: a plan built from the declared weaknesses carries each label
+  // in the rationale of the activity that addresses it. The weaknesses come from
+  // weaknessesFrom so addressedBy is the planner's own rule — a hand-written
+  // fixture could point at an activity the plan never actually drills.
+  const derived = weaknessesFrom([
+    ...[1, 2, 3].map(() => miss("ser vs estar", "correction")),
+    ...[1, 2, 3].map(() => miss("la cuenta", "lexicalItem")),
+    ...[1, 2, 3].map(() => miss("schwa", "pronunciation")),
+  ]);
+  const plan = buildDailyPlan(defaultSettings, { date: "2026-08-27", dayIndex: 10, dueVocab: 0, weaknesses: derived });
+  for (const w of derived)
+    for (const id of w.addressedBy) {
+      const a = plan.activities.find((x) => x.id === id);
+      assert(a, `invariant 6: ${w.label} points at ${id}, which the plan contains`);
+      assert(a!.rationale.includes(w.label), `invariant 6: ${id}'s rationale names ${w.label}`);
+    }
+}
 
 console.log("weakness.check OK");

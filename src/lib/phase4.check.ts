@@ -74,7 +74,7 @@ assert(!parseTurn(malformed).reply.includes('"corrections"'), "…and never show
 assert(strength(newCard) < 0.4, "a brand-new card reads weak");
 const mature = schedule(schedule(schedule(newCard, 2, 0), 2, 0), 2, 0);
 assert(strength(mature) > strength(newCard), "reviews make a card read stronger");
-assert(strength({ interval: 999 }) === 1, "strength is capped at 1");
+assert(strength({ interval: 999, ease: 2.5 }) === 1, "strength is capped at 1");
 
 // --- word normalisation for reading taps ---
 assert(bareWord("¿Cuánto?") === "cuánto", "leading/trailing punctuation stripped");

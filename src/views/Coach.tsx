@@ -5,10 +5,10 @@ import { getProvider } from "../lib/providers";
 import { weeklyReportPrompt, parseWeeklyReport, type WeeklyReport } from "../lib/coach";
 import { getPack } from "../lib/packs";
 import { CEFR_LEVELS } from "../lib/level";
-import { levelOf, levelGapNote, progressionSuggested, MIN_WEAKNESS_EVIDENCE } from "../lib/model";
-import { addressed } from "../lib/weakness";
-import { estimateLevelV2, metricsFromRow } from "../lib/metrics";
-import { activeDays, recentMemories, recentMetricScores, recentMetrics, weekStats } from "../lib/db";
+import { levelOf, levelGapNote, progressionSuggested, MIN_WEAKNESS_EVIDENCE, type Signal } from "../lib/model";
+import { addressed, weaknessCard } from "../lib/weakness";
+import { coachPanel, measured, headline, wins, daySeries, type Metric, type MetricPair } from "../lib/coachmetrics";
+import { recentMemories, recentMetricScores, weekStats, signalsSince } from "../lib/db";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -19,18 +19,10 @@ const weekRange = () => {
   return `${f(from)} – ${f(to)}`;
 };
 
-interface Cells {
-  complexity: number;
-  coverage: number;
-  accuracy: number;
-  deltas: { complexity: number; coverage: number; accuracy: number };
-  score: number;
-}
-
 export default function Coach({ settings, day }: { settings: Settings; day: Day }) {
   const [report, setReport] = useState<WeeklyReport | null>(null);
-  const [cells, setCells] = useState<Cells | null>(null);
-  const [days, setDays] = useState<boolean[]>([]);
+  const [panel, setPanel] = useState<MetricPair[]>([]);
+  const [signals, setSignals] = useState<Signal[]>([]);
   const [trend, setTrend] = useState<number[]>([]);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
@@ -42,31 +34,20 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
       setError("");
       try {
         const since = Date.now() - WEEK_MS;
-        const [stats, rows, scores, active, memories] = await Promise.all([
+        const [stats, scores, memories] = await Promise.all([
           weekStats(settings.profile.targetLanguage, since),
-          recentMetrics(settings.profile.targetLanguage, 2),
           recentMetricScores(settings.profile.targetLanguage, 12),
-          activeDays(),
           recentMemories(settings.profile.targetLanguage).catch(() => []),
         ]);
         if (!live) return;
 
-        setDays(active);
         setTrend(scores);
 
-        if (rows[0]) {
-          const now = estimateLevelV2(metricsFromRow(rows[0]));
-          const prev = rows[1] ? estimateLevelV2(metricsFromRow(rows[1])) : null;
-          setCells({
-            ...now.components,
-            score: now.score,
-            deltas: {
-              complexity: now.components.complexity - (prev?.components.complexity ?? now.components.complexity),
-              coverage: now.components.coverage - (prev?.components.coverage ?? now.components.coverage),
-              accuracy: now.components.accuracy - (prev?.components.accuracy ?? now.components.accuracy),
-            },
-          });
-        }
+        // The metric grid measures from signals only (§2.6) — two windows back so
+        // each metric can be compared against the week before it.
+        const signals = await signalsSince(settings.profile.targetLanguage, Date.now() - 2 * WEEK_MS);
+        setSignals(signals);
+        setPanel(coachPanel(signals, Date.now()));
 
         // The written report is the only AI call here; the numbers above are measured.
         const raw = await getProvider(settings).chat(
@@ -111,7 +92,16 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
   const gapNote = levelGapNote(levelOf(settings.profile), day.levelEstimate);
   const readyForNextBand = measuredIdx > declaredIdx && progressionSuggested(day.levelEstimate);
 
-  const delta = (n: number) => (n > 0 ? <i>+{n}</i> : n < 0 ? <i style={{ color: "var(--warn)" }}>{n}</i> : null);
+  // ponytail: the two spans below (20 words per sentence, 50 distinct words) are
+  // display scales, not thresholds — a bar that fills to its own value would make
+  // complexity and vocabulary unreadable next to the percentage metrics.
+  const meterWidth = (m: Metric) => {
+    if (m.value === null) return 0;
+    if (m.id === "consistency") return (m.value / 7) * 100;
+    if (m.id === "complexity") return Math.min(100, (m.value / 20) * 100);
+    if (m.id === "vocabulary") return Math.min(100, (m.value / 50) * 100);
+    return m.value;
+  };
   const line =
     trend.length > 1
       ? trend
@@ -119,12 +109,16 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
           .join(" ")
       : "";
 
+  // Titles come from tomorrow's plan through the day, so a card names the activity
+  // the learner will actually see rather than an id from the model.
+  const titles = Object.fromEntries((day.plan?.activities ?? []).map((a) => [a.id, a.title]));
+
   return (
     <div className="coach fade">
       <div className="eyebrow">
         Coach · {weekRange()} · {settings.profile.targetLanguage}
       </div>
-      <h1 className="display">{report?.headline ?? (busy ? "Reading your week…" : "Quiet, steady progress.")}</h1>
+      <h1 className="display">{busy ? "Reading your week…" : headline(panel)}</h1>
 
       {error && <div className="err">{error}</div>}
 
@@ -168,63 +162,54 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
         )}
       </div>
 
-      {cells ? (
+      {measured(panel).length > 0 ? (
         <div className="mgrid">
-          <div className="mcell">
-            <div className="h">
-              <span>Sentence complexity</span>
-              <b>
-                {cells.complexity} {delta(cells.deltas.complexity)}
-              </b>
+          {measured(panel).map(({ metric, delta, isNew }) => (
+            <div className="mcell" key={metric.id} data-delta={delta ?? undefined} data-new={isNew || undefined}>
+              <div className="h">
+                <span>{metric.label}</span>
+                <b>
+                  {metric.value}
+                  <span className="unit"> {metric.unit}</span>
+                  {isNew ? <em className="new">new</em> : delta !== null && delta !== 0 ? (
+                    <i style={delta < 0 ? { color: "var(--warn)" } : undefined}>
+                      {delta > 0 ? "+" : ""}
+                      {delta}
+                    </i>
+                  ) : null}
+                </b>
+              </div>
+              <div className="meter">
+                <div style={{ width: `${meterWidth(metric)}%` }} />
+              </div>
+              <div className="mnote">{metric.definition}</div>
+              {metric.id === "consistency" &&
+                (() => {
+                  const series = daySeries(signals, Date.now());
+                  return (
+                    <div className="consistency">
+                      <div className="boxes">
+                        {series.map((d, i) => (
+                          <span key={i} className={d.active ? "on" : ""} />
+                        ))}
+                      </div>
+                      <svg className="spark" viewBox="0 0 7 1" preserveAspectRatio="none">
+                        <polyline
+                          points={series.map((d, i) => `${i},${1 - Math.min(1, d.count / 5)}`).join(" ")}
+                          fill="none"
+                          stroke="var(--accent)"
+                          strokeWidth="0.12"
+                        />
+                      </svg>
+                    </div>
+                  );
+                })()}
             </div>
-            <div className="meter">
-              <div style={{ width: `${cells.complexity}%`, background: "var(--ink2)" }} />
-            </div>
-            <div className="mnote">Words per sentence and average word length in what you write.</div>
-          </div>
-          <div className="mcell">
-            <div className="h">
-              <span>Accuracy</span>
-              <b>
-                {cells.accuracy} {delta(cells.deltas.accuracy)}
-              </b>
-            </div>
-            <div className="meter">
-              <div style={{ width: `${cells.accuracy}%` }} />
-            </div>
-            <div className="mnote">How often you self-correct — fewer corrections per message reads as higher accuracy.</div>
-          </div>
-          <div className="mcell">
-            <div className="h">
-              <span>Vocabulary depth</span>
-              <b>
-                {cells.coverage} {delta(cells.deltas.coverage)}
-              </b>
-            </div>
-            <div className="meter">
-              <div style={{ width: `${cells.coverage}%`, background: "var(--ink2)" }} />
-            </div>
-            <div className="mnote">Variety of words you use, plus the size of your studied deck.</div>
-          </div>
-          <div className="mcell">
-            <div className="h">
-              <span>Consistency</span>
-              <b>
-                {days.filter(Boolean).length}
-                <span style={{ fontSize: 13, color: "var(--ink3)", fontWeight: 400 }}>/7 days</span>
-              </b>
-            </div>
-            <div className="days">
-              {days.map((on, i) => (
-                <i key={i} className={i === days.length - 1 ? (on ? "today" : "") : on ? "on" : ""} />
-              ))}
-            </div>
-            <div className="mnote">Days you practiced in the last seven.</div>
-          </div>
+          ))}
         </div>
       ) : (
         <div style={{ padding: "28px 0 44px", color: "var(--ink3)", fontSize: 13.5 }}>
-          Finish a conversation and your measured signals — complexity, accuracy, vocabulary depth — appear here.
+          Finish a conversation, a passage, or a review and your measured signals — complexity, accuracy, vocabulary depth — appear here.
         </div>
       )}
 
@@ -239,15 +224,17 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
       </div>
       {addressed(day.weaknesses).length > 0 ? (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 48 }}>
-          {addressed(day.weaknesses).map((w) => (
-            <div className="weak" key={w.id}>
-              <h3>{w.label}</h3>
-              <p>
-                {w.evidence.length} slips so far. Tomorrow's plan drills it in{" "}
-                {w.addressedBy.map((id) => day.plan?.activities.find((a) => a.id === id)?.title ?? id).join(" and ")}.
-              </p>
-            </div>
-          ))}
+          {addressed(day.weaknesses).map((w) => {
+            const card = weaknessCard(w, titles);
+            return (
+              <div className="weak" key={w.id}>
+                <h3>{w.label}</h3>
+                <p>{card.observed}</p>
+                <p className="ev">{card.evidence}</p>
+                <p>{card.plan}</p>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div style={{ padding: "4px 0 44px", color: "var(--ink3)", fontSize: 13.5 }}>
@@ -256,13 +243,13 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
         </div>
       )}
 
-      {report && report.wins.length > 0 && (
+      {wins(panel).length > 0 && (
         <>
           <div className="eyebrow" style={{ marginBottom: 14 }}>
             Wins this week
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 48 }}>
-            {report.wins.map((w) => (
+            {wins(panel).map((w) => (
               <div className="chip" key={w} style={{ cursor: "default" }}>
                 {w}
               </div>
@@ -274,9 +261,12 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
       {trend.length > 1 && (
         <>
           <div className="eyebrow" style={{ marginBottom: 16 }}>
-            Momentum · last {trend.length} sessions
+            Momentum · last {trend.length} sessions · {weekRange()}
           </div>
           <svg width="100%" height="72" viewBox="0 0 800 72" preserveAspectRatio="none" style={{ display: "block" }}>
+            <line x1="0" y1="72" x2="800" y2="72" stroke="var(--line)" strokeWidth="1" />
+            <text x="0" y="70" className="axis">0</text>
+            <text x="0" y="10" className="axis">100</text>
             <polyline points={line} fill="none" stroke="var(--accent)" strokeWidth="2.5" />
           </svg>
           <div style={{ fontSize: 12, color: "var(--ink3)", marginTop: 8 }}>

@@ -6,11 +6,15 @@ import {
   anotherTheme,
   buildDailyPlan,
   daySummary,
+  dependencyMet,
+  dependencyNote,
+  fallbackNote,
   nextActivity,
   isLegacyPlanShape,
   progressLine,
   shortfallNote,
   themeForDate,
+  tomorrowPreview,
   traceLine,
   type PlanContext,
 } from "./learn.ts";
@@ -183,5 +187,64 @@ assert.match(traceLine({ theme: "food and cooking", done: 3, total: 6 })!, /food
 assert.match(traceLine({ theme: "food and cooking", done: 3, total: 6 })!, /3 of 6/, "…and how far it got");
 assert.match(traceLine({ theme: "t", done: 6, total: 6 })!, /finished the day/, "a completed day reads as completed");
 assert(!/0 of/.test(traceLine({ theme: "t", done: 0, total: 6 })!), "…and an untouched one does not read as a score");
+
+// ---- invariant 7: the reading activity's dependency is real, and the note
+// ---- says what the learner gets instead when it is not met.
+{
+  const plan = buildDailyPlan(defaultSettings, ctx({ dueVocab: 5 }));
+  const read = plan.activities.find((a) => a.kind === "read")!;
+  const talk = plan.activities.find((a) => a.kind === "talk")!;
+  assert.equal(read.dependsOn, "talk", "invariant 7: read depends on talk");
+  assert(
+    plan.activities.findIndex((a) => a.id === "talk") < plan.activities.findIndex((a) => a.id === "read"),
+    "invariant 7: talk appears before read in the plan",
+  );
+
+  assert.equal(dependencyMet(plan, [], "read"), false, "invariant 7: read is unmet before talk runs");
+  assert.equal(dependencyMet(plan, ["talk"], "read"), true, "invariant 7: read is met once talk is done");
+  assert.equal(dependencyMet(plan, [], "talk"), true, "invariant 7: talk has no dependency, so it is always met");
+
+  const note = dependencyNote(plan, [], "read");
+  assert(note && note.length > 0, "invariant 7: an unmet read gets a note");
+  assert(note!.includes(read.title), "invariant 7: the note names the activity's own title");
+  assert(note!.includes(talk.title.toLowerCase()), "invariant 7: the note names the dependency it leans on");
+  assert.equal(dependencyNote(plan, ["talk"], "read"), null, "invariant 7: a met read gets no note");
+}
+
+// invariant 7 — the short day still carries the dependency: it drops role-play
+// and listening, not the read's connection to the conversation.
+{
+  const short = buildDailyPlan({ ...defaultSettings, dailyMinutes: 20 }, ctx({ dueVocab: 5 }));
+  const read = short.activities.find((a) => a.kind === "read")!;
+  const talk = short.activities.find((a) => a.kind === "talk")!;
+  assert.equal(read.dependsOn, "talk", "invariant 7: the short day's read still depends on talk");
+  assert(short.activities.some((a) => a.kind === "talk"), "invariant 7: talk is still in the short day");
+  assert(short.activities.some((a) => a.kind === "read"), "invariant 7: read is still in the short day");
+}
+
+// ---- state 10: a plan that could not be built says so, and tomorrow is previewed ----
+{
+  const plan = buildDailyPlan(defaultSettings, ctx({ dueVocab: 5 }));
+  const note = fallbackNote(plan);
+  assert(note.includes(plan.theme), "state 10: the fallback note names the theme");
+  assert(note.includes(String(plan.estimatedMinutes)), "state 10: …and the minute total");
+  const single = buildDailyPlan({ ...defaultSettings, dailyMinutes: 20 }, ctx({ dueVocab: 0 }));
+  assert(fallbackNote(single).length > 0, "state 10: a single-activity plan still gets a note");
+
+  const tomorrow = buildDailyPlan(defaultSettings, {
+    date: "2026-08-27",
+    dayIndex: 42,
+    dueVocab: 5,
+  });
+  const preview = tomorrowPreview(tomorrow);
+  assert(preview.includes(String(tomorrow.activities.length)), "state 10: the preview names its own activity count");
+  assert(preview.includes(String(tomorrow.estimatedMinutes)), "state 10: …and its own minutes");
+  assert.notEqual(preview, daySummary(tomorrow, []), "state 10: the preview and the summary are not the same sentence");
+
+  // Neither function throws on the smallest plan the builder can produce.
+  const tiny = buildDailyPlan({ ...defaultSettings, dailyMinutes: 20 }, ctx({ dueVocab: 0 }));
+  assert(fallbackNote(tiny).length > 0, "state 10: fallbackNote survives the smallest plan");
+  assert(tomorrowPreview(tiny).length > 0, "state 10: tomorrowPreview survives the smallest plan");
+}
 
 console.log("learn.check OK");

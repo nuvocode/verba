@@ -81,6 +81,12 @@ const TABLE: Row[] = [
     answer: "Hangi özelliğin çalışmayacağı yazılır, uygulama açık kalır",
     assertedIn: [{ file: "src/lib/lang.check.ts", marker: "state 9" }],
   },
+  {
+    id: 10,
+    state: "Günün planı üretilemedi",
+    answer: "Jenerik bir gün gösterilir ve neden jenerik olduğu yazılır; ekran boş kalmaz",
+    assertedIn: [{ file: "src/lib/learn.check.ts", marker: "state 10" }],
+  },
 ];
 
 /** Problems with a row's assertedIn targets — empty when every one holds. */
@@ -115,12 +121,12 @@ assert(
 for (const row of TABLE)
   if ("pending" in row) assert.match(row.pending, /^#\d+ — \S/, `state ${row.id} must name the issue that builds it`);
 
-// The table is complete: §7's 9 rows, in order, exactly once each. Deleting a row
+// The table is complete: §7's 10 rows, in order, exactly once each. Deleting a row
 // must fail the run rather than quietly shrinking the promise.
 assert.deepEqual(
   TABLE.map((r) => r.id),
-  Array.from({ length: 9 }, (_, i) => i + 1),
-  "the table must carry spec §7's 9 states, in order, exactly once each",
+  Array.from({ length: 10 }, (_, i) => i + 1),
+  "the table must carry spec §7's 10 states, in order, exactly once each",
 );
 
 // Every row says what the state is and what the learner gets — an exit-less row

@@ -4,9 +4,21 @@ import type { Day } from "../lib/useDay";
 import { allVocab, deleteVocab, reviewVocab, type VocabRow } from "../lib/db";
 import { getPack } from "../lib/packs";
 import { memorySignals } from "../lib/signals";
-import { strength, type Grade } from "../lib/srs";
+import { strength, DAILY_REVIEW_CAP, type Grade } from "../lib/srs";
 import { suspect } from "../lib/vocab";
 import { live } from "../lib/keys";
+import {
+  filterDeck,
+  groupDeck,
+  reviewAsk,
+  reviewCall,
+  backlogNote,
+  facets,
+  typeLabel,
+  originLine,
+  FRAGILE,
+  type DeckFilter,
+} from "../lib/deck";
 import Hints from "./Hints";
 
 const GRADES: [string, Grade, string][] = [
@@ -35,6 +47,7 @@ export default function Memory({
   const [revealed, setRevealed] = useState(false);
   const [grades, setGrades] = useState<Grade[]>([]);
   const [error, setError] = useState("");
+  const [filter, setFilter] = useState<DeckFilter>({});
   const block = day.plan?.activities.find((a) => a.kind === "memory");
 
   /**
@@ -80,8 +93,12 @@ export default function Memory({
   // not quietly keep resurfacing it.
   const junk = words.filter((w) => suspect(w) !== null);
   const good = words.filter((w) => suspect(w) === null);
-  const due = good.filter((w) => w.due <= now);
-  const settled = good.filter((w) => w.due > now);
+  const shown = filterDeck(good, filter);
+  const { due, soon, learned } = groupDeck(shown, now);
+  // What the CTA and backlog promise is what start() will actually do — the ask is
+  // the capped number, oldest first, and the filter is ignored. Group titles above
+  // stay filtered; this count is not.
+  const dueAll = groupDeck(good, now).due;
 
   /** Drop a card. Optimistic — the row leaves the list before the delete lands. */
   const drop = useCallback(async (id: number) => {
@@ -99,7 +116,9 @@ export default function Memory({
 
   const start = useCallback(() => {
     // Only reviewable cards are queued: a card with no meaning has no back to reveal.
-    const q = words.filter((w) => w.due <= Date.now() && suspect(w) === null);
+    // The ask is the capped number, oldest first, and the filter is ignored — a
+    // filtered view is a way of looking at the deck, not a way of choosing what is due.
+    const q = groupDeck(words.filter((w) => suspect(w) === null), Date.now()).due.slice(0, DAILY_REVIEW_CAP);
     if (!q.length) return;
     setQueue(q);
     setIdx(0);
@@ -255,10 +274,15 @@ export default function Memory({
 
   // ---- the collection ----
   const groups = [
-    { label: `Due for resurfacing · ${due.length}`, words: due, junk: false },
-    { label: "Settled — resting in long-term memory", words: settled, junk: false },
+    { label: `Due today · ${reviewAsk(due.length)} of ${due.length}`, words: due.slice(0, DAILY_REVIEW_CAP), junk: false },
+    { label: `Coming back soon · ${soon.length}`, words: soon, junk: false },
+    { label: `Learned · ${learned.length}`, words: learned, junk: false },
     { label: `Needs a look · ${junk.length}`, words: junk, junk: true },
   ].filter((g) => g.words.length);
+
+  const f = facets(good);
+  const toggle = (key: keyof DeckFilter, value: string) =>
+    setFilter((cur) => (cur[key] === value ? { ...cur, [key]: undefined } : { ...cur, [key]: value }));
 
   return (
     <div className="mem fade">
@@ -269,9 +293,9 @@ export default function Memory({
           </div>
           <h1 className="display">Everything you've met, in context.</h1>
         </div>
-        {due.length > 0 && (
+        {dueAll.length > 0 && (
           <button className="btn sm" onClick={start} style={{ whiteSpace: "nowrap" }}>
-            Resurface {due.length} due <span className="kbd">R</span>
+            {reviewCall(dueAll.length)} <span className="kbd">R</span>
           </button>
         )}
       </div>
@@ -279,6 +303,7 @@ export default function Memory({
         Nothing here was typed into a list, and nothing lands here on its own — a word arrives because you kept it while
         reading, or left it in place after a conversation. Each one resurfaces just before you'd forget it.
       </div>
+      {backlogNote(dueAll.length) && <div className="backlog">{backlogNote(dueAll.length)}</div>}
 
       {error && <div className="err">{error}</div>}
 
@@ -286,6 +311,39 @@ export default function Memory({
         <div className="empty">
           <h2>Empty — for now.</h2>
           <p>Have a conversation or read a passage; the words you meet land here on their own.</p>
+        </div>
+      )}
+
+      {words.length > 0 && (
+        <div className="deck-filters">
+          {f.types.length > 1 && f.types.map((t) => (
+            <button key={t} className={`chip ${filter.type === t ? "on" : ""}`} onClick={() => toggle("type", t)}>
+              {typeLabel(t)}
+            </button>
+          ))}
+          {f.surfaces.length > 1 && f.surfaces.map((s) => (
+            <button key={s} className={`chip ${filter.surface === s ? "on" : ""}`} onClick={() => toggle("surface", s)}>
+              {s}
+            </button>
+          ))}
+          {f.bands.length > 1 && f.bands.map((b) => (
+            <button key={b} className={`chip ${filter.band === b ? "on" : ""}`} onClick={() => toggle("band", b)}>
+              {b}
+            </button>
+          ))}
+          <button className={`chip ${filter.fragile ? "on" : ""}`} title="Strength under 40%" onClick={() => setFilter((cur) => ({ ...cur, fragile: !cur.fragile }))}>
+            Fragile
+          </button>
+        </div>
+      )}
+
+      {words.length > 0 && !groups.length && (
+        <div className="empty">
+          <h2>No cards match that.</h2>
+          <p>Clear the filters to see the whole deck.</p>
+          <button className="btn ghost" onClick={() => setFilter({})}>
+            Clear filters
+          </button>
         </div>
       )}
 
@@ -316,10 +374,15 @@ export default function Memory({
                 <div className="ctx" dir={dir}>
                   “{w.example}”
                 </div>
+                {!g.junk && (
+                  <div className="wmeta">
+                    {typeLabel(w.type)} · {originLine(w)}
+                  </div>
+                )}
                 {/* Rendered empty rather than omitted for a junk row: the strength rail
                     is what holds the × in the same column all the way down the list. */}
                 <div className="bar">
-                  {!g.junk && <div className={str < 0.4 ? "weak" : ""} style={{ width: `${Math.round(str * 100)}%` }} />}
+                  {!g.junk && <div className={str < FRAGILE ? "weak" : ""} style={{ width: `${Math.round(str * 100)}%` }} />}
                 </div>
                 <button className="x" title="Remove from Memory" onClick={() => void drop(w.id)}>
                   ×

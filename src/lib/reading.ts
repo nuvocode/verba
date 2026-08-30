@@ -52,6 +52,7 @@ export interface StoryOptions {
   goal?: string; // e.g. "practise past tense"
   sentences?: number; // rough target length (default 8)
   memories?: Memory[]; // what the coach knows about the learner — the story can be set in their own world
+  reuse?: string[]; // words the learner just used themselves — the passage should work them back in
 }
 
 const jsonShape =
@@ -89,6 +90,9 @@ export function storyPrompt(s: Settings, opts: StoryOptions = {}, pack?: Languag
         ? `Tailor the topic to the learner's interests: ${opts.interests}.`
         : `Pick an engaging everyday topic.`,
     opts.goal ? `Where natural, give practice with: ${opts.goal}.` : "",
+    opts.reuse?.length
+      ? `Work as many of these words as fit naturally into the passage — they are words the learner has just used themselves: ${opts.reuse.join(", ")}.`
+      : "",
     lengthLine(n),
     jsonShape.replace(/TARGET/g, s.profile.targetLanguage).replace(/NATIVE/g, s.profile.nativeLanguage),
   ]

@@ -56,8 +56,8 @@ assert(Math.abs(m.errorRate - 0.5) < 1e-9, "error rate = corrections / messages"
 assert(m.uniqueWords === 5 && Math.abs(m.typeTokenRatio - 1) < 1e-9, "all-distinct words → TTR 1");
 
 // --- coaching parsers: tolerant of fences/prose ---
-const rep = parseWeeklyReport('```json\n{"headline":"Great week","report":"You practised a lot.","wins":["x"],"focus":["y"]}\n```');
-assert(rep.headline === "Great week" && rep.wins[0] === "x", "weekly report parsed through fence");
+const rep = parseWeeklyReport('```json\n{"report":"You practised a lot."}\n```');
+assert(rep.report === "You practised a lot.", "weekly report parsed through fence");
 const drills = parseDrills('{"drills":[{"prompt":"Di algo","hint":"h","example":"e","area":"a"},{"nope":1}]}');
 assert(drills.length === 1 && drills[0].prompt === "Di algo", "drills without a prompt are dropped");
 const recap = parseRecap("garbage, no json");

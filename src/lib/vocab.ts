@@ -84,3 +84,27 @@ export function suspect(row: VocabCandidate): string | null {
   const v = worthLearning(row);
   return v.ok ? null : v.why;
 }
+
+/**
+ * How far below the learner an item has to sit before the tutor stops adding it
+ * on their behalf (§2.5, invariant 16). Two bands: one band down is revision,
+ * two is a word they are not going to thank anyone for.
+ */
+export const AUTO_ADD_BAND_GAP = 2;
+
+/**
+ * Should this item be kept out of the deck when nobody asked for it?
+ *
+ * Only ever consulted for `capturedBy: "coach"`. A learner who taps a word has
+ * asked for it, and no gate outranks that. An item with no band is not evidence
+ * of anything, so it passes — a missing measurement must not read as a low one.
+ */
+export function tooEasyToAutoAdd(itemBand: string | null | undefined, learnerLevel: string): boolean {
+  // ponytail: the CEFR list is repeated here rather than imported — this file is
+  // the one pure gate file, and vocab.check.ts runs it with nothing loaded.
+  const bands = ["A1", "A2", "B1", "B2", "C1", "C2"];
+  const item = bands.indexOf(String(itemBand ?? ""));
+  const learner = bands.indexOf(learnerLevel);
+  if (item === -1 || learner === -1) return false;
+  return learner - item >= AUTO_ADD_BAND_GAP;
+}

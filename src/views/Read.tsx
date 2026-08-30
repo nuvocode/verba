@@ -10,6 +10,7 @@ import Passage from "./read/Passage";
 import Prompter from "./read/Prompter";
 import ReadingCheck from "./read/ReadingCheck";
 import { readSignals } from "../lib/signals";
+import { dependencyMet, dependencyNote } from "../lib/learn";
 
 /**
  * The reading screen: one passage, two ways to work it.
@@ -57,9 +58,11 @@ export default function Read({
 
   // Whatever the sheet is asked for, the day's plan is still underneath it: an empty
   // topic falls back to the theme, and the day's weak area is folded in either way.
-  const generate = (ask: Ask) => {
+  const generate = async (ask: Partial<Ask>) => {
     setAsking(false);
-    void read.generate({ ...ask, interests: day.plan?.theme, goal: block?.goal });
+    const plan = day.plan;
+    const reuse = plan && block?.dependsOn && dependencyMet(plan, day.done, "read") ? await day.carry(block.dependsOn) : [];
+    void read.generate({ ...ask, interests: plan?.theme, goal: block?.goal, reuse });
   };
 
   // Finishing a passage runs the comprehension check first; only when it produces no
@@ -111,6 +114,9 @@ export default function Read({
     return (
       <>
         <div className="empty fade">
+          {day.plan && dependencyNote(day.plan, day.done, "read") && (
+            <div className="dep-note">{dependencyNote(day.plan, day.done, "read")}</div>
+          )}
           <h2>{read.busy ? "Writing you a passage…" : "Nothing to read yet."}</h2>
           <p>
             {read.busy
@@ -118,9 +124,18 @@ export default function Read({
               : "The coach writes a story at your level that reuses the words from your conversations."}
           </p>
           {!read.busy && (
-            <button className="btn" onClick={() => setAsking(true)}>
-              Generate a passage →
-            </button>
+            <>
+              <button className="btn" onClick={() => void generate({})}>
+                Today's passage — {day.plan?.theme ?? "everyday life"} →
+              </button>
+              <button
+                className="link"
+                title="Off-plan: a passage that is not part of today"
+                onClick={() => setAsking(true)}
+              >
+                Something else
+              </button>
+            </>
           )}
           {read.error && <div className="err" style={{ maxWidth: 520, margin: "20px auto 0" }}>{read.error}</div>}
           {!read.busy && read.library.length > 0 && (() => {
