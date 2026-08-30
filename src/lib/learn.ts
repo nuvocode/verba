@@ -352,6 +352,25 @@ export function traceLine(prev: Trace | null): string | null {
 }
 
 /**
+ * The line under a fallback plan (§2.1). It names what went wrong in the learner's
+ * terms and what they are looking at instead — a plan presented as today's when it
+ * was built from nothing is worse than no plan at all.
+ */
+export function fallbackNote(plan: DailyPlan): string {
+  return `Today's plan could not be built from your history, so this is a general ${plan.estimatedMinutes}-minute day on ${plan.theme}. Everything in it still counts.`;
+}
+
+/**
+ * What tomorrow holds, shown when today is finished (§2.1). One sentence off the
+ * real plan for the next date — not a description of one, so the preview and the
+ * day the learner wakes up to cannot disagree.
+ */
+export function tomorrowPreview(plan: DailyPlan): string {
+  const n = plan.activities.length;
+  return `Tomorrow: ${n} ${n === 1 ? "piece" : "pieces"} on ${plan.theme}, about ${plan.estimatedMinutes} minutes.`;
+}
+
+/**
  * A different theme from this one — §4.2's "başka bir konu".
  *
  * The rotation is deterministic per date, so "another" has to mean stepping along

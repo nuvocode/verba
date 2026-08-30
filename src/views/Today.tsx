@@ -5,11 +5,12 @@
 // Nothing here composes a sentence. Every claim on this page — the summary, the
 // progress line, the shortfall, yesterday's trace — is a pure function in lib, so
 // what the learner reads is something a check can hold.
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { isLocalProvider, type Settings } from "../lib/settings";
 import type { ActivityKind } from "../lib/model";
 import type { Day } from "../lib/useDay";
-import { activityStatus, daySummary, progressLine, shortfallNote, traceLine } from "../lib/learn";
+import { todayKey } from "../lib/useDay";
+import { activityStatus, buildDailyPlan, daySummary, fallbackNote, progressLine, shortfallNote, tomorrowPreview, traceLine } from "../lib/learn";
 import { listModels, modelTrouble, PROVIDERS, prettyModel, type Installed } from "../lib/models";
 import { levelOf } from "../lib/model";
 import { timeName } from "../lib/choices";
@@ -98,7 +99,12 @@ export default function Today({
   if (!day.plan)
     return (
       <div className="today fade">
-        <div className="eyebrow">{day.loading ? "Planning your day…" : "No plan"}</div>
+        <div className="eyebrow">{day.loading ? "Planning your day…" : "Building a plan…"}</div>
+        <p className="sub">
+          {day.loading
+            ? "Reading what you did last time and what is due today. A few seconds."
+            : "One moment — if this stays here, open Settings and check your model."}
+        </p>
       </div>
     );
 
@@ -108,6 +114,18 @@ export default function Today({
   const finished = plan.activities.every((a) => day.isDone(a.kind));
   const provider = PROVIDERS.find((p) => p.id === settings.provider);
   const modelId = String(settings[provider?.model ?? "ollamaModel"] ?? "");
+  // The preview of tomorrow is the real plan for the next date, not a description
+  // of one — so the line and the day the learner wakes up to cannot disagree.
+  const tomorrow = useMemo(
+    () =>
+      buildDailyPlan(settings, {
+        date: todayKey(new Date(Date.now() + 24 * 60 * 60 * 1000)),
+        dayIndex: plan.dayIndex + 1,
+        dueVocab: day.due,
+        weaknesses: day.weaknesses,
+      }),
+    [settings, plan.dayIndex, day.due, day.weaknesses],
+  );
 
   return (
     <div className="today fade">
@@ -117,6 +135,12 @@ export default function Today({
       <h1 className="display">{greeting()}.</h1>
 
       <ModelWarning settings={settings} />
+
+      {/* §2.1: a plan built without the day's inputs is named as such, never
+          presented as the real thing. Reuses the .dep-note class PLAN-012 added —
+          a plan built from nothing and an activity opened out of order are the
+          same kind of notice. */}
+      {day.planSource === "fallback" && <div className="dep-note">{fallbackNote(plan)}</div>}
 
       {/* The "your plan is ready" screen, demoted to a line you can open when you
           want it (§5, screen 5). Closed by default — the whole of the folding. */}
@@ -236,6 +260,18 @@ export default function Today({
           );
         })}
       </div>
+
+      {/* §2.1: a finished day shows the summary and a preview of tomorrow. The
+          recap below is the model's sentence about the day; this is the app's. */}
+      {finished && (
+        <div className="lede" style={{ marginTop: 40, maxWidth: 640 }}>
+          <div className="bullet" />
+          <div>
+            <p>{daySummary(plan, day.weaknesses)}</p>
+            <p style={{ fontSize: 14, color: "var(--ink3)", marginTop: 10 }}>{tomorrowPreview(tomorrow)}</p>
+          </div>
+        </div>
+      )}
 
       {day.recap && (
         <div className="lede" style={{ marginTop: 44, maxWidth: 640 }}>

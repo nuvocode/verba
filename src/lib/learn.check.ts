@@ -8,11 +8,13 @@ import {
   daySummary,
   dependencyMet,
   dependencyNote,
+  fallbackNote,
   nextActivity,
   isLegacyPlanShape,
   progressLine,
   shortfallNote,
   themeForDate,
+  tomorrowPreview,
   traceLine,
   type PlanContext,
 } from "./learn.ts";
@@ -218,6 +220,31 @@ assert(!/0 of/.test(traceLine({ theme: "t", done: 0, total: 6 })!), "…and an u
   assert.equal(read.dependsOn, "talk", "invariant 7: the short day's read still depends on talk");
   assert(short.activities.some((a) => a.kind === "talk"), "invariant 7: talk is still in the short day");
   assert(short.activities.some((a) => a.kind === "read"), "invariant 7: read is still in the short day");
+}
+
+// ---- state 10: a plan that could not be built says so, and tomorrow is previewed ----
+{
+  const plan = buildDailyPlan(defaultSettings, ctx({ dueVocab: 5 }));
+  const note = fallbackNote(plan);
+  assert(note.includes(plan.theme), "state 10: the fallback note names the theme");
+  assert(note.includes(String(plan.estimatedMinutes)), "state 10: …and the minute total");
+  const single = buildDailyPlan({ ...defaultSettings, dailyMinutes: 20 }, ctx({ dueVocab: 0 }));
+  assert(fallbackNote(single).length > 0, "state 10: a single-activity plan still gets a note");
+
+  const tomorrow = buildDailyPlan(defaultSettings, {
+    date: "2026-08-27",
+    dayIndex: 42,
+    dueVocab: 5,
+  });
+  const preview = tomorrowPreview(tomorrow);
+  assert(preview.includes(String(tomorrow.activities.length)), "state 10: the preview names its own activity count");
+  assert(preview.includes(String(tomorrow.estimatedMinutes)), "state 10: …and its own minutes");
+  assert.notEqual(preview, daySummary(tomorrow, []), "state 10: the preview and the summary are not the same sentence");
+
+  // Neither function throws on the smallest plan the builder can produce.
+  const tiny = buildDailyPlan({ ...defaultSettings, dailyMinutes: 20 }, ctx({ dueVocab: 0 }));
+  assert(fallbackNote(tiny).length > 0, "state 10: fallbackNote survives the smallest plan");
+  assert(tomorrowPreview(tiny).length > 0, "state 10: tomorrowPreview survives the smallest plan");
 }
 
 console.log("learn.check OK");

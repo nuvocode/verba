@@ -63,6 +63,12 @@ export interface Day {
   due: number;
   /** The whole backlog behind today's ask — stated separately, never on a button (§2.5). */
   backlog: number;
+  /**
+   * Where the plan on screen came from (§2.1). `fallback` means generation failed
+   * and the learner is looking at a plan built without the day's inputs — Today
+   * says so rather than presenting it as the real thing.
+   */
+  planSource: "fresh" | "resumed" | "fallback";
   loading: boolean;
   isDone(kind: ActivityKind): boolean;
   /** The first activity not yet finished — what ↵ on Today starts. */
@@ -121,6 +127,8 @@ export function useDay(settings: Settings): Day {
   // The whole backlog behind today's ask — the plan is built on the capped number,
   // and the backlog is stated separately so the learner is never asked for it all.
   const [backlog, setBacklog] = useState(0);
+  // Where the plan on screen came from — set on each of the load effect's paths.
+  const [planSource, setPlanSource] = useState<"fresh" | "resumed" | "fallback">("fresh");
 
   // ponytail: the measured estimate only refreshes when this effect re-runs — on
   // date, target-language, or level change. A Talk session writes new session_metrics
@@ -154,6 +162,7 @@ export function useDay(settings: Settings): Day {
             const { today, due: backlog } = await vocabCounts(settings.profile.targetLanguage);
             setDue(today);
             setBacklog(backlog);
+            setPlanSource("resumed");
             return;
           }
         }
@@ -176,13 +185,21 @@ export function useDay(settings: Settings): Day {
         setTrace(before);
         setDue(today);
         setBacklog(backlog);
+        setPlanSource("fresh");
         await saveDailySession(date, settings.profile.targetLanguage, fresh, [], null);
       } catch {
-        // No DB (browser dev, first run) — still give the learner a plan to work from.
+        // Generation failed — the store is missing (browser dev, first run) or a
+        // query threw. The learner still gets a day: yesterday's shape if it can be
+        // reached, a generic one otherwise. What must not happen is a blank screen.
+        // ponytail: this fallback is the generic plan. Yesterday's theme could be
+        // carried in from `previousDay` once that read is known to be independent
+        // of the one that just failed — a second DB read inside the catch of a
+        // failed DB read is how a fallback becomes a second failure.
         if (live) {
           setLevelEstimate(levelEstimateFrom([]));
           setPlan(buildDailyPlan(settings, { date, dayIndex: 1, dueVocab: 0 }));
           setWeaknesses([]);
+          setPlanSource("fallback");
         }
       } finally {
         if (live) setLoading(false);
@@ -323,6 +340,7 @@ export function useDay(settings: Settings): Day {
     trace,
     due,
     backlog,
+    planSource,
     loading,
     isDone: (k) => done.includes(k),
     next: nextActivity(plan, done),
