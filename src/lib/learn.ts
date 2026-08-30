@@ -194,7 +194,7 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
         id: "memory",
         kind: "memory",
         title: "Vocabulary review",
-        rationale: `${ctx.dueVocab} cards are due today, and reviewing them after you have used the words is when they stick.`,
+        rationale: `${ctx.dueVocab} cards come back today — reviewing them after you have used the words is when they stick.`,
         // Not capped. A review is the one part of the day whose length is a fact
         // rather than a choice — forty cards are forty cards, and a plan that
         // called them ten minutes would be describing a different afternoon.

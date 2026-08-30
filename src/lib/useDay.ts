@@ -57,8 +57,10 @@ export interface Day {
   recap: DayRecap | null;
   /** The session before this one, for Today's closing line. null on day one. */
   trace: Trace | null;
-  /** The cards due when the day was built — Memory's counter badge reads it. */
+  /** The capped ask — the cards the learner is asked for today. Memory's counter badge reads it. */
   due: number;
+  /** The whole backlog behind today's ask — stated separately, never on a button (§2.5). */
+  backlog: number;
   loading: boolean;
   isDone(kind: ActivityKind): boolean;
   /** The first activity not yet finished — what ↵ on Today starts. */
@@ -107,6 +109,9 @@ export function useDay(settings: Settings): Day {
   // The cards due when the day was built. Held so a regenerated plan is the same
   // day on a different topic, rather than one that quietly forgot the review.
   const [due, setDue] = useState(0);
+  // The whole backlog behind today's ask — the plan is built on the capped number,
+  // and the backlog is stated separately so the learner is never asked for it all.
+  const [backlog, setBacklog] = useState(0);
 
   // ponytail: the measured estimate only refreshes when this effect re-runs — on
   // date, target-language, or level change. A Talk session writes new session_metrics
@@ -137,19 +142,21 @@ export function useDay(settings: Settings): Day {
             setFocus(nextFocus);
             setWeaknesses(declared);
             setTrace(await previousDay(settings.profile.targetLanguage, date));
-            setDue((await vocabCounts(settings.profile.targetLanguage)).due);
+            const { today, due: backlog } = await vocabCounts(settings.profile.targetLanguage);
+            setDue(today);
+            setBacklog(backlog);
             return;
           }
         }
         // No plan for today (or the learner switched language, or the row is stale) — build fresh.
-        const [{ due }, dayIndex, scores, before] = await Promise.all([
+        const [{ today, due: backlog }, dayIndex, scores, before] = await Promise.all([
           vocabCounts(settings.profile.targetLanguage),
           dayNumber(settings.profile.targetLanguage),
           recentMetricScores(settings.profile.targetLanguage, 12),
           previousDay(settings.profile.targetLanguage, date),
         ]);
         const levelEstimate = levelEstimateFrom(scores);
-        const fresh = buildDailyPlan(settings, { date, dayIndex, dueVocab: due, focus: nextFocus, weaknesses: declared });
+        const fresh = buildDailyPlan(settings, { date, dayIndex, dueVocab: today, focus: nextFocus, weaknesses: declared });
         if (!live) return;
         setLevelEstimate(levelEstimate);
         setPlan(fresh);
@@ -158,7 +165,8 @@ export function useDay(settings: Settings): Day {
         setFocus(nextFocus);
         setWeaknesses(declared);
         setTrace(before);
-        setDue(due);
+        setDue(today);
+        setBacklog(backlog);
         await saveDailySession(date, settings.profile.targetLanguage, fresh, [], null);
       } catch {
         // No DB (browser dev, first run) — still give the learner a plan to work from.
@@ -284,6 +292,7 @@ export function useDay(settings: Settings): Day {
     recap,
     trace,
     due,
+    backlog,
     loading,
     isDone: (k) => done.includes(k),
     next: nextActivity(plan, done),

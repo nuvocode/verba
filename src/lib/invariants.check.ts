@@ -107,7 +107,7 @@ const LEDGER: Row[] = [
   {
     id: 15,
     claim: "`strength` çubuklarının uzunlukları deck içinde çeşitlilik gösterir.",
-    pending: "M1+ (Memory/SRS)",
+    assertedIn: [{ file: "src/lib/deck.check.ts", marker: "invariant 15" }],
   },
   {
     id: 16,

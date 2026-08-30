@@ -521,3 +521,8 @@ input { font: inherit; }
 .setup summary:hover { color: var(--ink); }
 .setup .row2 { display: flex; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line2); }
 .setup .row2 .k { font-family: var(--mono); font-size: 11px; color: var(--ink3); width: 96px; flex: none; padding-top: 2px; }
+
+/* ---------- memory: the backlog, the row meta, the filter chips ---------- */
+.backlog { font-size: 13px; color: var(--ink3); margin: -8px 0 26px; max-width: 640px; line-height: 1.6; }
+.wmeta { font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink3); }
+.deck-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 26px; }
