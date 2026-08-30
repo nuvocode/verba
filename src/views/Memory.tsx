@@ -95,6 +95,10 @@ export default function Memory({
   const good = words.filter((w) => suspect(w) === null);
   const shown = filterDeck(good, filter);
   const { due, soon, learned } = groupDeck(shown, now);
+  // What the CTA and backlog promise is what start() will actually do — the ask is
+  // the capped number, oldest first, and the filter is ignored. Group titles above
+  // stay filtered; this count is not.
+  const dueAll = groupDeck(good, now).due;
 
   /** Drop a card. Optimistic — the row leaves the list before the delete lands. */
   const drop = useCallback(async (id: number) => {
@@ -289,9 +293,9 @@ export default function Memory({
           </div>
           <h1 className="display">Everything you've met, in context.</h1>
         </div>
-        {due.length > 0 && (
+        {dueAll.length > 0 && (
           <button className="btn sm" onClick={start} style={{ whiteSpace: "nowrap" }}>
-            {reviewCall(due.length)} <span className="kbd">R</span>
+            {reviewCall(dueAll.length)} <span className="kbd">R</span>
           </button>
         )}
       </div>
@@ -299,7 +303,7 @@ export default function Memory({
         Nothing here was typed into a list, and nothing lands here on its own — a word arrives because you kept it while
         reading, or left it in place after a conversation. Each one resurfaces just before you'd forget it.
       </div>
-      {backlogNote(due.length) && <div className="backlog">{backlogNote(due.length)}</div>}
+      {backlogNote(dueAll.length) && <div className="backlog">{backlogNote(dueAll.length)}</div>}
 
       {error && <div className="err">{error}</div>}
 
