@@ -72,22 +72,22 @@ const LEDGER: Row[] = [
   {
     id: 8,
     claim: "Hiçbir delta, metriğin kendi değerine eşit değildir.",
-    pending: "M1+ (Coach metrikleri)",
+    assertedIn: [{ file: "src/lib/coachmetrics.check.ts", marker: "invariant 8" }],
   },
   {
     id: 9,
     claim: "Consistency görselindeki kutu sayısı === 7; işaretli kutu sayısı === bildirilen gün sayısı.",
-    pending: "M1+ (Coach metrikleri)",
+    assertedIn: [{ file: "src/lib/coachmetrics.check.ts", marker: "invariant 9" }],
   },
   {
     id: 10,
     claim: "Başlık metni ile metrik değerleri çelişmez.",
-    pending: "M1+ (Coach metrikleri)",
+    assertedIn: [{ file: "src/lib/coachmetrics.check.ts", marker: "invariant 10" }],
   },
   {
     id: 11,
     claim: 'Her "win" maddesi bir sinyal eşiğine dayanır.',
-    pending: "M1+ (Coach metrikleri)",
+    assertedIn: [{ file: "src/lib/coachmetrics.check.ts", marker: "invariant 11" }],
   },
   {
     id: 12,

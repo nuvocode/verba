@@ -5,9 +5,9 @@ import { getProvider } from "../lib/providers";
 import { weeklyReportPrompt, parseWeeklyReport, type WeeklyReport } from "../lib/coach";
 import { getPack } from "../lib/packs";
 import { CEFR_LEVELS } from "../lib/level";
-import { levelOf, levelGapNote, progressionSuggested, MIN_WEAKNESS_EVIDENCE } from "../lib/model";
+import { levelOf, levelGapNote, progressionSuggested, MIN_WEAKNESS_EVIDENCE, type Signal } from "../lib/model";
 import { addressed } from "../lib/weakness";
-import { coachPanel, measured, type Metric, type MetricPair } from "../lib/coachmetrics";
+import { coachPanel, measured, headline, wins, daySeries, type Metric, type MetricPair } from "../lib/coachmetrics";
 import { recentMemories, recentMetricScores, weekStats, signalsSince } from "../lib/db";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -22,6 +22,7 @@ const weekRange = () => {
 export default function Coach({ settings, day }: { settings: Settings; day: Day }) {
   const [report, setReport] = useState<WeeklyReport | null>(null);
   const [panel, setPanel] = useState<MetricPair[]>([]);
+  const [signals, setSignals] = useState<Signal[]>([]);
   const [trend, setTrend] = useState<number[]>([]);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
@@ -45,6 +46,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
         // The metric grid measures from signals only (§2.6) — two windows back so
         // each metric can be compared against the week before it.
         const signals = await signalsSince(settings.profile.targetLanguage, Date.now() - 2 * WEEK_MS);
+        setSignals(signals);
         setPanel(coachPanel(signals, Date.now()));
 
         // The written report is the only AI call here; the numbers above are measured.
@@ -112,7 +114,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
       <div className="eyebrow">
         Coach · {weekRange()} · {settings.profile.targetLanguage}
       </div>
-      <h1 className="display">{report?.headline ?? (busy ? "Reading your week…" : "Quiet, steady progress.")}</h1>
+      <h1 className="display">{busy ? "Reading your week…" : headline(panel)}</h1>
 
       {error && <div className="err">{error}</div>}
 
@@ -165,13 +167,39 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
                 <b>
                   {metric.value}
                   <span className="unit"> {metric.unit}</span>
+                  {isNew ? <em className="new">new</em> : delta !== null && delta !== 0 ? (
+                    <i style={delta < 0 ? { color: "var(--warn)" } : undefined}>
+                      {delta > 0 ? "+" : ""}
+                      {delta}
+                    </i>
+                  ) : null}
                 </b>
               </div>
               <div className="meter">
                 <div style={{ width: `${meterWidth(metric)}%` }} />
               </div>
               <div className="mnote">{metric.definition}</div>
-              {/* PLAN-011: delta / new badge */}
+              {metric.id === "consistency" &&
+                (() => {
+                  const series = daySeries(signals, Date.now());
+                  return (
+                    <div className="consistency">
+                      <div className="boxes">
+                        {series.map((d, i) => (
+                          <span key={i} className={d.active ? "on" : ""} />
+                        ))}
+                      </div>
+                      <svg className="spark" viewBox="0 0 7 1" preserveAspectRatio="none">
+                        <polyline
+                          points={series.map((d, i) => `${i},${1 - Math.min(1, d.count / 5)}`).join(" ")}
+                          fill="none"
+                          stroke="var(--accent)"
+                          strokeWidth="0.12"
+                        />
+                      </svg>
+                    </div>
+                  );
+                })()}
             </div>
           ))}
         </div>
@@ -209,13 +237,13 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
         </div>
       )}
 
-      {report && report.wins.length > 0 && (
+      {wins(panel).length > 0 && (
         <>
           <div className="eyebrow" style={{ marginBottom: 14 }}>
             Wins this week
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 48 }}>
-            {report.wins.map((w) => (
+            {wins(panel).map((w) => (
               <div className="chip" key={w} style={{ cursor: "default" }}>
                 {w}
               </div>
@@ -227,9 +255,12 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
       {trend.length > 1 && (
         <>
           <div className="eyebrow" style={{ marginBottom: 16 }}>
-            Momentum · last {trend.length} sessions
+            Momentum · last {trend.length} sessions · {weekRange()}
           </div>
           <svg width="100%" height="72" viewBox="0 0 800 72" preserveAspectRatio="none" style={{ display: "block" }}>
+            <line x1="0" y1="72" x2="800" y2="72" stroke="var(--line)" strokeWidth="1" />
+            <text x="0" y="70" className="axis">0</text>
+            <text x="0" y="10" className="axis">100</text>
             <polyline points={line} fill="none" stroke="var(--accent)" strokeWidth="2.5" />
           </svg>
           <div style={{ fontSize: 12, color: "var(--ink3)", marginTop: 8 }}>
