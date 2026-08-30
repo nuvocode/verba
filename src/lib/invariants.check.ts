@@ -97,12 +97,12 @@ const LEDGER: Row[] = [
   {
     id: 13,
     claim: "Due öğe sayısı < toplam öğe sayısı (deck 1 günden eskiyse).",
-    pending: "M1+ (Memory/SRS)",
+    assertedIn: [{ file: "src/lib/srs.check.ts", marker: "invariant 13" }],
   },
   {
     id: 14,
     claim: "Bir tekrar sonrası ilgili öğenin `dueAt` ve `interval` değerleri değişmiştir.",
-    pending: "M1+ (Memory/SRS)",
+    assertedIn: [{ file: "src/lib/srs.check.ts", marker: "invariant 14" }],
   },
   {
     id: 15,

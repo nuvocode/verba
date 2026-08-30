@@ -1,5 +1,5 @@
 import Database, { type QueryResult } from "@tauri-apps/plugin-sql";
-import { newCard, schedule, type Grade } from "./srs";
+import { newCard, schedule, DAILY_REVIEW_CAP, type Grade } from "./srs";
 import { worthLearning } from "./vocab";
 import { planMemory, type Memory, type MemoryWrite } from "./prompts";
 import { markDirty } from "./vault";
@@ -58,6 +58,7 @@ async function init(): Promise<Database> {
       interval INTEGER NOT NULL,
       due INTEGER NOT NULL,
       reps INTEGER NOT NULL,
+      lapses INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       UNIQUE(lang, term)     -- the same spelling is a different card in a different language
     );
@@ -149,6 +150,10 @@ async function init(): Promise<Database> {
   // The level a passage was written at, so the library can be filtered by it. Older
   // rows keep NULL — their level wasn't recorded — and only show under "All".
   await db.execute("ALTER TABLE reading_sessions ADD COLUMN cefr TEXT").catch(() => {});
+  // A failed card and a card that has never been failed used to look the same:
+  // the schedule tracked reps but threw the lapses away (§2.5). Existing decks
+  // start at 0 — that is "not recorded", and it is the only honest starting count.
+  await db.execute("ALTER TABLE vocab ADD COLUMN lapses INTEGER NOT NULL DEFAULT 0").catch(() => {});
   await migrateVocabToPerLanguage(db);
   return db;
 }
@@ -264,6 +269,7 @@ export interface VocabRow {
   interval: number;
   due: number;
   reps: number;
+  lapses: number;
 }
 
 // Every read and write below is scoped to one language: a deck belongs to the
@@ -322,11 +328,11 @@ export async function deleteVocabTerm(lang: string, term: string): Promise<void>
  */
 const REVIEWABLE = "TRIM(COALESCE(translation, '')) <> '' AND term NOT GLOB '*[0-9]*'";
 
-export async function dueVocab(lang: string, now = Date.now()): Promise<VocabRow[]> {
+export async function dueVocab(lang: string, now = Date.now(), limit = DAILY_REVIEW_CAP): Promise<VocabRow[]> {
   const db = await getDb();
   return db.select<VocabRow[]>(
-    `SELECT * FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE} ORDER BY due ASC`,
-    [lang, now],
+    `SELECT * FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE} ORDER BY due ASC LIMIT $3`,
+    [lang, now, limit],
   );
 }
 
@@ -335,7 +341,15 @@ export async function allVocab(lang: string): Promise<VocabRow[]> {
   return db.select<VocabRow[]>("SELECT * FROM vocab WHERE lang = $1 ORDER BY created_at DESC", [lang]);
 }
 
-export async function vocabCounts(lang: string, now = Date.now()): Promise<{ total: number; due: number }> {
+/**
+ * What the deck owes and what the learner is asked for. `due` is the whole
+ * backlog; `today` is the capped ask — the number every call to action shows,
+ * because "112 due" is the number that makes a learner close the app (§2.5).
+ */
+export async function vocabCounts(
+  lang: string,
+  now = Date.now(),
+): Promise<{ total: number; due: number; today: number }> {
   const db = await getDb();
   const total = await db.select<{ n: number }[]>(
     `SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND ${REVIEWABLE}`,
@@ -345,16 +359,21 @@ export async function vocabCounts(lang: string, now = Date.now()): Promise<{ tot
     `SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE}`,
     [lang, now],
   );
-  return { total: total[0]?.n ?? 0, due: due[0]?.n ?? 0 };
+  return { total: total[0]?.n ?? 0, due: due[0]?.n ?? 0, today: Math.min(due[0]?.n ?? 0, DAILY_REVIEW_CAP) };
 }
 
 export async function reviewVocab(card: VocabRow, grade: Grade): Promise<void> {
-  const next = schedule({ ease: card.ease, interval: card.interval, reps: card.reps }, grade, Date.now());
-  await write("UPDATE vocab SET ease = $1, interval = $2, reps = $3, due = $4 WHERE id = $5", [
+  const next = schedule(
+    { ease: card.ease, interval: card.interval, reps: card.reps, lapses: card.lapses },
+    grade,
+    Date.now(),
+  );
+  await write("UPDATE vocab SET ease = $1, interval = $2, reps = $3, due = $4, lapses = $5 WHERE id = $6", [
     next.ease,
     next.interval,
     next.reps,
     next.due,
+    next.lapses,
     card.id,
   ]);
   // Log the review so weekly stats can count activity (no per-review timestamp on vocab).
