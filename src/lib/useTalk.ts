@@ -49,6 +49,13 @@ export interface Reflection extends SessionSummary {
   turns: number;
   corrections: Correction[];
   words: { term: string; translation: string }[];
+  produced: ProducedTurn[];
+}
+
+/** One thing the learner actually sent, and whether they found it themselves. */
+export interface ProducedTurn {
+  text: string;
+  fromSuggestion: boolean;
 }
 
 const CONF_START = 50;
@@ -106,6 +113,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
 
   const history = useRef<ChatMessage[]>([]); // full provider context, incl. system
   const sessionId = useRef<number | null>(null);
+  // What the learner produced, and whether it was theirs. `msgs` cannot answer the
+  // second question — a picked suggestion and a typed sentence are the same bubble.
+  const produced = useRef<ProducedTurn[]>([]);
   // How far the session's title has got: 0 unnamed, 1 named off the opening,
   // 2 re-named once the subject settled. Not a rolling rewrite — 2 is the end.
   const titleStage = useRef<0 | 1 | 2>(0);
@@ -173,6 +183,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       setError("");
       setNotice("");
       titleStage.current = 0;
+      produced.current = [];
       setBusy(true);
       // What earlier conversations left behind. It rides in the system prompt, so
       // every call made off this history — the turns, the wrap-up, the vocabulary
@@ -223,6 +234,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       setSuggestions([]);
       const idx = msgs.length;
       setMsgs((m) => [...m, { role: "user", text: msg, corrections: [], inline: false }]);
+      produced.current.push({ text: msg, fromSuggestion });
       history.current.push({ role: "user", content: msg });
       if (sessionId.current) await addMessage(sessionId.current, "user", msg).catch(() => {});
 
@@ -378,7 +390,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     } finally {
       setBusy(false);
     }
-    setReflection({ ...summary, turns: userTexts.length, corrections, words });
+    setReflection({ ...summary, turns: userTexts.length, corrections, words, produced: produced.current });
   }, [scenario, busy, msgs, settings, pack]);
 
   /**

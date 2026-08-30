@@ -7,8 +7,8 @@
 // only thing that ever looks inside. The gate at the bottom holds the second half.
 // Run: node --experimental-strip-types src/lib/signals.check.ts
 import assert from "node:assert";
-import { signalLabel, type Signal } from "./model.ts";
-import { talkSignals, readSignals, listenSignals, memorySignals } from "./signals.ts";
+import { signalLabel, signalMiss, type Signal } from "./model.ts";
+import { talkSignals, readSignals, listenSignals, memorySignals, TURN, SUGGESTED } from "./signals.ts";
 
 const sig = (payload: unknown): Signal => ({
   id: "s1",
@@ -31,30 +31,60 @@ assert.equal(signalLabel(sig({ label: 7 })), null, "a label that is not a string
 assert.equal(signalLabel(sig({ label: "" })), "", "an empty label is a label — the writer's problem, not the door's");
 
 // --- what a surface hands over: every draft is readable through the door -------
-const drafts = talkSignals("talk-1", {
-  turns: 7,
-  corrections: [
-    { original: "yo soy cansado", fixed: "yo estoy cansado", note: "ser vs estar", severity: "severe" },
-    { original: "x", fixed: "y", note: "   ", severity: "minor" }, // names nothing
-  ],
-  words: [{ term: "la cuenta", translation: "the bill" }],
-  summary: "",
-  strengths: [],
-  focus: [],
-});
+const drafts = talkSignals(
+  "talk-1",
+  {
+    turns: 7,
+    corrections: [
+      { original: "yo soy cansado", fixed: "yo estoy cansado", note: "ser vs estar", severity: "severe" },
+      { original: "x", fixed: "y", note: "   ", severity: "minor" }, // names nothing
+    ],
+    words: [{ term: "la cuenta", translation: "the bill" }],
+    produced: [
+      { text: "Hola, buenos días.", fromSuggestion: false },
+      { text: "Quiero la cuenta, por favor.", fromSuggestion: false },
+      { text: "¿Cuánto cuesta?", fromSuggestion: false },
+      { text: "La cuenta, por favor.", fromSuggestion: true },
+    ],
+    summary: "",
+    strengths: [],
+    focus: [],
+  },
+  "es",
+);
 
 assert.deepEqual(
   drafts.map((d) => d.kind),
-  ["correction", "lexicalItem", "unpromptedTurn"],
-  "a noteless correction is not evidence; the words and the session each are",
+  ["correction", "lexicalItem", "unpromptedTurn", "unpromptedTurn", "unpromptedTurn", "suggestionUsed"],
+  "a noteless correction is not evidence; each produced turn is its own signal",
 );
 assert(drafts.every((d) => d.activityId === "talk-1"), "every signal hangs off the activity that produced it");
 // The whole point of the contract: whatever a surface writes, Coach can name it.
 assert.deepEqual(
   drafts.map((d) => signalLabel({ ...d, id: "x", observedAt: 0 })),
-  ["ser vs estar", "la cuenta", "turns"],
+  ["ser vs estar", "la cuenta", TURN, TURN, TURN, SUGGESTED],
   "every payload a surface writes must read back through signalLabel",
 );
+// The old aggregate is gone — no signal may still name the session's turn count.
+assert(
+  drafts.every((d) => (d.payload as { label: string }).label !== "turns"),
+  "the aggregate turn-count signal is removed, not kept alongside",
+);
+// Each turn is measured where it was produced, and the numbers ride along.
+for (const d of drafts.filter((d) => d.kind === "unpromptedTurn" || d.kind === "suggestionUsed")) {
+  const p = d.payload as { words: number; sentences: number; chars: number };
+  assert(typeof p.words === "number" && p.words > 0, "a non-empty turn measures more than zero words");
+  assert(typeof p.sentences === "number" && p.sentences >= 1, "a turn always has at least one sentence");
+  assert(typeof p.chars === "number", "the character count rides along as a number");
+}
+// A turn is an observation, never an accusation — no weakness may form on it.
+assert(
+  drafts.filter((d) => d.kind === "unpromptedTurn" || d.kind === "suggestionUsed").every((d) => signalMiss({ ...d, id: "x", observedAt: 0 }) === false),
+  "a produced turn is never a miss",
+);
+// A language with no spaces still measures: Japanese is cut by its own rules.
+const ja = talkSignals("talk-1", { turns: 1, corrections: [], words: [], produced: [{ text: "こんにちは、元気ですか。", fromSuggestion: false }], summary: "", strengths: [], focus: [] }, "ja");
+assert((ja[0].payload as { words: number }).words > 1, "a no-space language still counts more than one word");
 
 // --- the other three surfaces: same shape, their own evidence ----------------
 const q = (prompt: string, correct: boolean) => ({ prompt, given: "x", answer: "y", correct });

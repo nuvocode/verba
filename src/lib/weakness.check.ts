@@ -26,7 +26,7 @@ assert(!signalMiss(sig("comprehension", { label: "x", correct: true })), "a righ
 assert(signalMiss(sig("lexicalItem", { label: "la cuenta", grade: 0 })), 'a card graded "again" is a miss');
 assert(!signalMiss(sig("lexicalItem", { label: "la cuenta", grade: 2 })), "an easy card is not");
 assert(!signalMiss(sig("lexicalItem", { label: "la cuenta" })), "a word merely met is not a miss");
-assert(!signalMiss(sig("unpromptedTurn", { label: "turns", count: 5 })), "counting turns observes no failure");
+assert(!signalMiss(sig("unpromptedTurn", { label: "unaided turn", words: 5, sentences: 1, chars: 20 })), "a produced turn observes no failure");
 
 // --- the threshold ------------------------------------------------------------
 const below = weaknessesFrom([miss("a"), miss("a"), hit("a")]);

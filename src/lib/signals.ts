@@ -7,13 +7,19 @@
 // along unread — signalLabel (lib/model) is the only structural reader there is.
 import type { SignalDraft, ActivityId } from "./model.ts";
 import type { Grade } from "./srs.ts";
-import type { Reflection } from "./useTalk.ts";
+import { words, sentenceCount } from "./text.ts";
+import type { ProducedTurn, Reflection } from "./useTalk.ts";
 
 /**
  * A finished conversation. A correction with no note names nothing, so it is not
- * evidence of anything; the turn count is one signal about the session as a whole.
+ * evidence of anything; every turn the learner produced is measured where it was
+ * produced, because Coach reads signals and nothing else (§2.6).
+ *
+ * One signal per turn rather than one per session: an average computed here would
+ * be a number Coach could not recount, and a session that mixed one long unaided
+ * answer with four picked suggestions would arrive as a single middling figure.
  */
-export function talkSignals(activityId: ActivityId, r: Reflection): SignalDraft[] {
+export function talkSignals(activityId: ActivityId, r: Reflection, locale: string): SignalDraft[] {
   return [
     ...r.corrections
       .filter((c) => c.note.trim() !== "")
@@ -27,8 +33,27 @@ export function talkSignals(activityId: ActivityId, r: Reflection): SignalDraft[
       kind: "lexicalItem" as const,
       payload: { label: w.term, translation: w.translation },
     })),
-    { activityId, kind: "unpromptedTurn" as const, payload: { label: "turns", count: r.turns } },
+    ...r.produced.map((t) => turnSignal(activityId, t, locale)),
   ];
+}
+
+// The two labels a produced turn can carry. Fixed, not per-turn: a turn's own text
+// is unique, so grouping on it would mean no weakness could ever collect its three
+// pieces of evidence — the same reason READING and LISTENING are fixed below.
+export const TURN = "unaided turn";
+export const SUGGESTED = "suggested turn";
+
+function turnSignal(activityId: ActivityId, t: ProducedTurn, locale: string): SignalDraft {
+  const ws = words(t.text, locale);
+  const payload = {
+    label: t.fromSuggestion ? SUGGESTED : TURN,
+    words: ws.length,
+    sentences: Math.max(1, sentenceCount(t.text, locale)),
+    chars: ws.reduce((n, w) => n + w.length, 0),
+  };
+  return t.fromSuggestion
+    ? { activityId, kind: "suggestionUsed" as const, payload }
+    : { activityId, kind: "unpromptedTurn" as const, payload };
 }
 
 /**

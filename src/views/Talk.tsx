@@ -5,6 +5,7 @@ import type { ActivityKind } from "../lib/model";
 import type { Day } from "../lib/useDay";
 import type { Talk as TalkState } from "../lib/useTalk";
 import { talkSignals } from "../lib/signals";
+import { getPack } from "../lib/packs";
 import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
 import Face from "./talk/Face";
 import Hints from "./Hints";
@@ -69,7 +70,7 @@ export default function Talk({
   const closing = (day.plan?.activities ?? []).find((b) => b.kind === closes);
   useEffect(() => {
     if (talk.reflection && closes && !day.isDone(closes))
-      void day.complete(closes, closing ? talkSignals(closing.id, talk.reflection) : []);
+      void day.complete(closes, closing ? talkSignals(closing.id, talk.reflection, getPack(settings.packId)?.speech.locale ?? "en") : []);
   }, [talk.reflection]);
 
   // What the plan hands them next. Computed by skipping `closes` rather than reading
