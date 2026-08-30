@@ -265,4 +265,19 @@ const turn = (words: number, sentences: number, at = NOW) =>
   assert.equal(oldest[0].active, true, "a signal stamped NOW - 6 days marks index 0");
 }
 
+// invariant 9 boundary — the window is day-aligned, not a rolling 168 hours.
+// A signal at NOW - 7 days + 2h is inside a rolling week but outside the seven
+// local days daySeries draws, so the two must still agree. A rolling window
+// counts it (2 days) while the boxes show 1 — the mismatch this test pins.
+{
+  const signals = [
+    turn(5, 1, NOW),
+    turn(5, 1, NOW - 7 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000),
+  ];
+  const series = daySeries(signals, NOW);
+  const active = series.filter((d) => d.active).length;
+  const consistency = coachMetrics(signals, NOW).find((m) => m.id === "consistency")!.value;
+  assert.equal(active, consistency, "invariant 9: a signal just outside the day window is not counted by consistency");
+}
+
 console.log("coachmetrics.check OK");

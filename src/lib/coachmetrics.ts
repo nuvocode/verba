@@ -39,9 +39,12 @@ const round = (n: number, decimals = 0): number => {
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n));
 
 export function coachMetrics(signals: Signal[], now: number): Metric[] {
-  // The window Coach measures over: the week ending at `now`. A signal older than
-  // that is the previous period's business, not this one's.
-  const inWindow = signals.filter((s) => s.observedAt >= now - WEEK_MS && s.observedAt <= now);
+  // The window Coach measures over: the seven local days ending at `now`, aligned
+  // to the same day buckets daySeries draws (invariant 9). A rolling 168 hours
+  // drifts across the day boundary and would count a signal daySeries leaves out,
+  // so the two would disagree at the edge. The window starts at the midnight six
+  // days before today and runs to `now`.
+  const inWindow = signals.filter((s) => s.observedAt >= dayKey(now) - 6 * 24 * 60 * 60 * 1000 && s.observedAt <= now);
 
   // complexity — mean words per sentence over unprompted turns
   const turns = inWindow.filter((s) => s.kind === "unpromptedTurn");
