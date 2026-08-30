@@ -87,7 +87,7 @@ export function useRead(settings: Settings) {
    * day's theme, which is what keeps the daily flow a single keystroke.
    */
   const generate = useCallback(
-    async (opts: { interests?: string; goal?: string; length?: PassageLength; topic?: string } = {}) => {
+    async (opts: { interests?: string; goal?: string; length?: PassageLength; topic?: string; reuse?: string[] } = {}) => {
       const length = opts.length ?? ask.length;
       const topic = (opts.topic ?? "").trim();
       setAsk({ length, topic });
@@ -107,7 +107,7 @@ export function useRead(settings: Settings) {
               role: "user",
               content: storyPrompt(
                 settings,
-                { interests: opts.interests, goal: opts.goal, topic, sentences: LENGTHS[length], memories },
+                { interests: opts.interests, goal: opts.goal, topic, sentences: LENGTHS[length], memories, reuse: opts.reuse },
                 pack,
               ),
             },

@@ -38,6 +38,14 @@ const NAV: [string, Space, string][] = [
   ["Coach", "coach", "6"],
 ];
 
+/** Which planned activity a space carries. Coach, Today and Settings carry none. */
+const SPACE_ACTIVITY: Partial<Record<Space, ActivityKind>> = {
+  talk: "talk",
+  read: "read",
+  listening: "listen",
+  memory: "memory",
+};
+
 const isSettingsHash = () => window.location.hash.startsWith("#settings");
 
 interface PaletteItem {
@@ -198,6 +206,22 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
   );
 
   /**
+   * Entering a surface from the nav (§2.1). A surface that is on today's plan and
+   * not yet finished opens *its* activity, with the plan's theme, scenario and
+   * goal — not a blank screen that invents its own content. Everything else is a
+   * plain move.
+   */
+  const enter = useCallback(
+    (s: Space) => {
+      const kind = SPACE_ACTIVITY[s];
+      const activity = kind && day.plan?.activities.find((a) => a.kind === kind);
+      if (activity && !day.isDone(activity.kind)) return begin(activity.kind);
+      go(s);
+    },
+    [day, begin, go],
+  );
+
+  /**
    * Finish a block and hand the learner to whatever the plan actually has next — on a
    * normal day, reading hands off to the role-play. Only the plan decides; no screen gets
    * to guess. Nothing left to do means the day is over, and the honest place to land is
@@ -216,10 +240,10 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
     const q = query.trim();
     const items: PaletteItem[] = [
       { section: "Go to", label: "Today — your session plan", kbd: "1", run: () => go("today") },
-      { label: "Talk — conversation with the coach", kbd: "2", run: () => go("talk") },
-      { label: "Read — a passage at your level", kbd: "3", run: () => go("read") },
-      { label: "Listen — a chaptered story to hear", kbd: "4", run: () => go("listening") },
-      { label: "Memory — everything you've met", kbd: "5", run: () => go("memory") },
+      { label: "Talk — conversation with the coach", kbd: "2", run: () => enter("talk") },
+      { label: "Read — a passage at your level", kbd: "3", run: () => enter("read") },
+      { label: "Listen — a chaptered story to hear", kbd: "4", run: () => enter("listening") },
+      { label: "Memory — everything you've met", kbd: "5", run: () => enter("memory") },
       { label: "Coach — your weekly report", kbd: "6", run: () => go("coach") },
       { label: "Settings — providers, packs, offline", kbd: ",", run: () => go("settings") },
       // Every settings row, from the one index — the same list the Settings
@@ -302,7 +326,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       },
     });
     return hits;
-  }, [query, go, begin, day, read, talk, listening, settings.theme, update, space]);
+  }, [query, go, enter, begin, day, read, talk, listening, settings.theme, update, space]);
 
   // The one thing Esc does on this screen. The key and the visible pill run it, so nobody
   // has to know the shortcut exists. Memory's review owns its own Esc while it's captured.
@@ -437,7 +461,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
           ",": "settings",
         };
         const to = dest[e.key];
-        if (to) go(to);
+        if (to) enter(to);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -454,6 +478,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
     day,
     begin,
     go,
+    enter,
     captured,
     escape,
     confirmReplay,
@@ -529,7 +554,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         </button>
         <div className="nav">
           {NAV.map(([label, key, kbd]) => (
-            <button key={key} className={`nav-item ${space === key ? "on" : ""}`} onClick={() => go(key)}>
+            <button key={key} className={`nav-item ${space === key ? "on" : ""}`} onClick={() => enter(key)}>
               <span>{label}</span>
               {/* The badge is the shortcut, and only where the shortcut is live: on
                   Talk, 1–3 are suggestions, so the bar shows no numbers there. */}

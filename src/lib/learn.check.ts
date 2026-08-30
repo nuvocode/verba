@@ -6,6 +6,8 @@ import {
   anotherTheme,
   buildDailyPlan,
   daySummary,
+  dependencyMet,
+  dependencyNote,
   nextActivity,
   isLegacyPlanShape,
   progressLine,
@@ -183,5 +185,39 @@ assert.match(traceLine({ theme: "food and cooking", done: 3, total: 6 })!, /food
 assert.match(traceLine({ theme: "food and cooking", done: 3, total: 6 })!, /3 of 6/, "…and how far it got");
 assert.match(traceLine({ theme: "t", done: 6, total: 6 })!, /finished the day/, "a completed day reads as completed");
 assert(!/0 of/.test(traceLine({ theme: "t", done: 0, total: 6 })!), "…and an untouched one does not read as a score");
+
+// ---- invariant 7: the reading activity's dependency is real, and the note
+// ---- says what the learner gets instead when it is not met.
+{
+  const plan = buildDailyPlan(defaultSettings, ctx({ dueVocab: 5 }));
+  const read = plan.activities.find((a) => a.kind === "read")!;
+  const talk = plan.activities.find((a) => a.kind === "talk")!;
+  assert.equal(read.dependsOn, "talk", "invariant 7: read depends on talk");
+  assert(
+    plan.activities.findIndex((a) => a.id === "talk") < plan.activities.findIndex((a) => a.id === "read"),
+    "invariant 7: talk appears before read in the plan",
+  );
+
+  assert.equal(dependencyMet(plan, [], "read"), false, "invariant 7: read is unmet before talk runs");
+  assert.equal(dependencyMet(plan, ["talk"], "read"), true, "invariant 7: read is met once talk is done");
+  assert.equal(dependencyMet(plan, [], "talk"), true, "invariant 7: talk has no dependency, so it is always met");
+
+  const note = dependencyNote(plan, [], "read");
+  assert(note && note.length > 0, "invariant 7: an unmet read gets a note");
+  assert(note!.includes(read.title), "invariant 7: the note names the activity's own title");
+  assert(note!.includes(talk.title.toLowerCase()), "invariant 7: the note names the dependency it leans on");
+  assert.equal(dependencyNote(plan, ["talk"], "read"), null, "invariant 7: a met read gets no note");
+}
+
+// invariant 7 — the short day still carries the dependency: it drops role-play
+// and listening, not the read's connection to the conversation.
+{
+  const short = buildDailyPlan({ ...defaultSettings, dailyMinutes: 20 }, ctx({ dueVocab: 5 }));
+  const read = short.activities.find((a) => a.kind === "read")!;
+  const talk = short.activities.find((a) => a.kind === "talk")!;
+  assert.equal(read.dependsOn, "talk", "invariant 7: the short day's read still depends on talk");
+  assert(short.activities.some((a) => a.kind === "talk"), "invariant 7: talk is still in the short day");
+  assert(short.activities.some((a) => a.kind === "read"), "invariant 7: read is still in the short day");
+}
 
 console.log("learn.check OK");

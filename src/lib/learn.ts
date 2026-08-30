@@ -168,8 +168,9 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
       id: "read",
       kind: "read",
       title: "Reading",
-      rationale: `The passage reuses what you just said about ${theme}, so you meet those words again in someone else's sentences.`,
+      rationale: `The passage reuses the words you just used about ${theme}, so you meet them again in someone else's sentences.`,
       estimatedMinutes: 5,
+      dependsOn: "talk",
       goal: readGoal,
     }),
   ];
@@ -298,6 +299,30 @@ export type ActivityStatus = "done" | "next" | "waiting";
 export function activityStatus(plan: DailyPlan, done: ActivityKind[], kind: ActivityKind): ActivityStatus {
   if (done.includes(kind)) return "done";
   return nextActivity(plan, done) === kind ? "next" : "waiting";
+}
+
+/** Has the activity this one leans on actually run yet? */
+export function dependencyMet(plan: DailyPlan, done: ActivityKind[], kind: ActivityKind): boolean {
+  const activity = plan.activities.find((a) => a.kind === kind);
+  if (!activity?.dependsOn) return true;
+  const dep = plan.activities.find((a) => a.id === activity.dependsOn);
+  return !dep || done.includes(dep.kind);
+}
+
+/**
+ * What to say when a learner opens an activity ahead of what it was built on
+ * (§2.1). Not a block — they may work in any order they like. It says what they
+ * will get instead, because the alternative is a passage that quietly does not
+ * do what its own rationale claims.
+ *
+ * `null` when there is nothing to warn about.
+ */
+export function dependencyNote(plan: DailyPlan, done: ActivityKind[], kind: ActivityKind): string | null {
+  if (dependencyMet(plan, done, kind)) return null;
+  const activity = plan.activities.find((a) => a.kind === kind);
+  const dep = plan.activities.find((a) => a.id === activity?.dependsOn);
+  if (!activity || !dep) return null;
+  return `${activity.title} was built to reuse what you say in ${dep.title.toLowerCase()}, and you have not done that yet. This one stands on its own instead — ${dep.title.toLowerCase()} first if you would rather have the version that connects.`;
 }
 
 /** What the last day the learner worked leaves behind. */

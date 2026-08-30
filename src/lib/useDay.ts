@@ -11,7 +11,8 @@ import {
   type DayRecap,
   type Trace,
 } from "./learn";
-import type { ActivityKind, DailyPlan, LevelEstimate, SignalDraft, Weakness } from "./model";
+import type { ActivityId, ActivityKind, DailyPlan, LevelEstimate, SignalDraft, Weakness } from "./model";
+import { signalLabel } from "./model";
 import { levelEstimateFrom } from "./metrics";
 import { weaknessesFrom } from "./weakness";
 import { getPack } from "./packs";
@@ -20,6 +21,7 @@ import {
   saveDailySession,
   saveSignals,
   recentSignals,
+  signalsSince,
   latestRecap,
   previousDay,
   vocabCounts,
@@ -75,6 +77,13 @@ export interface Day {
    * activity produced them.
    */
   complete(kind: ActivityKind, signals?: SignalDraft[]): Promise<ActivityKind | null>;
+  /**
+   * The words an earlier activity of today actually produced — what a `dependsOn`
+   * activity consumes (§1.2). Empty when nothing was produced or the store is
+   * unavailable; an empty carry is a passage that connects to nothing, which is
+   * exactly what `dependencyNote` warns about.
+   */
+  carry(activityId: ActivityId): Promise<string[]>;
   /** Ask the coach to close out the day. Marks the wrap-up activity done. */
   wrapUp(): Promise<void>;
   /**
@@ -238,6 +247,27 @@ export function useDay(settings: Settings): Day {
     [done, plan, persist, recap, recordSignals],
   );
 
+  const carry = useCallback(
+    async (activityId: string): Promise<string[]> => {
+      const midnight = new Date();
+      midnight.setHours(0, 0, 0, 0);
+      try {
+        const signals = await signalsSince(settings.profile.targetLanguage, midnight.getTime());
+        return [
+          ...new Set(
+            signals
+              .filter((s) => s.activityId === activityId && s.kind === "lexicalItem")
+              .map(signalLabel)
+              .filter((l): l is string => !!l),
+          ),
+        ];
+      } catch {
+        return [];
+      }
+    },
+    [settings.profile.targetLanguage],
+  );
+
   // wrapup writes no signals on purpose (#15): it observes nothing about the
   // learner, it summarises the day. The recap's nextFocus is the coach's own
   // opinion, and feeding that back as evidence would let a weakness cite itself.
@@ -297,6 +327,7 @@ export function useDay(settings: Settings): Day {
     isDone: (k) => done.includes(k),
     next: nextActivity(plan, done),
     complete,
+    carry,
     wrapUp,
     changeTopic,
   };

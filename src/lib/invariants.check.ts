@@ -216,9 +216,9 @@ function checkDependsOn(plan: DailyPlan): string[] {
   return problems;
 }
 
-// The real plan of the day. Today no activity writes `dependsOn`, so this is
-// vacuous — correct and intended; the helper (not a "nobody uses dependsOn"
-// freeze) is the assertion.
+// The real plan of the day. `read` now writes `dependsOn: "talk"` (PLAN-012), so
+// this assertion runs over a real edge — the ledger's own check is no longer
+// vacuous. The helper (not a "nobody uses dependsOn" freeze) is the assertion.
 assert(
   checkDependsOn(buildDailyPlan(defaultSettings, { date: "2026-08-26", dayIndex: 41, dueVocab: 0 })).length === 0,
   "the daily plan's dependsOn graph must be consistent",
