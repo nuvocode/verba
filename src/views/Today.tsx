@@ -5,7 +5,7 @@
 // Nothing here composes a sentence. Every claim on this page — the summary, the
 // progress line, the shortfall, yesterday's trace — is a pure function in lib, so
 // what the learner reads is something a check can hold.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { isLocalProvider, type Settings } from "../lib/settings";
 import type { ActivityKind } from "../lib/model";
 import type { Day } from "../lib/useDay";
@@ -114,18 +114,6 @@ export default function Today({
   const finished = plan.activities.every((a) => day.isDone(a.kind));
   const provider = PROVIDERS.find((p) => p.id === settings.provider);
   const modelId = String(settings[provider?.model ?? "ollamaModel"] ?? "");
-  // The preview of tomorrow is the real plan for the next date, not a description
-  // of one — so the line and the day the learner wakes up to cannot disagree.
-  const tomorrow = useMemo(
-    () =>
-      buildDailyPlan(settings, {
-        date: todayKey(new Date(Date.now() + 24 * 60 * 60 * 1000)),
-        dayIndex: plan.dayIndex + 1,
-        dueVocab: day.due,
-        weaknesses: day.weaknesses,
-      }),
-    [settings, plan.dayIndex, day.due, day.weaknesses],
-  );
 
   return (
     <div className="today fade">
@@ -262,13 +250,26 @@ export default function Today({
       </div>
 
       {/* §2.1: a finished day shows the summary and a preview of tomorrow. The
-          recap below is the model's sentence about the day; this is the app's. */}
+          recap below is the model's sentence about the day; this is the app's.
+          The preview is the real plan for the next date, not a description of
+          one — so the line and the day the learner wakes up to cannot disagree.
+          buildDailyPlan is pure and cheap, so it is built inline rather than
+          memoised (a hook here would sit after the early return above). */}
       {finished && (
         <div className="lede" style={{ marginTop: 40, maxWidth: 640 }}>
           <div className="bullet" />
           <div>
             <p>{daySummary(plan, day.weaknesses)}</p>
-            <p style={{ fontSize: 14, color: "var(--ink3)", marginTop: 10 }}>{tomorrowPreview(tomorrow)}</p>
+            <p style={{ fontSize: 14, color: "var(--ink3)", marginTop: 10 }}>
+              {tomorrowPreview(
+                buildDailyPlan(settings, {
+                  date: todayKey(new Date(Date.now() + 24 * 60 * 60 * 1000)),
+                  dayIndex: plan.dayIndex + 1,
+                  dueVocab: day.due,
+                  weaknesses: day.weaknesses,
+                }),
+              )}
+            </p>
           </div>
         </div>
       )}
