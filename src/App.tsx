@@ -180,7 +180,10 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
           break;
         case "read":
           go("read");
-          if (!read.text && !read.busy) void read.generate({ interests: day.plan?.theme, goal: activity?.goal });
+          if (!read.text && !read.busy)
+            void day.carry(activity?.dependsOn ?? "").then((reuse) =>
+              read.generate({ interests: day.plan?.theme, goal: activity?.goal, reuse }),
+            );
           break;
         case "listen":
           go("listening");
