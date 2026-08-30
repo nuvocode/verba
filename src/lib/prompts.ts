@@ -164,7 +164,8 @@ export function vocabPrompt(s: Settings, pack?: LanguagePack): string {
   return [
     `From the conversation so far, pick at most 5 ${s.profile.targetLanguage} words or short phrases that a ${levelOf(s.profile)} learner should study.`,
     packGuidance(pack),
-    `Answer with ONLY a JSON object: { "items": [ { "term": "the ${s.profile.targetLanguage} word/phrase in its dictionary form", "translation": "its meaning in ${s.profile.nativeLanguage}", "example": "a short example sentence in ${s.profile.targetLanguage} that uses the term" } ] }.`,
+    `Answer with ONLY a JSON object: { "items": [ { "term": "the ${s.profile.targetLanguage} word/phrase in its dictionary form", "translation": "its meaning in ${s.profile.nativeLanguage}", "example": "a short example sentence in ${s.profile.targetLanguage} that uses the term", "type": "word | phrase | phrasalVerb | idiom | collocation | pronunciation", "level": "the CEFR band of the item itself: A1, A2, B1, B2, C1 or C2" } ] }.`,
+    `"level" is the difficulty of the item, not of the learner. Judge it honestly — a word far below their level will be left out rather than studied.`,
     `Prefer words that actually appeared in the conversation. Skip trivial words (the, a, is).`,
     // Fewer, better cards. The deck used to take eight a session and fill with things
     // the learner already used correctly, or with details of what was said rather
@@ -182,7 +183,16 @@ export function vocabPrompt(s: Settings, pack?: LanguagePack): string {
  * rather than at the write, so the wrap-up shows the learner exactly the cards that
  * would be kept — never a chip that would silently fail to save.
  */
-export function parseVocab(raw: string): { term: string; translation: string; example: string }[] {
+const VOCAB_TYPES = ["word", "phrase", "phrasalVerb", "idiom", "collocation", "pronunciation"];
+const BANDS = ["A1", "A2", "B1", "B2", "C1", "C2"];
+
+export function parseVocab(raw: string): {
+  term: string;
+  translation: string;
+  example: string;
+  type: string;
+  levelBand: string | null;
+}[] {
   const obj = extractJson(raw);
   if (!Array.isArray(obj?.items)) return [];
   return obj.items
@@ -191,6 +201,8 @@ export function parseVocab(raw: string): { term: string; translation: string; ex
       term: String(v.term).trim(),
       translation: String(v.translation ?? "").trim(),
       example: String(v.example ?? "").trim(),
+      type: VOCAB_TYPES.includes(String(v.type)) ? String(v.type) : "word",
+      levelBand: BANDS.includes(String(v.level)) ? String(v.level) : null,
     }))
     .filter((v: { term: string; translation: string; example: string }) => worthLearning(v).ok)
     .slice(0, MAX_VOCAB_PER_SESSION);

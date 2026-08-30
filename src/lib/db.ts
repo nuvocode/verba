@@ -1,6 +1,6 @@
 import Database, { type QueryResult } from "@tauri-apps/plugin-sql";
 import { newCard, schedule, DAILY_REVIEW_CAP, type Grade } from "./srs";
-import { worthLearning } from "./vocab";
+import { worthLearning, tooEasyToAutoAdd } from "./vocab";
 import { planMemory, type Memory, type MemoryWrite } from "./prompts";
 import { markDirty } from "./vault";
 import type { Signal, SignalKind } from "./model";
@@ -59,6 +59,10 @@ async function init(): Promise<Database> {
       due INTEGER NOT NULL,
       reps INTEGER NOT NULL,
       lapses INTEGER NOT NULL DEFAULT 0,
+      type TEXT NOT NULL DEFAULT 'word',       -- §1.4 VocabItem.type
+      captured_by TEXT NOT NULL DEFAULT 'learner',
+      source_surface TEXT NOT NULL DEFAULT '', -- §1.4 sourceRef.surface
+      level_band TEXT,                         -- CEFR band of the item; NULL = never measured
       created_at INTEGER NOT NULL,
       UNIQUE(lang, term)     -- the same spelling is a different card in a different language
     );
@@ -154,6 +158,13 @@ async function init(): Promise<Database> {
   // the schedule tracked reps but threw the lapses away (§2.5). Existing decks
   // start at 0 — that is "not recorded", and it is the only honest starting count.
   await db.execute("ALTER TABLE vocab ADD COLUMN lapses INTEGER NOT NULL DEFAULT 0").catch(() => {});
+  // §1.4: a card knows what kind of thing it is, where it was met, who kept it and
+  // roughly how hard it is. Rows written before this keep the defaults — "a word,
+  // kept by the learner, from nowhere in particular" — which is what they were.
+  await db.execute("ALTER TABLE vocab ADD COLUMN type TEXT NOT NULL DEFAULT 'word'").catch(() => {});
+  await db.execute("ALTER TABLE vocab ADD COLUMN captured_by TEXT NOT NULL DEFAULT 'learner'").catch(() => {});
+  await db.execute("ALTER TABLE vocab ADD COLUMN source_surface TEXT NOT NULL DEFAULT ''").catch(() => {});
+  await db.execute("ALTER TABLE vocab ADD COLUMN level_band TEXT").catch(() => {});
   await migrateVocabToPerLanguage(db);
   return db;
 }
@@ -270,6 +281,10 @@ export interface VocabRow {
   due: number;
   reps: number;
   lapses: number;
+  type: string;
+  captured_by: string;
+  source_surface: string;
+  level_band: string | null;
 }
 
 // Every read and write below is scoped to one language: a deck belongs to the
@@ -287,14 +302,34 @@ export interface VocabRow {
  */
 export async function addVocab(
   lang: string,
-  item: { term: string; translation: string; example: string },
+  item: { term: string; translation: string; example: string; type?: string; levelBand?: string | null },
+  origin: { capturedBy: "learner" | "coach"; surface: string; learnerLevel: string },
 ): Promise<boolean> {
   if (!worthLearning(item).ok) return false;
+  // invariant 16: the tutor does not put words two bands below the learner in
+  // their deck. They may still add one themselves — that is what asking is.
+  if (origin.capturedBy === "coach" && tooEasyToAutoAdd(item.levelBand, origin.learnerLevel)) return false;
   // INSERT OR IGNORE keeps existing SRS progress if the term was already captured.
   const r = await write(
-    `INSERT OR IGNORE INTO vocab (lang, term, translation, example, ease, interval, due, reps, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [lang, item.term.trim(), item.translation.trim(), item.example, newCard.ease, newCard.interval, Date.now(), newCard.reps, Date.now()],
+    `INSERT OR IGNORE INTO vocab (lang, term, translation, example, ease, interval, due, reps, lapses,
+                                  type, captured_by, source_surface, level_band, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+    [
+      lang,
+      item.term.trim(),
+      item.translation.trim(),
+      item.example,
+      newCard.ease,
+      newCard.interval,
+      Date.now(),
+      newCard.reps,
+      newCard.lapses,
+      item.type ?? "word",
+      origin.capturedBy,
+      origin.surface,
+      item.levelBand ?? null,
+      Date.now(),
+    ],
   );
   return (r.rowsAffected ?? 0) > 0;
 }

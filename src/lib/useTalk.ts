@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Settings } from "./settings";
+import { levelOf } from "./model";
 import { getProvider, type ChatMessage } from "./providers";
 import {
   buildSystem,
@@ -326,7 +327,11 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       // review history that a stray tap has no business erasing. `addVocab` is also
       // where the capture gate lives, so anything that isn't vocabulary never counts.
       for (const it of parseVocab(vocabRaw)) {
-        const added = await addVocab(settings.profile.targetLanguage, it).catch(() => false);
+        const added = await addVocab(settings.profile.targetLanguage, it, {
+          capturedBy: "coach",
+          surface: "talk",
+          learnerLevel: levelOf(settings.profile),
+        }).catch(() => false);
         if (added) words.push({ term: it.term, translation: it.translation });
       }
 

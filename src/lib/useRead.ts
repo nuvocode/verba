@@ -188,7 +188,11 @@ export function useRead(settings: Settings) {
   const saveWord = useCallback(async () => {
     const p = popover;
     if (!p || !p.lemma || p.gloss === "…") return;
-    await addVocab(settings.profile.targetLanguage, { term: p.lemma, translation: p.gloss, example: p.sentence }).catch(() => {});
+    await addVocab(
+      settings.profile.targetLanguage,
+      { term: p.lemma, translation: p.gloss, example: p.sentence },
+      { capturedBy: "learner", surface: "read", learnerLevel: levelOf(settings.profile) },
+    ).catch(() => {});
     setPopover((cur) => (cur && cur.term === p.term ? { ...cur, saved: true } : cur));
     setSaved((s) => (s.includes(p.term) ? s : [...s, p.term]));
   }, [popover, settings.profile.targetLanguage]);

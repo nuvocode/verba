@@ -4,7 +4,7 @@
 // are both rejected.
 // Run: node --experimental-strip-types src/lib/vocab.check.ts
 import assert from "node:assert";
-import { suspect, worthLearning, MAX_TERM_WORDS } from "./vocab.ts";
+import { suspect, worthLearning, MAX_TERM_WORDS, tooEasyToAutoAdd, AUTO_ADD_BAND_GAP } from "./vocab.ts";
 
 const ok = (c: { term: string; translation: string; example?: string }) => worthLearning(c).ok;
 const why = (c: { term: string; translation: string; example?: string }) => {
@@ -55,5 +55,14 @@ assert(why({ term: "e", translation: "and" }) === "a single letter", "a lone lat
 // --- suspect() is the same ruling, pointed at rows already on file ---
 assert(suspect({ term: "acogedor", translation: "cosy" }) === null, "a good row is not suspect");
 assert(suspect({ term: "8:15", translation: "" }) === "a number, time or date", "…and a bad one names its reason for the deck to show");
+
+// invariant 16: the tutor does not stock a B2 deck with A1 words. The learner still can.
+assert.equal(tooEasyToAutoAdd("A1", "B2"), true, "two bands down is not worth auto-adding");
+assert.equal(tooEasyToAutoAdd("A2", "B2"), true, "exactly two bands down is the boundary, and it is closed");
+assert.equal(tooEasyToAutoAdd("B1", "B2"), false, "one band down is revision, not noise");
+assert.equal(tooEasyToAutoAdd("C1", "B2"), false, "above the learner is never too easy");
+assert.equal(tooEasyToAutoAdd(null, "B2"), false, "an unmeasured item is not a low one");
+assert.equal(tooEasyToAutoAdd("A1", "nonsense"), false, "an unreadable learner level gates nothing");
+assert.equal(AUTO_ADD_BAND_GAP, 2, "the gap the copy and the gate both stand on");
 
 console.log("vocab.check.ts — all assertions passed");

@@ -112,7 +112,7 @@ const LEDGER: Row[] = [
   {
     id: 16,
     claim: "Öğrencinin seviyesinin iki bant altındaki öğeler otomatik eklenmez.",
-    pending: "M1+ (Memory/SRS)",
+    assertedIn: [{ file: "src/lib/vocab.check.ts", marker: "invariant 16" }],
   },
   {
     id: 17,
