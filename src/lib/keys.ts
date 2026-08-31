@@ -60,13 +60,21 @@ export const KEYS: Shortcut[] = [
   // and the topbar says so again.
   { keys: ["1", "2", "3"], label: "1–3", does: "use a suggestion", on: ["talk"], when: "suggestions" },
   { keys: ["Enter"], label: "↵", does: "send", on: ["talk"] },
-  { keys: ["Escape"], label: "esc", does: "end the session", on: ["talk"] },
+
+  // ---- Esc — one verb, every surface (invariant 24) ----
+  // Esc means "one level up" everywhere: backing out of a focused sentence, a
+  // sheet, a session, a review, a section, or returning to Today from wherever
+  // the learner landed. The specific label the escape pill shows ("clear focus",
+  // "end the session", …) is richer, but the table's `does` is one shared phrase
+  // so the invariant can say it is uniform. Onboarding's two rows are two states
+  // of the same verb, split by `when`; every other surface's Esc is unconditional.
+  { keys: ["Escape"], label: "esc", does: "one level up", on: ["today"] },
+  { keys: ["Escape"], label: "esc", does: "one level up", on: ["talk"] },
 
   // ---- read (close reading) ----
   { keys: ["ArrowRight", "ArrowLeft"], label: "← →", does: "move focus", on: ["read"] },
   { keys: ["t"], label: "T", does: "bilingual mode", on: ["read"], when: "bilingual" },
   { keys: ["p"], label: "P", does: "read it out loud", on: ["read"] },
-  { keys: ["Escape"], label: "esc", does: "clear focus", on: ["read"] },
   { keys: ["Enter"], label: "↵", does: "keep the word", on: ["read"], when: "save" },
 
   // ---- prompter ----
@@ -76,21 +84,25 @@ export const KEYS: Shortcut[] = [
   { keys: ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"], label: "← →", does: "skip a line", on: ["prompter"] },
   { keys: ["r"], label: "R", does: "from the top", on: ["prompter"] },
   { keys: ["p"], label: "P", does: "back to close reading", on: ["prompter"] },
+  { keys: ["Escape"], label: "esc", does: "one level up", on: ["read", "prompter"] },
 
   // ---- listening ----
   { keys: [" "], label: "space", does: "play the chapter", on: ["listening"], when: "idle" },
   { keys: [" "], label: "space", does: "stop", on: ["listening"], when: "playing" },
+  { keys: ["Escape"], label: "esc", does: "one level up", on: ["listening"] },
 
   // ---- memory (the collection) ----
   { keys: ["r"], label: "R", does: "resurface due", on: ["memory"] },
+  { keys: ["Escape"], label: "esc", does: "one level up", on: ["memory"] },
 
   // ---- review (Memory's review mode) ----
   { keys: ["Enter"], label: "↵", does: "reveal the meaning", on: ["review"] },
   { keys: ["1", "2", "3"], label: "1–3", does: "grade", on: ["review"] },
-  { keys: ["Escape"], label: "esc", does: "exit", on: ["review"] },
+  { keys: ["Escape"], label: "esc", does: "one level up", on: ["review"] },
 
   // ---- settings ----
   { keys: ["]", "[", "ArrowDown", "ArrowUp"], label: "[ ] ↑ ↓", does: "move between sections", on: ["settings"] },
+  { keys: ["Escape"], label: "esc", does: "one level up", on: ["settings"] },
 
   // ---- onboarding ----
   // The option count is real, not a fixed 1–9: a step with three choices must not
@@ -98,9 +110,11 @@ export const KEYS: Shortcut[] = [
   { keys: ["1", "2", "3", "4", "5", "6", "7", "8", "9"], label: (has) => `1–${Math.min(Number(has.find((h) => h.startsWith("picks:"))?.slice(6) ?? 0) || 1, 9)}`, does: "choose", on: ["onboarding"], when: "picks" },
   { keys: ["Enter"], label: "↵", does: "continue", on: ["onboarding"], when: "enter" },
   // Esc on the first step of a fresh install has nothing to go back to — it
-  // leaves the field instead. The label follows the state.
-  { keys: ["Escape"], label: "esc", does: "leave a field", on: ["onboarding"], when: "field" },
-  { keys: ["Escape"], label: "esc", does: "back", on: ["onboarding"], when: "back" },
+  // leaves the field instead. The two rows are two states of the same verb, so
+  // they share `does` and differ only on `when` (invariant 24).
+  { keys: ["Escape"], label: "esc", does: "one level up", on: ["onboarding"], when: "field" },
+  { keys: ["Escape"], label: "esc", does: "one level up", on: ["onboarding"], when: "back" },
+  { keys: ["Escape"], label: "esc", does: "one level up", on: ["coach"] },
 ];
 
 /** The shortcuts live on a surface — the hint line's source. `has` names the

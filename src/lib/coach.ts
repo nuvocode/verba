@@ -55,11 +55,16 @@ export interface WeeklyReport {
   report: string;
 }
 
-export function parseWeeklyReport(raw: string): WeeklyReport {
+/**
+ * Parse a weekly report from the model's reply. Returns `null` when the reply held
+ * no usable report — the caller shows the `Unusable` state and offers regeneration
+ * rather than putting the raw reply on screen (§3.2, PLAN-015). A parsed report is
+ * always a real report string, never the raw text.
+ */
+export function parseWeeklyReport(raw: string): WeeklyReport | null {
   const o = extractJson(raw) ?? {};
-  return {
-    report: typeof o.report === "string" ? o.report : raw.trim(),
-  };
+  if (typeof o.report === "string") return { report: o.report };
+  return null;
 }
 
 /** Generate a small set of focused exercises for the learner's weak areas. */
