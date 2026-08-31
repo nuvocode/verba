@@ -7,6 +7,7 @@ import { memorySignals } from "../lib/signals";
 import { strength, DAILY_REVIEW_CAP, type Grade } from "../lib/srs";
 import { suspect } from "../lib/vocab";
 import { live } from "../lib/keys";
+import { humanError } from "../lib/fmt";
 import {
   filterDeck,
   groupDeck,
@@ -77,8 +78,10 @@ export default function Memory({
   const load = useCallback(async () => {
     try {
       setWords(await allVocab(settings.profile.targetLanguage));
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
+    } catch (e) {
+      const { say, log } = humanError(e);
+      console.warn("[memory] load failed:", log);
+      setError(say);
     }
   }, [settings.profile.targetLanguage]);
 
@@ -104,7 +107,11 @@ export default function Memory({
   const drop = useCallback(async (id: number) => {
     setWords((ws) => ws.filter((w) => w.id !== id));
     setQueue((q) => q.filter((c) => c.id !== id));
-    await deleteVocab(id).catch((e) => setError(String(e?.message ?? e)));
+    await deleteVocab(id).catch((e) => {
+      const { say, log } = humanError(e);
+      console.warn("[memory] drop failed:", log);
+      setError(say);
+    });
   }, []);
 
   /** Clear the whole "needs a look" group in one go. */
@@ -144,7 +151,11 @@ export default function Memory({
       setGrades((gs) => [...gs, g]);
       setIdx((i) => i + 1);
       setRevealed(false);
-      await reviewVocab(card, g).catch((e) => setError(String(e?.message ?? e)));
+      await reviewVocab(card, g).catch((e) => {
+        const { say, log } = humanError(e);
+        console.warn("[memory] grade failed:", log);
+        setError(say);
+      });
       if (idx + 1 >= queue.length) {
         // `grades` has not caught up with this grade yet — setGrades is a queued update.
         void day.complete("memory", reviewSignals([...grades, g]));

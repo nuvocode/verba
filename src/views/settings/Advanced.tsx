@@ -25,6 +25,7 @@ import {
   type Probe,
 } from "../../lib/models";
 import { Because, linkish, ToggleRow, type SectionProps } from "./parts";
+import { humanError } from "../../lib/fmt";
 import { EngineHalf } from "./engines";
 
 /** Where the format, the schema and the worked examples live. Not a filename on screen (§5.7). */
@@ -117,9 +118,11 @@ export default function Advanced({ settings, onChange }: SectionProps) {
       }
       setPasting("");
       setPasted("");
-    } catch (e: any) {
+    } catch (e) {
       setMsg("");
-      setErr(String(e?.message ?? e));
+      const { say, log } = humanError(e);
+      console.warn("[advanced] add failed:", log);
+      setErr(say);
     }
   };
 
@@ -131,8 +134,10 @@ export default function Advanced({ settings, onChange }: SectionProps) {
       const path = await open({ filters: [{ name: "Verba add-on", extensions: ["json"] }], multiple: false });
       if (typeof path !== "string") return;
       take(kind, await invoke<string>("file_read", { path }));
-    } catch (e: any) {
-      setErr(String(e?.message ?? e));
+    } catch (e) {
+      const { say, log } = humanError(e);
+      console.warn("[advanced] add-from-file failed:", log);
+      setErr(say);
     }
   };
 

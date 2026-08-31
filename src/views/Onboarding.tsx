@@ -33,6 +33,7 @@ import { primePlacement, placementPending, clearPlacement, scorePlacement, type 
 import { poolFor } from "../lib/packs/pools";
 import { attach, detach, pickFolder, pull } from "../lib/vault";
 import { live } from "../lib/keys";
+import { humanError } from "../lib/fmt";
 import Hints from "./Hints";
 
 const STEP_LABELS = ["Before we start", "Setup · 1 of 4", "Setup · 2 of 4", "Setup · 3 of 4", "Setup · 4 of 4", "Ready"];
@@ -225,10 +226,10 @@ export default function Onboarding({
       // Leave no half-attached folder behind: an aborted restore must not turn
       // the next launch into a conflict dialog on an empty install.
       detach();
-      // The reason alone is not the whole answer — the learner needs to know what
-      // was expected too, or the next folder they try is a guess (§6).
+      const { say, log } = humanError(e);
+      console.warn("[onboarding] restore failed:", log);
       setRestoreErr(
-        `${String(e?.message ?? e)} Verba looks for the folder you pointed your other machine at — the one holding your Verba data, not the app itself.`,
+        `${say} Verba looks for the folder you pointed your other machine at — the one holding your Verba data, not the app itself.`,
       );
       setRestoring("");
     }
@@ -420,9 +421,11 @@ export default function Onboarding({
       setQi(0);
       setAnswers([]);
       setMode("test");
-    } catch (e: any) {
+    } catch (e) {
       clearPlacement();
-      setTestErr(`${String(e?.message ?? e)} — pick your level below instead.`);
+      const { say, log } = humanError(e);
+      console.warn("[onboarding] placement test failed:", log);
+      setTestErr(`${say} — pick your level below instead.`);
       setMode("pick");
     }
   }, [packId, prov, host]);
@@ -562,8 +565,10 @@ export default function Onboarding({
         abortPull.current = ctrl;
         try {
           await pullModel(hosts.ollama, suggestedModel(), setPulling, ctrl.signal);
-        } catch (e: any) {
-          setPullErr(String(e?.message ?? e));
+        } catch (e) {
+          const { say, log } = humanError(e);
+          console.warn("[onboarding] model pull failed:", log);
+          setPullErr(say);
         } finally {
           abortPull.current = null;
         }

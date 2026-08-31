@@ -9,14 +9,17 @@ import { levelOf, levelGapNote, progressionSuggested, MIN_WEAKNESS_EVIDENCE, typ
 import { addressed, weaknessCard } from "../lib/weakness";
 import { coachPanel, measured, headline, wins, daySeries, type Metric, type MetricPair } from "../lib/coachmetrics";
 import { recentMemories, recentMetricScores, weekStats, signalsSince } from "../lib/db";
+import { absolute, humanError } from "../lib/fmt";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const weekRange = () => {
-  const to = new Date();
-  const from = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
-  const f = (d: Date) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  return `${f(from)} – ${f(to)}`;
+  const from = Date.now() - 6 * 24 * 60 * 60 * 1000;
+  const to = Date.now();
+  // This week's range is a pair of absolute dates, not ages — "6 days ago – now"
+  // would be noise for a window the learner is already looking at. `absolute`
+  // omits the year when it's the current one, so the label stays tidy.
+  return `${absolute(from)} – ${absolute(to)}`;
 };
 
 export default function Coach({ settings, day }: { settings: Settings; day: Day }) {
@@ -65,8 +68,12 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
           { json: true },
         );
         if (live) setReport(parseWeeklyReport(raw));
-      } catch (e: any) {
-        if (live) setError(String(e?.message ?? e));
+      } catch (e: unknown) {
+        if (live) {
+          const { say, log } = humanError(e);
+          console.warn("[coach] weekly report failed:", log);
+          setError(say);
+        }
       } finally {
         if (live) setBusy(false);
       }

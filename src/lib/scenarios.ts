@@ -2,6 +2,7 @@
 // small typed record with its own validator (same trust-boundary story as
 // language packs). ponytail: JSON-in / hand validator, not YAML + Zod — swap
 // when community scenarios ship as .yaml.
+import { SayError } from "./fmt.ts";
 
 export const SCENARIO_FORMAT_VERSION = 1;
 
@@ -133,10 +134,10 @@ export function importScenario(jsonText: string): Scenario {
   try {
     raw = JSON.parse(jsonText);
   } catch (e: any) {
-    throw new Error(`Not valid JSON: ${e?.message ?? e}`);
+    throw new SayError(`Not valid JSON: ${e?.message ?? e}`);
   }
   const res = validateScenario(raw);
-  if (!res.ok || !res.scenario) throw new Error(res.errors.join("; "));
+  if (!res.ok || !res.scenario) throw new SayError(res.errors.join("; "));
   const next = imported().filter((s) => s.id !== res.scenario!.id);
   next.push(res.scenario);
   localStorage.setItem(KEY, JSON.stringify(next));

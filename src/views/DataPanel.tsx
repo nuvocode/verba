@@ -7,6 +7,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { collect, parseBackup, restore, suggestedFilename, summarize, wipe, type Backup, type Summary } from "../lib/backup";
 import { canUpdate, check, install, pending as pendingUpdate, type Available, type Progress } from "../lib/update";
+import { when as fmtWhen, humanError } from "../lib/fmt";
 import {
   attach,
   detach,
@@ -36,7 +37,7 @@ import {
  * rather than picking one.
  */
 
-const when = (t: number) => (t ? new Date(t).toLocaleString() : "never");
+const when = (t: number) => (t ? fmtWhen(t) : "never");
 
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
@@ -120,8 +121,10 @@ export default function DataPanel({
     try {
       setFound(await check(beta));
       setAsked(true);
-    } catch (e: any) {
-      setUpdateErr(String(e?.message ?? e));
+    } catch (e) {
+      const { say, log } = humanError(e);
+      console.warn("[data] update check failed:", log);
+      setUpdateErr(say);
     } finally {
       setChecking(false);
     }
@@ -132,8 +135,10 @@ export default function DataPanel({
     try {
       // Resolves only on failure — on success the process is replaced.
       await install(setProgress);
-    } catch (e: any) {
-      setUpdateErr(String(e?.message ?? e));
+    } catch (e) {
+      const { say, log } = humanError(e);
+      console.warn("[data] install failed:", log);
+      setUpdateErr(say);
       setProgress(null);
     }
   };
@@ -160,8 +165,10 @@ export default function DataPanel({
     try {
       const said = await fn();
       if (said) setMsg(said);
-    } catch (e: any) {
-      setErr(String(e?.message ?? e));
+    } catch (e) {
+      const { say, log } = humanError(e);
+      console.warn("[data] operation failed:", log);
+      setErr(say);
     } finally {
       setBusy("");
       setDir(vaultDir());
@@ -629,7 +636,9 @@ export function ConflictDialog({
     resolve(choice, appVersion)
       .then(() => (choice === "theirs" ? reload() : onDone()))
       .catch((e) => {
-        setErr(String(e?.message ?? e));
+        const { say, log } = humanError(e);
+        console.warn("[data] conflict resolve failed:", log);
+        setErr(say);
         setBusy("");
       });
   };

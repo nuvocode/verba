@@ -7,6 +7,7 @@ import type { Talk as TalkState } from "../lib/useTalk";
 import { talkSignals } from "../lib/signals";
 import { getPack } from "../lib/packs";
 import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
+import { when } from "../lib/fmt";
 import Face from "./talk/Face";
 import Hints from "./Hints";
 
@@ -83,7 +84,7 @@ export default function Talk({
     return (
       <div className="refl">
         <div className="eyebrow">
-          {new Date(open.started_at).toLocaleString()} · {talk.scenarioById(open.scenario).title}
+          {when(open.started_at, undefined, undefined, true)} · {talk.scenarioById(open.scenario).title}
         </div>
         <h1 className="display">Looking back.</h1>
 
@@ -154,7 +155,7 @@ export default function Talk({
                       </div>
                       <div className="meta">{s.summary ?? "no summary — ended early"}</div>
                     </div>
-                    <div className="st">{new Date(s.started_at).toLocaleDateString()}</div>
+                    <div className="st">{when(s.started_at)}</div>
                   </button>
                 );
               })}

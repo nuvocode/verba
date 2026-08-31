@@ -23,6 +23,7 @@ import { BUNDLED_SCENARIOS, listScenarios, type Scenario } from "./scenarios";
 import { getPack } from "./packs";
 import { computeMetrics, estimateLevelV2 } from "./metrics";
 import { getSpeech, listenBlocker } from "./speech";
+import { humanError } from "./fmt";
 import {
   addMessage,
   addVocab,
@@ -214,8 +215,10 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         setMsgs([{ role: "ai", text: turn.reply, corrections: [], inline: false }]);
         setSuggestions(turn.suggestions);
         say(turn.reply);
-      } catch (e: any) {
-        setError(String(e?.message ?? e));
+      } catch (e: unknown) {
+        const { say: said, log } = humanError(e);
+        console.warn("[talk] start failed:", log);
+        setError(said);
       } finally {
         setStreaming(""); // a half-streamed reply is not a turn — it must not linger
         setBusy(false);
@@ -283,8 +286,10 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         const gain = worst ? (worst.severity === "severe" ? 0 : 2) : fromSuggestion ? 1 : 4;
         setConfidence((c) => Math.min(100, c + gain));
         say(turn.reply);
-      } catch (e: any) {
-        setError(String(e?.message ?? e));
+      } catch (e: unknown) {
+        const { say: said, log } = humanError(e);
+        console.warn("[talk] send failed:", log);
+        setError(said);
       } finally {
         setStreaming(""); // a half-streamed reply is not a turn — it must not linger
         setBusy(false);
@@ -310,8 +315,10 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     try {
       const heard = await speech.listen(pack?.speech.locale);
       if (heard.trim()) setInput(heard);
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
+    } catch (e: unknown) {
+      const { say: said, log } = humanError(e);
+      console.warn("[talk] transcribe failed:", log);
+      setError(said);
     } finally {
       setMicPhase("");
     }
@@ -385,8 +392,10 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       } catch {
         /* metrics are best-effort */
       }
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
+    } catch (e: unknown) {
+      const { say: said, log } = humanError(e);
+      console.warn("[talk] end failed:", log);
+      setError(said);
     } finally {
       setBusy(false);
     }
@@ -430,8 +439,10 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         // and laid out as a scenario turn — it would carry the wrong voice here.
         const raw = await getProvider(settings).chat(ctx);
         setMsgs((m) => [...m, { role: "ai", text: raw.trim(), corrections: [], inline: false, isAsk: true }]);
-      } catch (e: any) {
-        setError(String(e?.message ?? e));
+      } catch (e: unknown) {
+        const { say: said, log } = humanError(e);
+        console.warn("[talk] ask failed:", log);
+        setError(said);
       } finally {
         setBusy(false);
       }

@@ -19,6 +19,7 @@ import {
 import { scoreAnswer, type Question } from "./questions";
 import { computeMetrics } from "./metrics";
 import { getPack } from "./packs";
+import { humanError } from "./fmt";
 import { addVocab, recentMemories, saveReading, saveMetrics, vocabCounts, listReadings, getReading, type ReadingRow } from "./db";
 
 export interface WordPopover {
@@ -118,8 +119,10 @@ export function useRead(settings: Settings) {
         if (!t.sentences.length) throw new Error("The model returned no readable sentences. Try again.");
         setText(t);
         await saveReading(settings.profile.targetLanguage, t.title, t, { length, topic, cefr: levelOf(settings.profile) }).catch(() => {});
-      } catch (e: any) {
-        setError(String(e?.message ?? e));
+      } catch (e: unknown) {
+        const { say: said, log } = humanError(e);
+        console.warn("[read] generate failed:", log);
+        setError(said);
       } finally {
         setBusy(false);
       }
@@ -139,8 +142,10 @@ export function useRead(settings: Settings) {
       );
       const more = parseReading(raw);
       if (more.sentences.length) setText({ ...text, sentences: [...text.sentences, ...more.sentences] });
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
+    } catch (e: unknown) {
+      const { say: said, log } = humanError(e);
+      console.warn("[read] extend failed:", log);
+      setError(said);
     } finally {
       setBusy(false);
     }
@@ -171,8 +176,10 @@ export function useRead(settings: Settings) {
         );
         const w = parseWordExplanation(raw);
         setPopover((p) => (p && p.term === term ? { ...p, gloss: w.meaning || "—", lemma: w.lemma || term } : p));
-      } catch (e: any) {
-        setPopover((p) => (p && p.term === term ? { ...p, gloss: String(e?.message ?? e) } : p));
+      } catch (e: unknown) {
+        const { say: said, log } = humanError(e);
+        console.warn("[read] explain failed:", log);
+        setPopover((p) => (p && p.term === term ? { ...p, gloss: said } : p));
       }
     },
     [settings, saved],

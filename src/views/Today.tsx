@@ -14,6 +14,7 @@ import { activityStatus, buildDailyPlan, daySummary, fallbackNote, progressLine,
 import { listModels, modelTrouble, PROVIDERS, prettyModel, type Installed } from "../lib/models";
 import { levelOf } from "../lib/model";
 import { timeName } from "../lib/choices";
+import { headerDate } from "../lib/fmt";
 import { AT } from "../lib/rules";
 import Hints from "./Hints";
 
@@ -23,8 +24,10 @@ function greeting(h = new Date().getHours()): string {
   return "Good evening";
 }
 
-const dateLine = () =>
-  new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }).replace(/,/g, " ·");
+/** The current date as a header line — weekday first, via the formatter's own
+ *  header, so this page reads like a date while every other surface reads like
+ *  a moment. */
+const dateLine = () => headerDate();
 
 /**
  * §7 row 2: "Model yanıt vermiyor → ana ekranda uyarı + sına düğmesi + model

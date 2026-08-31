@@ -43,6 +43,7 @@ import {
   type Voice,
 } from "../../lib/bundled";
 import { listPacks } from "../../lib/packs";
+import { humanError } from "../../lib/fmt";
 import { linkish, ToggleRow, type SectionProps } from "./parts";
 
 const langNames = (ls: string[]) => ls.map(langName).join(", ") || "any language";
@@ -84,9 +85,12 @@ async function audition(
     await bundledTts(m.id, voice?.sid ?? 0).speak(sampleLine(voice?.lang ?? "en"));
     set({ s: "ready", bytes: 0 });
     return true;
-  } catch (e: any) {
-    // Includes the checksum mismatch, which Rust reports having installed nothing.
-    set({ s: "failed", why: String(e?.message ?? e) });
+  } catch (e) {
+    // A failed sample never reaches the learner raw (PLAN-015): the detail goes
+    // to the log, and the button shows one calm sentence.
+    const { say, log } = humanError(e);
+    console.warn("[speech] sample playback failed:", log);
+    set({ s: "failed", why: say });
     return false;
   }
 }
@@ -345,8 +349,10 @@ function DictationRow({ m, shelf }: { m: CatalogModel; shelf: Shelf }) {
       setState({ s: "ready", bytes: 0 });
       await refresh();
       if (!settings.bundledSttModel) onChange({ bundledSttModel: m.id });
-    } catch (e: any) {
-      setState({ s: "failed", why: String(e?.message ?? e) });
+    } catch (e) {
+      const { say, log } = humanError(e);
+      console.warn("[speech] model download failed:", log);
+      setState({ s: "failed", why: say });
     }
   }
 

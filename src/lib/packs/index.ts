@@ -3,6 +3,7 @@ import { BUNDLED_PACKS } from "./bundled.ts";
 import { COMMUNITY_PACKS } from "./community.ts";
 import { checkCompatibility, type PackOrigin, type RegisteredPack } from "./registry.ts";
 import { promptDocs } from "./docs.ts";
+import { SayError } from "../fmt.ts";
 
 export type { LanguagePack } from "./schema.ts";
 export { validatePack, PACK_FORMAT_VERSION } from "./schema.ts";
@@ -74,11 +75,11 @@ export function importPack(jsonText: string): LanguagePack {
   try {
     raw = JSON.parse(jsonText);
   } catch (e: any) {
-    throw new Error(`Not valid JSON: ${e?.message ?? e}`);
+    throw new SayError(`Not valid JSON: ${e?.message ?? e}`);
   }
   const report = checkCompatibility(raw);
   // One error per line so the import UI can list them clearly (not a silent failure).
-  if (!report.compatible) throw new Error("• " + report.validation.errors.join("\n• "));
+  if (!report.compatible) throw new SayError("• " + report.validation.errors.join("\n• "));
   const pack = report.validation.pack!;
   const next = imported().filter((p) => p.id !== pack.id);
   next.push(pack);

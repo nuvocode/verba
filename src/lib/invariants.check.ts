@@ -142,7 +142,7 @@ const LEDGER: Row[] = [
   {
     id: 22,
     claim: "Ham model çıktısı (JSON, stack trace) hiçbir kullanıcı yüzeyinde görünmez.",
-    pending: "M1+ (Arayüz)",
+    pending: "#57 — parseSummary still stores raw output (PLAN-020)",
   },
   {
     id: 23,

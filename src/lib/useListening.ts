@@ -14,6 +14,7 @@ import { scoreAnswer, type Question } from "./questions";
 import { getPack } from "./packs";
 import { getSpeech } from "./speech";
 import { computeMetrics } from "./metrics";
+import { humanError } from "./fmt";
 import { recentMemories, saveListening, saveMetrics, vocabCounts } from "./db";
 
 /** One chapter's worth of the learner's work — kept per chapter so it survives moving on. */
@@ -100,8 +101,10 @@ export function useListening(settings: Settings) {
         }
         setPiece({ title: outline.title, premise: outline.premise, chapters });
         setProgress(chapters.map((c) => blank(c.questions.length)));
-      } catch (e: any) {
-        setError(String(e?.message ?? e));
+      } catch (e: unknown) {
+        const { say: said, log } = humanError(e);
+        console.warn("[listen] generate failed:", log);
+        setError(said);
       } finally {
         setBusy(false);
         setStatus("");
