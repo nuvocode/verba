@@ -18,7 +18,7 @@ import { storyPrompt } from "./reading.ts";
 import { weeklyReportPrompt } from "./coach.ts";
 
 const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "English" } };
-const scenario = { id: "free", title: "Free talk", emoji: "💬", setup: "Talk about anything." };
+const scenario = { id: "free", title: "Free talk", emoji: "💬", setup: "Talk about anything.", persona: { name: "Marta", role: "a friendly conversation partner", emoji: "🧑‍🏫" } };
 
 const JULY = new Date("2026-07-14T09:00:00Z").getTime();
 const known: Memory[] = [
@@ -78,10 +78,13 @@ const flood = planMemory(
 assert(flood.length === 6, "at most six facts come out of one conversation");
 
 // --- the facts reach the three prompts that asked for them ---
-const system = buildSystem(s, scenario, undefined, known);
+const system = buildSystem(s, scenario, scenario.persona, undefined, known);
 assert(system.includes("Lives in Ankara"), "the coach's system prompt carries the memory");
 assert(system.includes("Never read the list back"), "…and is told not to recite it");
-assert(!buildSystem(s, scenario).includes("What you know about the learner"), "no memory, no block");
+assert(!buildSystem(s, scenario, scenario.persona).includes("What you know about the learner"), "no memory, no block");
+// The persona is the coach's identity for the session — named once, held throughout.
+assert(system.includes("Marta"), "the system prompt names the persona");
+assert(system.includes("fixed for the whole session"), "…and says the persona holds for the session");
 
 // Knowing them is not a reason to talk about them. A list of facts reads to a model as a
 // list of things to work in — so the same caveat rides along with the facts everywhere.

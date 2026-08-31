@@ -19,7 +19,7 @@ import {
   type Correction,
   type SessionSummary,
 } from "./prompts";
-import { BUNDLED_SCENARIOS, listScenarios, type Scenario } from "./scenarios";
+import { BUNDLED_SCENARIOS, listScenarios, type Persona, type Scenario } from "./scenarios";
 import { getPack } from "./packs";
 import { computeMetrics, estimateLevelV2 } from "./metrics";
 import { getSpeech, listenBlocker } from "./speech";
@@ -111,6 +111,12 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   const [reflecting, setReflecting] = useState(false);
   const [reflection, setReflection] = useState<Reflection | null>(null);
   const [confidence, setConfidence] = useState(CONF_START);
+  // The coach's identity for this session, resolved once at start. A TTS fallback
+  // mid-session does not re-pick a voice — the persona holds (§2.2).
+  const [persona, setPersona] = useState<Persona | null>(null);
+  // How far each scenario goal has got. Starts all pending; a returned index moves
+  // one to met (never back); end() marks whatever is still pending as missed.
+  const [goalState, setGoalState] = useState<("pending" | "met" | "missed")[]>([]);
 
   const history = useRef<ChatMessage[]>([]); // full provider context, incl. system
   const sessionId = useRef<number | null>(null);
@@ -145,9 +151,11 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   const say = useCallback(
     (text: string) => {
       if (settings.speak && speech.canSpeak)
-        void speech.speak(text, { locale: pack?.speech.locale, voiceHint: pack?.speech.voiceHint }).catch(() => {});
+        void speech
+          .speak(text, { locale: pack?.speech.locale, voiceHint: persona?.voiceHint || pack?.speech.voiceHint })
+          .catch(() => {});
     },
-    [settings.speak, speech, pack],
+    [settings.speak, speech, pack, persona],
   );
 
   /**
@@ -176,6 +184,8 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   const start = useCallback(
     async (sc: Scenario, goal?: string) => {
       setScenario(sc);
+      setPersona(sc.persona);
+      setGoalState((sc.goals ?? []).map(() => "pending" as const));
       setMsgs([]);
       setSuggestions([]);
       setReflecting(false);
@@ -191,7 +201,8 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       // capture — is talking to a coach that has read it.
       const memories = await recentMemories(settings.profile.targetLanguage).catch(() => []);
       const system =
-        buildSystem(settings, sc, pack, memories) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
+        buildSystem(settings, sc, sc.persona, pack, memories) +
+        (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
       history.current = [{ role: "system", content: system }];
       try {
         try {
@@ -269,6 +280,19 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         });
         setSuggestions(turn.suggestions);
 
+        // A goal the coach says was just met ticks — and only that one. A returned
+        // index moves a pending goal to met and never moves it back; a goal already
+        // met is left alone, and an index past the list is ignored.
+        if (turn.goalsMet.length) {
+          setGoalState((gs) => {
+            const next = [...gs];
+            for (const i of turn.goalsMet) {
+              if (i >= 0 && i < next.length && next[i] === "pending") next[i] = "met";
+            }
+            return next;
+          });
+        }
+
         // The session is named off its first real exchange — that is also the turn
         // it starts showing up in the history list — and re-named exactly once,
         // when enough has been said for the subject to be the subject.
@@ -317,6 +341,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       if (heard.trim()) setInput(heard);
     } catch (e: unknown) {
       const { say: said, log } = humanError(e);
+    // Whatever is still pending when the session closes was never met — it is
+    // missed, and the reflection's scorecard reads it that way.
+    setGoalState((gs) => gs.map((g) => (g === "pending" ? "missed" : g)));
       console.warn("[talk] transcribe failed:", log);
       setError(said);
     } finally {
@@ -453,6 +480,10 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   return {
     scenario,
     scenarios: listScenarios(),
+    /** The coach's identity for this session, resolved once at start. */
+    persona,
+    /** How far each scenario goal has got: pending, met, or missed. */
+    goalState,
     /** Writing direction of the target language — target text is laid out with it. */
     dir: pack?.direction ?? "ltr",
     msgs,

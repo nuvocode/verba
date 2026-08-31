@@ -8,9 +8,18 @@ import { talkSignals } from "../lib/signals";
 import { getPack } from "../lib/packs";
 import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
 import { when } from "../lib/fmt";
+import {
+  bandSplit,
+  duplicateScenario,
+  removeImportedScenario,
+  saveScenario,
+  scenarioRegistry,
+  type Scenario,
+} from "../lib/scenarios";
 import Face from "./talk/Face";
 import Hints from "./Hints";
 import { Generating, Nothing, Failed } from "./States";
+import { linkish } from "./settings/parts";
 
 // Where the reflection sends them, named by what the plan has next. The wording is the
 // day's, not this screen's — Talk never decides that reading (or anything) comes after.
@@ -39,6 +48,12 @@ export default function Talk({
   const [past, setPast] = useState<SessionRow[]>([]);
   const [open, setOpen] = useState<SessionRow | null>(null);
   const [transcript, setTranscript] = useState<{ role: string; content: string }[]>([]);
+  // The inline edit panel over the picker grid — the same pattern Settings uses,
+  // no route, no modal library. `editing` is the scenario being edited; null is
+  // the closed panel. `confirming` is the id of the scenario awaiting a delete.
+  const [editing, setEditing] = useState<Scenario | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [, bump] = useState(0); // scenarios live in localStorage — re-read after a change
 
   // The picker is also the archive — reload it whenever we come back to it.
   useEffect(() => {
@@ -115,7 +130,11 @@ export default function Talk({
     );
 
   // ---- no conversation open yet: pick a scenario ----
-  if (!talk.started)
+  if (!talk.started) {
+    const registry = scenarioRegistry();
+    const byId = new Map(registry.map((r) => [r.scenario.id, r.origin]));
+    const { main, easier } = bandSplit(talk.scenarios, levelOf(settings.profile));
+
     return (
       <div className="today fade">
         <div className="eyebrow">Talk · {settings.profile.targetLanguage}</div>
@@ -129,16 +148,93 @@ export default function Talk({
           /* surface talk: error */
           <Failed say={talk.error} retry={{ label: "Try again", onClick: () => talk.scenarios[0] && void talk.start(talk.scenarios[0]) }} />
         )}
+
+        {editing && (
+          <ScenarioEditor
+            scenario={editing}
+            onSave={(next) => {
+              saveScenario(next);
+              setEditing(null);
+              bump((n) => n + 1);
+            }}
+            onCancel={() => setEditing(null)}
+          />
+        )}
+
         <div className="grid3">
-          {talk.scenarios.map((sc) => (
-            <button key={sc.id} className="pick" onClick={() => void talk.start(sc)}>
-              <div className="big">
-                {sc.emoji} {sc.title}
-              </div>
-              <div className="small">{sc.level ? `${sc.level[0]}–${sc.level[1]}` : "any level"}</div>
-            </button>
+          {main.map((sc) => (
+            <div className="pick-wrap" key={sc.id}>
+              <button className="pick" onClick={() => void talk.start(sc)}>
+                <div className="big">
+                  {sc.emoji} {sc.title}
+                </div>
+                <div className="small">{sc.level ? `${sc.level[0]}–${sc.level[1]}` : "any level"}</div>
+              </button>
+              {byId.get(sc.id) === "imported" && (
+                <span className="tag" title="Added by you — nobody reviewed it">
+                  yours
+                </span>
+              )}
+              {byId.get(sc.id) === "imported" && (
+                <div className="pick-actions">
+                  <button className="model" style={linkish} onClick={() => setEditing(sc)}>
+                    Edit
+                  </button>
+                  <button
+                    className="model"
+                    style={linkish}
+                    onClick={() => {
+                      // A duplicate of a bundled scenario is an import — it is
+                      // saved to the same key, and the bundled original is left
+                      // untouched. It shows up in the picker like any other.
+                      saveScenario(duplicateScenario(sc));
+                      bump((n) => n + 1);
+                    }}
+                  >
+                    Duplicate
+                  </button>
+                  {confirming === sc.id ? (
+                    <span className="pick-confirm">
+                      <button className="model" style={linkish} onClick={() => { removeImportedScenario(sc.id); setConfirming(null); bump((n) => n + 1); }}>
+                        Delete
+                      </button>
+                      <button className="model" style={linkish} onClick={() => setConfirming(null)}>
+                        Keep
+                      </button>
+                    </span>
+                  ) : (
+                    <button className="model" style={linkish} onClick={() => setConfirming(sc.id)}>
+                      Delete
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           ))}
         </div>
+
+        {easier.length > 0 && (
+          <details className="setup" style={{ marginTop: 20 }}>
+            <summary>Easier — below your level</summary>
+            <div className="grid3" style={{ marginTop: 12 }}>
+              {easier.map((sc) => (
+                <div className="pick-wrap" key={sc.id}>
+                  <button className="pick" onClick={() => void talk.start(sc)}>
+                    <div className="big">
+                      {sc.emoji} {sc.title}
+                    </div>
+                    <div className="small">{sc.level ? `${sc.level[0]}–${sc.level[1]}` : "any level"}</div>
+                  </button>
+                  {byId.get(sc.id) === "imported" && (
+                    <span className="tag" title="Added by you — nobody reviewed it">
+                      yours
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
 
         {past.length > 0 && (
           <>
@@ -167,6 +263,7 @@ export default function Talk({
         )}
       </div>
     );
+  }
 
   // ---- reflection ----
   if (talk.reflecting) {
@@ -434,9 +531,9 @@ export default function Talk({
         <div className="rail">
           {/* The face reacts to what the session is already doing — every one of
               these is a count or a flag useTalk keeps anyway. See talk/face/.
-              Goals are deliberately not among them: they tick off by turn count
-              (see the ponytail below), and a coach smiling at a fake signal is
-              worse than one that doesn't smile. */}
+              Goals are deliberately not among them: a goal is a real signal now
+              (the coach reports it), but the face's smiles are earned by the
+              opening, a pleased emoji, and confidence — not by a checklist. */}
           <Face
             typing={talk.input.trim() !== ""}
             mic={talk.micPhase === "recording"}
@@ -445,6 +542,8 @@ export default function Talk({
             confidence={talk.confidence}
             coachTurns={coachSaid.length}
             coachSaid={coachSaid[coachSaid.length - 1] ?? ""}
+            personaEmoji={talk.persona?.emoji}
+            personaName={talk.persona?.name}
           />
 
           {goals.length > 0 && (
@@ -452,12 +551,14 @@ export default function Talk({
               <div className="lbl">Scenario goals</div>
               <div style={{ marginBottom: 30 }}>
                 {goals.map((g, i) => {
-                  // ponytail: goals tick off by turn count. Real per-goal detection
-                  // needs another model call per turn — not worth it for a side rail.
-                  const hit = talk.userTurns > i;
+                  const st = talk.goalState[i] ?? "pending";
+                  const mark = st === "met" ? "✓" : st === "missed" ? "✗" : "○";
+                  const label = st === "met" ? "met" : st === "missed" ? "missed" : "pending";
                   return (
-                    <div className={`goal ${hit ? "hit" : ""}`} key={g}>
-                      <span className="mk">{hit ? "✓" : "○"}</span>
+                    <div className={`goal ${st}`} key={g}>
+                      <span className="mk" title={label}>
+                        {mark}
+                      </span>
                       <span>{g}</span>
                     </div>
                   );
@@ -501,6 +602,134 @@ export default function Talk({
             End session → reflection
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The inline edit form over the picker grid — the same pattern Settings uses,
+ * no route, no modal library. Edits title, emoji, setup, goals (max 5), band and
+ * persona; saving writes the edited copy over the original via `saveScenario`.
+ * A bundled scenario is never edited in place — the caller duplicates it first.
+ */
+function ScenarioEditor({
+  scenario,
+  onSave,
+  onCancel,
+}: {
+  scenario: Scenario;
+  onSave: (next: Scenario) => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(scenario.title);
+  const [emoji, setEmoji] = useState(scenario.emoji);
+  const [setup, setSetup] = useState(scenario.setup);
+  const [goals, setGoals] = useState<string[]>((scenario.goals ?? []).slice(0, 5));
+  const [level, setLevel] = useState<[string, string] | undefined>(scenario.level);
+  const [name, setName] = useState(scenario.persona.name);
+  const [role, setRole] = useState(scenario.persona.role);
+  const [pEmoji, setPEmoji] = useState(scenario.persona.emoji);
+  const [voiceHint, setVoiceHint] = useState(scenario.persona.voiceHint ?? "");
+  const [err, setErr] = useState("");
+
+  const setGoal = (i: number, v: string) => setGoals((g) => g.map((x, j) => (j === i ? v : x)));
+  const addGoal = () => setGoals((g) => (g.length < 5 ? [...g, ""] : g));
+  const dropGoal = (i: number) => setGoals((g) => g.filter((_, j) => j !== i));
+
+  const save = () => {
+    const trimmed = goals.map((g) => g.trim()).filter(Boolean);
+    if (!title.trim() || !setup.trim() || !name.trim() || !role.trim() || !pEmoji.trim()) {
+      setErr("Title, setup, and the persona's name, role and emoji are all required.");
+      return;
+    }
+    if (trimmed.length > 5) {
+      setErr("A scenario can have at most 5 goals.");
+      return;
+    }
+    onSave({
+      ...scenario,
+      title: title.trim(),
+      emoji: emoji.trim() || "💬",
+      setup: setup.trim(),
+      goals: trimmed.length ? trimmed : undefined,
+      level,
+      persona: { name: name.trim(), role: role.trim(), emoji: pEmoji.trim(), voiceHint: voiceHint.trim() || undefined },
+    });
+  };
+
+  return (
+    <div className="scenario-editor" style={{ border: "1px solid var(--line)", borderRadius: 11, padding: 18, marginBottom: 20 }}>
+      <div className="eyebrow" style={{ marginBottom: 12 }}>
+        Edit scenario
+      </div>
+      <div className="field">
+        <label>Title</label>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Emoji</label>
+        <input value={emoji} onChange={(e) => setEmoji(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Setup</label>
+        <textarea value={setup} onChange={(e) => setSetup(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Goals (max 5)</label>
+        {goals.map((g, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+            <input value={g} onChange={(e) => setGoal(i, e.target.value)} placeholder={`Goal ${i + 1}`} />
+            <button className="model" style={linkish} onClick={() => dropGoal(i)}>
+              remove
+            </button>
+          </div>
+        ))}
+        {goals.length < 5 && (
+          <button className="model" style={linkish} onClick={addGoal}>
+            + add goal
+          </button>
+        )}
+      </div>
+      <div className="field">
+        <label>Band (min–max, e.g. A2–B2)</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={level?.[0] ?? ""}
+            onChange={(e) => setLevel((l) => [e.target.value.toUpperCase(), l?.[1] ?? ""])}
+            placeholder="min"
+          />
+          <input
+            value={level?.[1] ?? ""}
+            onChange={(e) => setLevel((l) => [l?.[0] ?? "", e.target.value.toUpperCase()])}
+            placeholder="max"
+          />
+        </div>
+      </div>
+      <div className="field">
+        <label>Persona — name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Persona — role</label>
+        <input value={role} onChange={(e) => setRole(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Persona — emoji</label>
+        <input value={pEmoji} onChange={(e) => setPEmoji(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Persona — voice hint (optional)</label>
+        <input value={voiceHint} onChange={(e) => setVoiceHint(e.target.value)} />
+      </div>
+      {err && <div className="err">{err}</div>}
+      <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+        <button className="btn sm" onClick={save}>
+          Save →
+        </button>
+        <button className="btn sm ghost" onClick={onCancel}>
+          Cancel
+        </button>
       </div>
     </div>
   );

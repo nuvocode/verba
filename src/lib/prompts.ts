@@ -1,6 +1,6 @@
 import type { Settings } from "./settings.ts";
 import { levelOf } from "./model.ts";
-import type { Scenario } from "./scenarios";
+import type { Persona, Scenario } from "./scenarios";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 import { worthLearning } from "./vocab.ts";
 
@@ -16,9 +16,16 @@ export type { Scenario } from "./scenarios";
 export { packGuidance } from "./packs/schema.ts";
 
 /** System prompt for a normal conversational turn. Model must return the turn JSON. */
-export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack, memories: Memory[] = []): string {
+export function buildSystem(
+  s: Settings,
+  scenario: Scenario,
+  persona: Persona,
+  pack?: LanguagePack,
+  memories: Memory[] = [],
+): string {
   return [
     `You are Verba, a warm and encouraging ${s.profile.targetLanguage} conversation tutor.`,
+    `For this session you are ${persona.name}, ${persona.role}. This persona is fixed for the whole session — stay in it throughout.`,
     `The learner's native language is ${s.profile.nativeLanguage}. Their self-reported level is ${levelOf(s.profile)}.`,
     `Scenario: ${scenario.setup}`,
     scenario.goals?.length ? `Help the learner practise these goals: ${scenario.goals.join("; ")}.` : "",
@@ -34,7 +41,8 @@ export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack
     `{`,
     `  "reply": "your natural conversational reply in ${s.profile.targetLanguage} (1-3 sentences)",`,
     `  "corrections": [ { "original": "the learner's exact wording that was wrong", "fixed": "the corrected version", "note": "a short explanation written in ${s.profile.nativeLanguage}", "severity": "minor or severe" } ],`,
-    `  "suggestions": [ "a short example reply the learner could send next, in ${s.profile.targetLanguage}", "another option" ]`,
+    `  "suggestions": [ "a short example reply the learner could send next, in ${s.profile.targetLanguage}", "another option" ],`,
+    `  "goalsMet": [0, 2]`,
     `}`,
     ``,
     `Rules:`,
@@ -42,6 +50,7 @@ export function buildSystem(s: Settings, scenario: Scenario, pack?: LanguagePack
     `- Only add a correction for a real grammar, word-choice, or spelling mistake. If the learner's message was fine, return "corrections": [].`,
     `- "severity" is "severe" when the mistake breaks meaning or grammar rules, "minor" when it is understandable but unnatural.`,
     `- Give 2-3 "suggestions". Keep them natural and at the learner's level.`,
+    `- "goalsMet" lists the index of every scenario goal the learner has JUST satisfied with their last message. An empty list is the normal answer. Never re-list a goal already met, and never credit a goal the learner only asked about.`,
     `- Never mention that you are returning JSON.`,
   ].join("\n");
 }
@@ -82,6 +91,8 @@ export interface TurnResult {
   reply: string;
   corrections: Correction[];
   suggestions: string[];
+  /** Indices into the scenario's goals that this turn just satisfied. */
+  goalsMet: number[];
 }
 
 /** The JSON escapes worth decoding mid-stream; `\uXXXX` is handled separately. */
@@ -155,6 +166,13 @@ export function parseTurn(raw: string): TurnResult {
       : [],
     suggestions: Array.isArray(obj?.suggestions)
       ? obj.suggestions.map((x: any) => String(x)).filter(Boolean).slice(0, 3)
+      : [],
+    // Indices into the scenario's goals. Only non-negative integers count; a
+    // model that hands back strings or floats is read as having met nothing.
+    goalsMet: Array.isArray(obj?.goalsMet)
+      ? obj.goalsMet
+          .map((x: any) => Number(x))
+          .filter((n: number) => Number.isInteger(n) && n >= 0)
       : [],
   };
 }

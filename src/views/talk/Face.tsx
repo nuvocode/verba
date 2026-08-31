@@ -59,6 +59,10 @@ export interface FaceProps {
   coachTurns?: number;
   /** What the coach said last. Read only for the marks it uses when it is pleased. */
   coachSaid?: string;
+  /** The persona's avatar — an emoji until there is art. Shown beside the face. */
+  personaEmoji?: string;
+  /** The persona's name, shown under the face. */
+  personaName?: string;
 }
 
 /**
@@ -73,6 +77,8 @@ export default function Face({
   confidence = 0,
   coachTurns = 0,
   coachSaid = "",
+  personaEmoji,
+  personaName,
 }: FaceProps) {
   const [mouth, setMouth] = useState<voice.Mouth>("rest");
   const [blinking, setBlinking] = useState(false);
@@ -237,6 +243,9 @@ export default function Face({
           <Glasses />
           <MouthPart mouth={mouth} smiling={smiling} />
         </g>
+        {personaEmoji ? `${personaEmoji} ` : ""}
+        {personaName ?? "Coach"}
+      
       </svg>
       <div className="lbl">Coach</div>
     </div>

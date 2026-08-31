@@ -123,6 +123,13 @@ input { font: inherit; }
    tap target inside a 19px title and pushed it into the line below. */
 .pick .rec { display: inline-block; margin-left: 9px; padding: 2px 8px; border: 1px solid var(--accent); border-radius: 20px; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); vertical-align: middle; }
 .pick.on .tag { color: var(--accent); }
+/* The picker card's wrapper: the card plus the imported mark and the inline
+   Edit / Duplicate / Delete row. The card is the tap target; the actions sit
+   under it, only for learner-made scenarios. */
+.pick-wrap { position: relative; }
+.pick-wrap .tag { position: absolute; top: 10px; right: 10px; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
+.pick-actions { display: flex; gap: 12px; padding: 8px 4px 0; font-size: 12px; }
+.pick-confirm { display: inline-flex; gap: 12px; }
 /* the quiet native-language line + its inline picker */
 .native { margin-top: 22px; font-size: 13.5px; color: var(--ink2); }
 .plan-row .native { margin-top: 0; font-size: inherit; color: inherit; }
@@ -198,8 +205,10 @@ input { font: inherit; }
 .rail .lbl { font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink3); margin-bottom: 14px; }
 .goal { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 9px; }
 .goal .mk { color: var(--ink3); font-size: 12px; width: 14px; flex: none; }
-.goal.hit .mk { color: var(--good); }
-.goal.hit span { color: var(--ink3); text-decoration: line-through; }
+.goal.met .mk { color: var(--good); }
+.goal.met span { color: var(--ink3); text-decoration: line-through; }
+.goal.missed .mk { color: var(--sev); }
+.goal.missed span { color: var(--ink3); }
 .sugg { display: flex; gap: 10px; align-items: flex-start; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 11px 12px; margin-bottom: 8px; width: 100%; text-align: left; }
 .sugg:hover { border-color: var(--accent); }
 .sugg .k { font-family: var(--mono); font-size: 10px; color: var(--ink3); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; flex: none; margin-top: 1px; }
