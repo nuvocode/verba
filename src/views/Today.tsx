@@ -68,14 +68,15 @@ function ModelWarning({ settings }: { settings: Settings }) {
   const why = modelTrouble(settings, served);
   if (!why) return null;
 
-  // surface today: error — the model the plan is built on is unreachable, so
+  // surface today: unusable — the model the plan is built on is unreachable, so
   // today's generated content can't be trusted. The learner sees why and the way
   // out, never a plan that silently can't be made.
   return (
     <div className="empty fade" style={{ textAlign: "left", padding: "0 0 24px" }}>
-      <Failed
-        say={why}
-        retry={{ label: "Test the connection", onClick: () => window.location.assign(AT.advanced) }}
+      <Unusable
+        what={why}
+        regenerate={{ label: "Test the connection", onClick: () => window.location.assign(AT.advanced) }}
+        fallback={{ label: "Choose another model", onClick: () => window.location.assign(AT.advanced) }}
       />
     </div>
   );
@@ -123,13 +124,13 @@ export default function Today({
 
       <ModelWarning settings={settings} />
 
-      {/* surface today: unusable — the plan failed to build from history, so this
-          is a general day; the learner is told what they are looking at instead. */}
+      {/* surface today: error — the plan failed to build from history, so this is
+          a general day; the learner is told what they are looking at instead. */}
       {day.planSource === "fallback" && (
         <div className="empty fade" style={{ textAlign: "left", padding: "0 0 24px" }}>
-          <Unusable
-            what={fallbackNote(plan)}
-            regenerate={{ label: "Rebuild on another topic", onClick: () => void day.changeTopic() }}
+          <Failed
+            say={fallbackNote(plan)}
+            retry={{ label: "Rebuild on another topic", onClick: () => void day.changeTopic() }}
           />
         </div>
       )}
