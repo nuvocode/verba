@@ -510,8 +510,15 @@ export default function Talk({
                 {talk.busy ? "Sending…" : "Send"}
               </button>
             </div>
-            {/* The keyboard half comes from the one table; the mouse half — click ◉
-                to speak — is a pointer instruction, so it stays beside it (§5.4). */}
+            {/* The live level meter while the mic is open — the recording is real,
+                and the bar says so. Below it, the line that is true for the tier in
+                use: with partials the running text is already in the box; without,
+                it says so *before* the learner wonders why nothing is appearing. */}
+            {talk.micPhase === "recording" && (
+              <div className="meter" style={{ margin: "8px auto 0", maxWidth: 640, height: 4 }}>
+                <div style={{ width: `${Math.round(talk.micLevel * 100)}%` }} />
+              </div>
+            )}
             <div style={{ maxWidth: 640, margin: "10px auto 0", fontSize: 11, color: "var(--ink3)" }}>
               <Hints
                 settings={settings}
@@ -521,7 +528,17 @@ export default function Talk({
               />
               {settings.showHints && (
                 <span style={{ marginLeft: 22 }}>
-                  or click <span style={{ fontFamily: "var(--mono)" }}>◉</span> to speak
+                  {talk.micPhase === "recording" ? (
+                    talk.partials ? (
+                      "speak — the text appears as you go"
+                    ) : (
+                      "transcribing when you stop"
+                    )
+                  ) : (
+                    <>
+                      or click <span style={{ fontFamily: "var(--mono)" }}>◉</span> to speak
+                    </>
+                  )}
                 </span>
               )}
             </div>

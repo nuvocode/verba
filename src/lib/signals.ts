@@ -8,7 +8,7 @@
 import type { SignalDraft, ActivityId } from "./model.ts";
 import type { Grade } from "./srs.ts";
 import { words, sentenceCount } from "./text.ts";
-import type { ProducedTurn, Reflection } from "./useTalk.ts";
+import type { ProducedTurn, Reflection, VoiceTurn } from "./useTalk.ts";
 
 /**
  * A finished conversation. A correction with no note names nothing, so it is not
@@ -34,6 +34,8 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
       payload: { label: w.term, translation: w.translation },
     })),
     ...r.produced.map((t) => turnSignal(activityId, t, locale)),
+    // What the mic observed, per spoken turn — pace and delivery.
+    ...(r.voice ?? []).flatMap((v) => voiceSignals(activityId, v)),
   ];
 }
 
@@ -54,6 +56,72 @@ function turnSignal(activityId: ActivityId, t: ProducedTurn, locale: string): Si
   return t.fromSuggestion
     ? { activityId, kind: "suggestionUsed" as const, payload }
     : { activityId, kind: "unpromptedTurn" as const, payload };
+}
+
+/**
+ * What a spoken turn observed, beside what it said. Two drafts, both with a unit
+ * and a definition the Coach can print (invariant 12):
+ *
+ * - **pace** — words per minute, from the locale's own word count. Skipped when
+ *   the turn is under 1.5 s or the text is empty: a one-word answer has no tempo.
+ * - **pronunciation** — not phoneme scoring (no engine can do that honestly yet),
+ *   but *delivery*: the fraction of the recording that carried speech, and how
+ *   often the learner paused. Both are real observations with a real definition.
+ */
+export function voiceSignals(
+  activityId: ActivityId,
+  v: VoiceTurn,
+): SignalDraft[] {
+  const out: SignalDraft[] = [];
+
+  // Pace: words per minute. A turn under 1.5 s or with no words has no tempo.
+  if (v.ms >= 1500 && v.text.trim()) {
+    const ws = words(v.text, v.locale).length;
+    const wpm = ws / (v.ms / 60000);
+    out.push({
+      activityId,
+      kind: "pace" as const,
+      payload: {
+        label: "speaking pace",
+        wpm: Math.round(wpm * 10) / 10,
+        unit: "words per minute",
+        definition: "how many words you spoke per minute",
+      },
+    });
+  }
+
+  // Pronunciation → delivery: how much of the recording carried speech, and how
+  // often the learner paused. The threshold is the same one the silence detector
+  // uses, so "speech" here means the same thing the recorder heard.
+  if (v.levels.length) {
+    const THRESHOLD = 0.02;
+    const speechFrames = v.levels.filter((l) => l > THRESHOLD).length;
+    const speechRatio = speechFrames / v.levels.length;
+    // A silent break longer than 600 ms is a pause worth counting.
+    let pauses = 0;
+    let quiet = 0;
+    for (const l of v.levels) {
+      if (l > THRESHOLD) {
+        if (quiet > 0.6) pauses++;
+        quiet = 0;
+      } else {
+        quiet += 1 / 20; // ~20 frames/s
+      }
+    }
+    out.push({
+      activityId,
+      kind: "pronunciation" as const,
+      payload: {
+        label: "spoken delivery",
+        speechRatio: Math.round(speechRatio * 100) / 100,
+        pauses,
+        unit: "fraction of speech, pauses",
+        definition: "how much of your recording was speech, and how often you paused",
+      },
+    });
+  }
+
+  return out;
 }
 
 /**

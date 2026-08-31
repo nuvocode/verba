@@ -51,12 +51,22 @@ export interface Reflection extends SessionSummary {
   corrections: Correction[];
   words: { term: string; translation: string }[];
   produced: ProducedTurn[];
+  /** What each spoken turn observed, beside what it said — feeds `voiceSignals`. */
+  voice: VoiceTurn[];
 }
 
 /** One thing the learner actually sent, and whether they found it themselves. */
 export interface ProducedTurn {
   text: string;
   fromSuggestion: boolean;
+}
+
+/** A spoken turn as the mic observed it: the transcript and the envelope. */
+export interface VoiceTurn {
+  text: string;
+  ms: number;
+  levels: number[];
+  locale: string;
 }
 
 const CONF_START = 50;
@@ -99,6 +109,8 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   // Cloud STT has two phases the learner can feel: the mic is open, then the clip
   // is in flight. One "Listening…" bar covering both is a lie for the second half.
   const [micPhase, setMicPhase] = useState<"" | "recording" | "transcribing">("");
+  // The live level meter while the mic is open — 0–1, straight off the analyser.
+  const [micLevel, setMicLevel] = useState(0);
   const [error, setError] = useState("");
   // Not an error: something degraded (a local speech server went away) and the
   // conversation carried on. Raised once per adapter, and cleared when the next
@@ -123,6 +135,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   // What the learner produced, and whether it was theirs. `msgs` cannot answer the
   // second question — a picked suggestion and a typed sentence are the same bubble.
   const produced = useRef<ProducedTurn[]>([]);
+  // What each spoken turn observed, beside what it said. Accumulated in `mic()`
+  // and handed to the reflection, where `voiceSignals` turns it into signals.
+  const voice = useRef<VoiceTurn[]>([]);
   // How far the session's title has got: 0 unnamed, 1 named off the opening,
   // 2 re-named once the subject settled. Not a rolling rewrite — 2 is the end.
   const titleStage = useRef<0 | 1 | 2>(0);
@@ -195,6 +210,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       setNotice("");
       titleStage.current = 0;
       produced.current = [];
+      voice.current = [];
       setBusy(true);
       // What earlier conversations left behind. It rides in the system prompt, so
       // every call made off this history — the turns, the wrap-up, the vocabulary
@@ -322,7 +338,11 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     [busy, scenario, msgs, settings, say, nameSession],
   );
 
-  /** Push-to-talk: click to open the mic, click again to stop and transcribe. */
+  /**
+   * Push-to-talk: click to open the mic, click again to stop. The transcript
+   * lands in the input box as an editable draft — nothing is sent automatically.
+   * Partials (where the tier can produce them) fill the box as they arrive.
+   */
   const mic = useCallback(async () => {
     if (busy) return;
     if (micPhase === "recording") {
@@ -336,18 +356,28 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
 
     setError("");
     setMicPhase("recording");
+    setMicLevel(0);
     try {
-      const heard = await speech.listen(pack?.speech.locale);
-      if (heard.trim()) setInput(heard);
+      const heard = await speech.listen({
+        locale: pack?.speech.locale,
+        onLevel: setMicLevel,
+        onPartial: (text) => setInput(text),
+      });
+      // The final text lands in the box, focused and editable — the draft. The
+      // envelope is kept for the voice signals; the learner's own words are what
+      // the conversation measures, so a spoken turn is a produced turn too.
+      if (heard.text.trim()) {
+        setInput(heard.text);
+        produced.current.push({ text: heard.text, fromSuggestion: false });
+        voice.current.push({ text: heard.text, ms: heard.ms, levels: heard.levels, locale: pack?.speech.locale ?? "en" });
+      }
     } catch (e: unknown) {
       const { say: said, log } = humanError(e);
-    // Whatever is still pending when the session closes was never met — it is
-    // missed, and the reflection's scorecard reads it that way.
-    setGoalState((gs) => gs.map((g) => (g === "pending" ? "missed" : g)));
       console.warn("[talk] transcribe failed:", log);
       setError(said);
     } finally {
       setMicPhase("");
+      setMicLevel(0);
     }
   }, [busy, micPhase, speech, pack, settings]);
 
@@ -426,7 +456,17 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     } finally {
       setBusy(false);
     }
-    setReflection({ ...summary, turns: userTexts.length, corrections, words, produced: produced.current });
+    // Whatever is still pending when the session closes was never met — it is
+    // missed, and the reflection's scorecard reads it that way.
+    setGoalState((gs) => gs.map((g) => (g === "pending" ? "missed" : g)));
+    setReflection({
+      ...summary,
+      turns: userTexts.length,
+      corrections,
+      words,
+      produced: produced.current,
+      voice: voice.current,
+    });
   }, [scenario, busy, msgs, settings, pack]);
 
   /**
@@ -495,6 +535,10 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     busy,
     listening: micPhase !== "",
     micPhase,
+    /** The live level meter while the mic is open — 0–1. */
+    micLevel,
+    /** Whether the serving STT tier can stream partials into the draft. */
+    partials: speech.partials,
     error,
     notice,
     reflecting,

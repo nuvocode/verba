@@ -8,7 +8,7 @@
 // Run: node --experimental-strip-types src/lib/signals.check.ts
 import assert from "node:assert";
 import { signalLabel, signalMiss, type Signal } from "./model.ts";
-import { talkSignals, readSignals, listenSignals, memorySignals, TURN, SUGGESTED } from "./signals.ts";
+import { talkSignals, readSignals, listenSignals, memorySignals, voiceSignals, TURN, SUGGESTED } from "./signals.ts";
 
 const sig = (payload: unknown): Signal => ({
   id: "s1",
@@ -85,6 +85,45 @@ assert(
 // A language with no spaces still measures: Japanese is cut by its own rules.
 const ja = talkSignals("talk-1", { turns: 1, corrections: [], words: [], produced: [{ text: "こんにちは、元気ですか。", fromSuggestion: false }], summary: "", strengths: [], focus: [] }, "ja");
 assert((ja[0].payload as { words: number }).words > 1, "a no-space language still counts more than one word");
+
+// --- voiceSignals: pace and delivery, both with a unit and a definition --------
+// A spoken turn under 1.5 s has no tempo — a one-word answer is not a pace.
+const short = voiceSignals("talk-1", { text: "Hola", ms: 1000, levels: [0.1, 0.1, 0.1], locale: "es" });
+assert(!short.some((d) => d.kind === "pace"), "a turn under 1.5 s must not emit a pace signal");
+// …and neither does an empty transcript.
+const empty = voiceSignals("talk-1", { text: "", ms: 5000, levels: [0.1, 0.1], locale: "es" });
+assert(!empty.some((d) => d.kind === "pace"), "an empty transcript must not emit a pace signal");
+
+// A real turn emits both, and the wpm comes from the locale's own word count.
+const spoken = voiceSignals("talk-1", { text: "Quisiera un café, por favor.", ms: 6000, levels: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1], locale: "es" });
+const pace = spoken.find((d) => d.kind === "pace")!;
+assert(pace, "a real spoken turn must emit a pace signal");
+const pacePayload = pace.payload as { wpm: number; unit: string; definition: string };
+assert(pacePayload.wpm > 0, "wpm is a positive number");
+assert.equal(pacePayload.unit, "words per minute", "pace carries its unit");
+assert(typeof pacePayload.definition === "string" && pacePayload.definition.length > 0, "pace carries a definition");
+
+const pron = spoken.find((d) => d.kind === "pronunciation")!;
+assert(pron, "a spoken turn with an envelope must emit a pronunciation signal");
+const pronPayload = pron.payload as { speechRatio: number; pauses: number; unit: string; definition: string };
+assert(pronPayload.speechRatio > 0 && pronPayload.speechRatio <= 1, "speech ratio is a fraction of the recording");
+assert(typeof pronPayload.pauses === "number", "the pause count rides along");
+assert(typeof pronPayload.unit === "string" && pronPayload.unit.length > 0, "pronunciation carries its unit");
+assert(typeof pronPayload.definition === "string" && pronPayload.definition.length > 0, "pronunciation carries a definition");
+
+// A Japanese locale counts its own words — no spaces, so the wpm is not a lie.
+const jaSpoken = voiceSignals("talk-1", { text: "こんにちは、元気ですか。", ms: 6000, levels: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1], locale: "ja" });
+const jaPace = jaSpoken.find((d) => d.kind === "pace")!;
+assert((jaPace.payload as { wpm: number }).wpm > 0, "a no-space language still measures a pace");
+
+// The voice signals ride into the reflection's talkSignals output.
+const withVoice = talkSignals(
+  "talk-1",
+  { turns: 1, corrections: [], words: [], produced: [{ text: "Quisiera un café.", fromSuggestion: false }], summary: "", strengths: [], focus: [], voice: [{ text: "Quisiera un café.", ms: 4000, levels: [0.1, 0.1, 0.1, 0.1], locale: "es" }] },
+  "es",
+);
+assert(withVoice.some((d) => d.kind === "pace"), "a spoken reflection carries a pace signal");
+assert(withVoice.some((d) => d.kind === "pronunciation"), "a spoken reflection carries a pronunciation signal");
 
 // --- the other three surfaces: same shape, their own evidence ----------------
 const q = (prompt: string, correct: boolean) => ({ prompt, given: "x", answer: "y", correct });

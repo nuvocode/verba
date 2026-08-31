@@ -5,16 +5,21 @@
 // Run: node --experimental-strip-types src/lib/speech.check.ts
 import assert from "node:assert";
 import {
+  bundledStt,
+  deepgram,
   deepgramHelp,
   getSpeech,
   listenBlocker,
   micRoute,
   micTrouble,
   migrateSpeech,
+  openaiStt,
   pruneBundled,
   prunedNote,
+  record,
   resolveTier,
   tierName,
+  webSpeech,
 } from "./speech.ts";
 
 // --- the original bug: an ElevenLabs key must not decide dictation ---
@@ -263,5 +268,116 @@ assert.match(micRoute("Mozilla/5.0 (X11; Linux x86_64)"), /privacy settings/, "s
 assert.equal(tierName("native", "tts"), "your system voice");
 assert.equal(tierName("native", "stt"), "your system's speech recognition");
 assert.notEqual(tierName("cloud", "tts"), tierName("cloud", "stt"), "the two halves use different cloud services");
+
+// ---- PLAN-018: every tier's partials flag matches what it can do ----
+// Asserted by construction over the exported factories: a tier either streams
+// partials (bundled whisper, a local server) or it does not (cloud, the OS).
+assert.equal(bundledStt("whisper-base").partials, true, "bundled whisper streams partials");
+assert.equal(openaiStt("http://localhost:8000/v1", "m").partials, true, "a local server streams partials");
+assert.equal(deepgram("key").partials, false, "Deepgram is record-then-transcribe — no partials");
+assert.equal(webSpeech().partials, false, "the OS recogniser has no partials");
+
+// ---- PLAN-018: record() measures the envelope and stops on silence ----
+// Headless node has no mic, no MediaRecorder, no AudioContext — give it fakes
+// that drive the analyser frames the silence detector reads.
+{
+  let rafCb: (() => void) | null = null;
+  (globalThis as any).requestAnimationFrame = (cb: () => void) => {
+    rafCb = cb;
+    return 1;
+  };
+  (globalThis as any).cancelAnimationFrame = () => {
+    rafCb = null;
+  };
+
+  class FakeAnalyser {
+    level = 0;
+    getByteTimeDomainData(buf: Uint8Array) {
+      // A constant level fills the buffer with a constant sample; RMS reads it back.
+      const v = Math.max(0, Math.min(255, Math.round(this.level * 128) + 128));
+      buf.fill(v);
+    }
+  }
+  let currentCtx: { analyser: FakeAnalyser } | null = null;
+  (globalThis as any).AudioContext = class {
+    analyser = new FakeAnalyser();
+    constructor() {
+      currentCtx = this;
+    }
+    createMediaStreamSource() {
+      return { connect: () => {} };
+    }
+    createAnalyser() {
+      return this.analyser;
+    }
+    close() {
+      return Promise.resolve();
+    }
+  };
+
+  let stopped = false;
+  class FakeMediaRecorder {
+    state = "inactive";
+    mimeType = "audio/webm";
+    ondataavailable: ((e: any) => void) | null = null;
+    onstop: (() => void) | null = null;
+    onerror: ((e: any) => void) | null = null;
+    start() {
+      this.state = "recording";
+    }
+    stop() {
+      this.state = "inactive";
+      stopped = true;
+      this.onstop?.();
+    }
+  }
+  (globalThis as any).MediaRecorder = FakeMediaRecorder;
+  Object.defineProperty(globalThis, "navigator", {
+    value: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [] }) } },
+    configurable: true,
+  });
+
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  let t = 0;
+  const frames = (level: number, n: number) => {
+    if (currentCtx) currentCtx.analyser.level = level;
+    for (let i = 0; i < n; i++) {
+      t += 16; // ~60 fps, as requestAnimationFrame actually runs
+      rafCb?.(t);
+    }
+  };
+
+  // Quiet before any speech must not stop the recording — a learner thinking for
+  // a few seconds is not a finished recording.
+  stopped = false;
+  const levels: number[] = [];
+  const p1 = record(() => {}, { silenceMs: 200, onLevel: (l) => levels.push(l) });
+  await flush(); // let mic() resolve and the analyser attach
+  frames(0, 10); // ten quiet frames, no speech yet
+  assert.equal(stopped, false, "quiet before any speech must not stop the recording");
+
+  // Speech, then enough quiet to trip the stop.
+  frames(0.1, 5); // speech
+  frames(0, 15); // 15 quiet frames = 240 ms > 200 ms silenceMs
+  const r1 = await p1;
+  assert.equal(stopped, true, "silence after speech must stop the recording on its own");
+  assert(r1.ms > 0, "the recording reports how long it ran");
+  assert(r1.levels.length > 0, "the recording returns a non-empty envelope");
+  assert(levels.length > 0, "onLevel is fed the live meter");
+
+  // A recording that never sees speech must not self-stop on silence — only the
+  // cap (or a hand stop) ends it. Capture the recorder via onStart and stop it
+  // by hand, as cancel() would.
+  stopped = false;
+  let rec2: any = null;
+  const p2 = record((r) => (rec2 = r), { maxMs: 10_000, silenceMs: 200 });
+  await flush();
+  frames(0, 20); // still quiet — silence must not have stopped it
+  assert.equal(stopped, false, "a recording that never saw speech must not self-stop on silence");
+  rec2.stop(); // hand stop, as cancel() does
+  const r2 = await p2;
+  assert(r2.ms >= 0, "a hand-stopped recording still resolves with the record shape");
+  assert(r2.levels.length > 0, "the envelope is measured even when nothing was said");
+}
 
 console.log("speech.check: ok");

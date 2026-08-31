@@ -35,10 +35,31 @@ export interface Tts {
   cancel(): void;
 }
 
+/** What a recording observed, beside what it said. */
+export interface ListenResult {
+  text: string;
+  /** How long the learner spoke, in ms. */
+  ms: number;
+  /** The RMS envelope, one entry per analyser frame (~20/s). */
+  levels: number[];
+}
+
+export interface ListenOptions {
+  locale?: string; // BCP-47, e.g. "es-ES"
+  /** 0–1, ~20×/s, straight off the analyser. Drives the meter. */
+  onLevel?(level: number): void;
+  /** Best-effort running transcript. Only called by tiers with `partials: true`. */
+  onPartial?(text: string): void;
+  /** Stop after this much continuous silence. 0 disables. Default 1800. */
+  silenceMs?: number;
+}
+
 /** Audio → text. `listen` resolves when `cancel` stops the recording. */
 export interface Stt {
   canListen: boolean;
-  listen(locale?: string): Promise<string>;
+  /** Whether this tier can produce `onPartial` at all. The UI reads it. */
+  partials: boolean;
+  listen(opts?: ListenOptions): Promise<ListenResult>;
   cancel(): void;
 }
 
@@ -80,6 +101,9 @@ export function webSpeech(): SpeechAdapter {
   return {
     canSpeak: !!synth,
     canListen: !!Recognition,
+    // No webview ships a recogniser that can stream partials — this tier is
+    // record-then-transcribe at best, and usually nothing at all.
+    partials: false,
 
     speak(text, opts = {}) {
       return new Promise((resolve) => {
@@ -105,14 +129,15 @@ export function webSpeech(): SpeechAdapter {
       });
     },
 
-    listen(locale) {
+    listen(opts = {}) {
       return new Promise((resolve, reject) => {
         if (!Recognition) return reject(new Error("This webview has no speech recognition."));
         recognition = new Recognition();
-        recognition.lang = locale ?? "en-US";
+        recognition.lang = opts.locale ?? "en-US";
         recognition.interimResults = false;
         recognition.maxAlternatives = 1;
-        recognition.onresult = (e: any) => resolve(e.results?.[0]?.[0]?.transcript ?? "");
+        recognition.onresult = (e: any) =>
+          resolve({ text: e.results?.[0]?.[0]?.transcript ?? "", ms: 0, levels: [] });
         recognition.onerror = (e: any) => reject(new Error(e?.error ?? "recognition error"));
         recognition.onend = () => (recognition = null);
         recognition.start();
@@ -214,8 +239,19 @@ export function micTrouble(err: unknown): string {
  * Record until `onStart`'s recorder is stopped — push-to-talk, not a fixed
  * window. A learner mid-sentence at second 6 was the old behaviour; the cap is
  * only there so a mic left open doesn't record until the heat death.
+ *
+ * The shared work every tier needs: an `AnalyserNode` on the stream measures the
+ * RMS envelope (fed to `onLevel` and returned as `levels`), and once at least
+ * `minSpeechMs` of speech has been seen, `silenceMs` of continuous below-threshold
+ * level calls `rec.stop()` on its own. Before any speech it never fires — a
+ * learner thinking for four seconds is not a finished recording. The `AudioContext`
+ * is closed on every exit path, including the throwing ones.
  */
-function record(onStart: (r: MediaRecorder) => void, maxMs = 60_000, deviceId = ""): Promise<Blob> {
+export function record(
+  onStart: (r: MediaRecorder) => void,
+  opts: { maxMs?: number; deviceId?: string; silenceMs?: number; onLevel?: (level: number) => void; onChunk?: (chunk: BlobPart) => void } = {},
+): Promise<{ clip: Blob; ms: number; levels: number[] }> {
+  const { maxMs = 60_000, deviceId = "", silenceMs = 1800, onLevel, onChunk } = opts;
   return new Promise(async (resolve, reject) => {
     let stream: MediaStream;
     try {
@@ -225,17 +261,82 @@ function record(onStart: (r: MediaRecorder) => void, maxMs = 60_000, deviceId = 
     }
     const rec = new MediaRecorder(stream);
     const chunks: BlobPart[] = [];
+    const levels: number[] = [];
+    const started = performance.now();
     const done = () => stream.getTracks().forEach((t) => t.stop());
     const cap = setTimeout(() => rec.state !== "inactive" && rec.stop(), maxMs);
 
-    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    // The level meter and the silence detector share one analyser. RMS per frame
+    // is the honest measure of "is there speech right now" — a peak meter would
+    // light up on a cough, and the silence stop has to be about the voice.
+    let ctx: AudioContext | null = null;
+    let raf = 0;
+    let sawSpeech = false;
+    let quietSince = 0;
+    let lastFrame = 0;
+    let closed = false;
+    const teardown = () => {
+      if (closed) return;
+      closed = true;
+      cancelAnimationFrame(raf);
+      if (ctx) void ctx.close().catch(() => {});
+      ctx = null;
+    };
+
+    try {
+      ctx = new AudioContext();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.3;
+      src.connect(analyser);
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+      const frame = (now: number) => {
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / buf.length);
+        levels.push(rms);
+        onLevel?.(rms);
+        // Silence is measured by wall-clock time, not frame count — the analyser
+        // runs at the display's refresh rate, and the threshold must not depend
+        // on it. `lastFrame` is 0 on the first frame, so the first delta is skipped.
+        const dt = lastFrame ? now - lastFrame : 0;
+        lastFrame = now;
+        if (rms > 0.02) {
+          sawSpeech = true;
+          quietSince = 0;
+        } else if (sawSpeech) {
+          quietSince += dt;
+          if (silenceMs > 0 && quietSince >= silenceMs && rec.state !== "inactive") rec.stop();
+        }
+        raf = requestAnimationFrame(frame);
+      };
+      raf = requestAnimationFrame(frame);
+    } catch (e) {
+      teardown();
+      done();
+      clearTimeout(cap);
+      return reject(e instanceof Error ? e : new Error(String(e)));
+    }
+
+    rec.ondataavailable = (e) => {
+      if (!e.data.size) return;
+      chunks.push(e.data);
+      onChunk?.(e.data);
+    };
     rec.onstop = () => {
       clearTimeout(cap);
+      teardown();
       done();
-      resolve(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
+      resolve({ clip: new Blob(chunks, { type: rec.mimeType || "audio/webm" }), ms: performance.now() - started, levels });
     };
     rec.onerror = (e: any) => {
       clearTimeout(cap);
+      teardown();
       done();
       reject(new Error(e?.error?.message ?? "recording error"));
     };
@@ -334,41 +435,90 @@ export function openaiTts(baseUrl: string, model: string, voice: string, apiKey 
 
 /**
  * `POST /audio/transcriptions` — multipart, as speaches/faster-whisper serves it.
- * Records until `cancel()`, like Deepgram.
+ * Records until `cancel()`, like Deepgram. A local server is fast enough to
+ * re-transcribe the accumulated clip every few seconds, so this tier streams
+ * partials (`partials: true`) — the running text fills the draft as it lands.
  */
 export function openaiStt(baseUrl: string, model: string, apiKey = "", deviceId = ""): Stt {
   let rec: MediaRecorder | null = null;
   return {
     canListen: hasMic(),
+    partials: true,
 
-    async listen(locale) {
-      const clip = await record((r) => (rec = r), undefined, deviceId);
+    async listen(opts = {}) {
+      const { locale, onPartial } = opts;
+      const partialChunks: BlobPart[] = [];
+      let stopped = false;
+
+      const transcribe = async (blob: Blob): Promise<string> => {
+        const form = new FormData();
+        form.append("model", model);
+        // Whisper servers sniff the container from the filename, not the mime type —
+        // an ".webm" clip named ".mp3" is rejected, and WebKit hands back mp4 where
+        // Chromium hands back webm. Name the file whatever the recorder actually made.
+        const ext = (blob.type.split(";")[0].split("/")[1] || "webm").replace("mpeg", "mp3");
+        form.append("file", blob, `speech.${ext}`);
+        // Whisper takes ISO-639-1, so the pack's "es-ES" goes in as "es". Without it
+        // the model auto-detects, and a beginner's accented Spanish detects as English.
+        const lang = baseLang(locale);
+        if (lang) form.append("language", lang);
+
+        const res = await fetch(`${trimUrl(baseUrl)}/audio/transcriptions`, {
+          method: "POST",
+          // No Content-Type: the boundary is generated when the body is serialised,
+          // and setting the header by hand loses it (the plugin only fills in headers
+          // the caller left empty). A hand-set multipart Content-Type = a 400.
+          headers: { Authorization: `Bearer ${apiKey || "local"}` },
+          body: form,
+        });
+        if (!res.ok) throw new Error(`Transcription server ${res.status}: ${await res.text()}`);
+        const data = await res.json();
+        return data.text ?? "";
+      };
+
+      // Stream partials while the recording is still open: re-transcribe the
+      // accumulated clip every ~3 s, one flight at a time. The timer runs
+      // concurrently with `record()` — `onChunk` feeds `partialChunks` as the
+      // recorder emits, and the loop reads the growing clip. A partial that lands
+      // after the recording stopped is dropped; the final transcription below is
+      // the one that counts.
+      let inFlight = false;
+      let last = 0;
+      const timer = onPartial
+        ? setInterval(async () => {
+            if (inFlight || stopped) return;
+            if (performance.now() - last < 3000) return;
+            inFlight = true;
+            try {
+              const blob = new Blob(partialChunks, { type: "audio/webm" });
+              if (blob.size) {
+                const text = await transcribe(blob);
+                if (!stopped && text) onPartial(text);
+              }
+            } catch {
+              /* a partial is best-effort — the final transcription still runs */
+            } finally {
+              inFlight = false;
+              last = performance.now();
+            }
+          }, 1000)
+        : null;
+
+      const { clip, ms, levels } = await record(
+        (r) => {
+          rec = r;
+          // A timeslice makes the recorder emit data chunks as it goes, which is
+          // what lets a partial re-transcription see everything recorded so far.
+          r.start(1000);
+        },
+        { deviceId, silenceMs: opts.silenceMs, onLevel: opts.onLevel, onChunk: (c) => partialChunks.push(c) },
+      );
       rec = null;
-      if (!clip.size) return "";
+      stopped = true;
+      if (timer) clearInterval(timer);
+      if (!clip.size) return { text: "", ms, levels };
 
-      const form = new FormData();
-      form.append("model", model);
-      // Whisper servers sniff the container from the filename, not the mime type —
-      // an ".webm" clip named ".mp3" is rejected, and WebKit hands back mp4 where
-      // Chromium hands back webm. Name the file whatever the recorder actually made.
-      const ext = (clip.type.split(";")[0].split("/")[1] || "webm").replace("mpeg", "mp3");
-      form.append("file", clip, `speech.${ext}`);
-      // Whisper takes ISO-639-1, so the pack's "es-ES" goes in as "es". Without it
-      // the model auto-detects, and a beginner's accented Spanish detects as English.
-      const lang = baseLang(locale);
-      if (lang) form.append("language", lang);
-
-      const res = await fetch(`${trimUrl(baseUrl)}/audio/transcriptions`, {
-        method: "POST",
-        // No Content-Type: the boundary is generated when the body is serialised,
-        // and setting the header by hand loses it (the plugin only fills in headers
-        // the caller left empty). A hand-set multipart Content-Type = a 400.
-        headers: { Authorization: `Bearer ${apiKey || "local"}` },
-        body: form,
-      });
-      if (!res.ok) throw new Error(`Transcription server ${res.status}: ${await res.text()}`);
-      const data = await res.json();
-      return data.text ?? "";
+      return { text: await transcribe(clip), ms, levels };
     },
 
     cancel() {
@@ -435,26 +585,69 @@ export function bundledStt(modelId: string, deviceId = ""): Stt {
   let rec: MediaRecorder | null = null;
   return {
     canListen: hasMic(),
+    // Whisper runs in-process, so re-transcribing the accumulated clip every few
+    // seconds is cheap — this tier streams partials (`partials: true`).
+    partials: true,
 
-    async listen(locale) {
-      const clip = await record((r) => (rec = r), undefined, deviceId);
-      rec = null;
-      if (!clip.size) return "";
-      const samples = await pcm16k(clip);
-      if (!samples.length) return "";
+    async listen(opts = {}) {
+      const { locale, onPartial } = opts;
+      const partialChunks: BlobPart[] = [];
+      let stopped = false;
 
-      // The samples ride the raw IPC channel, not JSON: a 15-second clip is a
-      // quarter of a million floats, and serialising that as a JSON array is
-      // several megabytes of text for no reason. Everything else goes in headers.
-      return await invoke<string>("bundled_stt", samples.buffer as ArrayBuffer, {
-        headers: {
-          "x-model": modelId,
-          // Whisper takes ISO-639-1: the pack's "es-ES" goes in as "es". Without
-          // it the model auto-detects, and a beginner's accent detects as English.
-          "x-language": baseLang(locale),
-          "x-rate": "16000",
+      const transcribe = async (blob: Blob): Promise<string> => {
+        const samples = await pcm16k(blob);
+        if (!samples.length) return "";
+        // The samples ride the raw IPC channel, not JSON: a 15-second clip is a
+        // quarter of a million floats, and serialising that as a JSON array is
+        // several megabytes of text for no reason. Everything else goes in headers.
+        return await invoke<string>("bundled_stt", samples.buffer as ArrayBuffer, {
+          headers: {
+            "x-model": modelId,
+            // Whisper takes ISO-639-1: the pack's "es-ES" goes in as "es". Without
+            // it the model auto-detects, and a beginner's accent detects as English.
+            "x-language": baseLang(locale),
+            "x-rate": "16000",
+          },
+        });
+      };
+
+      // Stream partials while the recording is still open, exactly as openaiStt
+      // does: re-transcribe the growing clip every ~3 s, one flight at a time.
+      let inFlight = false;
+      let last = 0;
+      const timer = onPartial
+        ? setInterval(async () => {
+            if (inFlight || stopped) return;
+            if (performance.now() - last < 3000) return;
+            inFlight = true;
+            try {
+              const blob = new Blob(partialChunks, { type: "audio/webm" });
+              if (blob.size) {
+                const text = await transcribe(blob);
+                if (!stopped && text) onPartial(text);
+              }
+            } catch {
+              /* a partial is best-effort — the final transcription still runs */
+            } finally {
+              inFlight = false;
+              last = performance.now();
+            }
+          }, 1000)
+        : null;
+
+      const { clip, ms, levels } = await record(
+        (r) => {
+          rec = r;
+          r.start(1000); // timeslice → chunks as it goes, for the partials
         },
-      });
+        { deviceId, silenceMs: opts.silenceMs, onLevel: opts.onLevel, onChunk: (c) => partialChunks.push(c) },
+      );
+      rec = null;
+      stopped = true;
+      if (timer) clearInterval(timer);
+      if (!clip.size) return { text: "", ms, levels };
+
+      return { text: await transcribe(clip), ms, levels };
     },
 
     cancel() {
@@ -468,12 +661,19 @@ export function deepgram(apiKey: string, deviceId = ""): Stt {
   let rec: MediaRecorder | null = null;
   return {
     canListen: hasMic(),
+    // A cloud tier is record-then-transcribe — no partials, and the UI says so
+    // rather than faking a stream.
+    partials: false,
 
-    async listen(locale) {
+    async listen(opts = {}) {
+      const { locale } = opts;
       if (!apiKey) throw new Error("Deepgram API key is not set (Settings → Speech and listening).");
-      const clip = await record((r) => (rec = r), undefined, deviceId);
+      const { clip, ms, levels } = await record(
+        (r) => (rec = r),
+        { deviceId, silenceMs: opts.silenceMs, onLevel: opts.onLevel },
+      );
       rec = null;
-      if (!clip.size) return "";
+      if (!clip.size) return { text: "", ms, levels };
 
       // WebKit's MediaRecorder hands back "audio/mp4;codecs=mp4a.40.2"; Deepgram
       // sniffs the container itself but chokes on the codecs parameter, so send
@@ -495,7 +695,7 @@ export function deepgram(apiKey: string, deviceId = ""): Stt {
       if (!res.ok && baseLang(wanted) !== wanted) res = await transcribe(baseLang(wanted));
       if (!res.ok) throw new Error(`Deepgram ${res.status}: ${await res.text()}`);
       const data = await res.json();
-      return data.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";
+      return { text: data.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "", ms, levels };
     },
 
     cancel() {
@@ -726,6 +926,9 @@ export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void =
   return {
     canSpeak: tts.canSpeak,
     canListen: stt.canListen,
+    // Whether the serving STT tier can stream partials — the composer reads it
+    // to decide what the line under the box says.
+    partials: stt.partials,
 
     async speak(text, opts) {
       if (tts !== web && !ttsDead) {
@@ -748,10 +951,10 @@ export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void =
       await web.speak(text, opts);
     },
 
-    async listen(locale) {
+    async listen(opts) {
       if (stt !== web && !sttDead) {
         try {
-          return await stt.listen(locale);
+          return await stt.listen(opts);
         } catch (e) {
           // No webview ships a recogniser, so there is often nothing to fall back
           // *to*: say what actually broke rather than "no speech recognition".
@@ -767,7 +970,7 @@ export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void =
           }
         }
       }
-      return await web.listen(locale);
+      return await web.listen(opts);
     },
 
     cancel() {
