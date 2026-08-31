@@ -146,12 +146,11 @@ export default function Passage({
           <div className="eyebrow" style={{ fontSize: 10, marginBottom: 8 }}>
             Sentence {focusIdx + 1} of {text.sentences.length}
           </div>
+          {/* invariant 25: a note lives in the margin rail, never here. This bar
+              keeps only what the margin lacks — the counter and the translation.
+              Focusing a sentence highlights its note beside it; repeating it here
+              would show the same fact twice. */}
           {read.canBilingual && <div className="en">{focused.native}</div>}
-          {focused.note && (
-            <div className="nt">
-              <span style={{ color: "var(--accent-ink)" }}>✳</span> {focused.note}
-            </div>
-          )}
         </div>
       )}
 

@@ -11,6 +11,7 @@ import Prompter from "./read/Prompter";
 import ReadingCheck from "./read/ReadingCheck";
 import { readSignals } from "../lib/signals";
 import { dependencyMet, dependencyNote } from "../lib/learn";
+import { Generating, Nothing, Failed } from "./States";
 
 /**
  * The reading screen: one passage, two ways to work it.
@@ -113,31 +114,41 @@ export default function Read({
   if (!read.text)
     return (
       <>
+        {day.plan && dependencyNote(day.plan, day.done, "read") && (
+          <div className="dep-note">{dependencyNote(day.plan, day.done, "read")}</div>
+        )}
         <div className="empty fade">
-          {day.plan && dependencyNote(day.plan, day.done, "read") && (
-            <div className="dep-note">{dependencyNote(day.plan, day.done, "read")}</div>
+          {/* surface read: loading */}
+          {read.busy && (
+            <Generating
+              what={`Writing you a ${levelOf(settings.profile)} story…`}
+              eta="About 20 seconds on this model — it keeps words from your conversations warm."
+            />
           )}
-          <h2>{read.busy ? "Writing you a passage…" : "Nothing to read yet."}</h2>
-          <p>
-            {read.busy
-              ? `A ${levelOf(settings.profile)} story about ${read.ask.topic || day.plan?.theme || "everyday life"}, in ${settings.profile.targetLanguage}.`
-              : "The coach writes a story at your level that reuses the words from your conversations."}
-          </p>
+
+          {/* surface read: empty */}
+          {!read.busy && !read.error && (
+            <Nothing
+              why="The coach writes a story at your level that reuses the words from your conversations."
+              action={{ label: `Today's passage — ${day.plan?.theme ?? "everyday life"}`, onClick: () => void generate({}) }}
+            />
+          )}
+
+          {/* surface read: error */}
+          {!read.busy && read.error && (
+            <Failed say={read.error} retry={{ label: "Try again", onClick: () => void generate({}) }} />
+          )}
+
           {!read.busy && (
-            <>
-              <button className="btn" onClick={() => void generate({})}>
-                Today's passage — {day.plan?.theme ?? "everyday life"} →
-              </button>
-              <button
-                className="link"
-                title="Off-plan: a passage that is not part of today"
-                onClick={() => setAsking(true)}
-              >
-                Something else
-              </button>
-            </>
+            <button
+              className="link"
+              title="Off-plan: a passage that is not part of today"
+              onClick={() => setAsking(true)}
+            >
+              Something else
+            </button>
           )}
-          {read.error && <div className="err" style={{ maxWidth: 520, margin: "20px auto 0" }}>{read.error}</div>}
+
           {!read.busy && read.library.length > 0 && (() => {
             // The chip row only offers levels the library actually has, in CEFR order.
             const levels = CEFR_LEVELS.filter((l) => read.library.some((r) => r.cefr === l));

@@ -147,17 +147,17 @@ const LEDGER: Row[] = [
   {
     id: 23,
     claim: "Ekranda ilan edilen kısayol sayısı === çalışan kısayol sayısı.",
-    pending: "M1+ (Arayüz)",
+    assertedIn: [{ file: "src/lib/keys.check.ts", marker: "invariant 23" }],
   },
   {
     id: 24,
     claim: '`Esc` her yüzeyde "bir seviye yukarı" anlamındadır.',
-    pending: "M1+ (Arayüz)",
+    assertedIn: [{ file: "src/lib/keys.check.ts", marker: "invariant 24" }],
   },
   {
     id: 25,
     claim: "Aynı bilgi aynı anda iki yerde gösterilmez.",
-    pending: "M1+ (Arayüz)",
+    assertedIn: [{ file: "src/lib/surfaces.check.ts", marker: "invariant 25" }],
   },
   {
     id: 26,
@@ -167,7 +167,7 @@ const LEDGER: Row[] = [
   {
     id: 27,
     claim: "Her yüzey dört durumu (yükleniyor / boş / hata / bozuk içerik) uygular.",
-    pending: "M1+ (Arayüz)",
+    assertedIn: [{ file: "src/lib/surfaces.check.ts", marker: "invariant 27" }],
   },
 ];
 

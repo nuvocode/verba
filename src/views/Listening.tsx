@@ -1,11 +1,11 @@
 import type { Settings } from "../lib/settings";
-import { levelOf } from "../lib/model";
 import type { ActivityKind, SignalDraft } from "../lib/model";
 import type { Day } from "../lib/useDay";
 import { listenSignals } from "../lib/signals";
 import type { Listening as ListeningState } from "../lib/useListening";
 import QuestionCard from "./QuestionCard";
 import Hints from "./Hints";
+import { Generating, Nothing, Failed } from "./States";
 
 /**
  * The listening screen: a chaptered story you hear, not read, with a comprehension
@@ -31,21 +31,31 @@ export default function Listening({
   const block = day.plan?.activities.find((b) => b.kind === "listen");
   const start = () => void listening.generate({ interests: day.plan?.theme, goal: block?.goal });
 
+  // The four content states (§3.2): loading renders Generating (status names the
+  // chapter), an absent piece renders Nothing, a failed generation renders Failed.
+  // The four content states (§3.2): loading renders Generating (status names the
+  // chapter), an absent piece renders Nothing, a failed generation renders Failed.
   if (!listening.piece)
     return (
       <div className="empty fade">
-        <h2>{listening.busy ? listening.status || "Writing you a story…" : "Nothing to listen to yet."}</h2>
-        <p>
-          {listening.busy
-            ? `A short ${levelOf(settings.profile)} story in ${settings.profile.targetLanguage}, in chapters — you'll hear each one, then answer what you caught.`
-            : "The coach writes a short story in chapters. You hear each chapter, then answer a couple of questions about what mattered."}
-        </p>
-        {!listening.busy && (
-          <button className="btn" onClick={start}>
-            Generate a story →
-          </button>
+        {/* surface listen: loading */}
+        {listening.busy && (
+          <Generating
+            what="Writing you a story…"
+            eta="Three or four short chapters, each one a couple of sentences you'll hear twice."
+            step={listening.status || undefined}
+          />
         )}
-        {listening.error && <div className="err" style={{ maxWidth: 520, margin: "20px auto 0" }}>{listening.error}</div>}
+
+        {!listening.busy && listening.error && (
+          /* surface listen: error */
+          <Failed say={listening.error} retry={{ label: "Try again", onClick: start }} />
+        )}
+
+        {!listening.busy && !listening.error && (
+          /* surface listen: empty */
+          <Nothing why="The coach writes a short story in chapters. You hear each chapter, then answer a couple of questions about what mattered." action={{ label: "Generate a story", onClick: start }} />
+        )}
       </div>
     );
 

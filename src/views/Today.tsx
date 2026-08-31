@@ -17,6 +17,7 @@ import { timeName } from "../lib/choices";
 import { headerDate } from "../lib/fmt";
 import { AT } from "../lib/rules";
 import Hints from "./Hints";
+import { Generating, Nothing, Failed, Unusable } from "./States";
 
 function greeting(h = new Date().getHours()): string {
   if (h < 12) return "Good morning";
@@ -67,22 +68,16 @@ function ModelWarning({ settings }: { settings: Settings }) {
   const why = modelTrouble(settings, served);
   if (!why) return null;
 
+  // surface today: unusable — the model the plan is built on is unreachable, so
+  // today's generated content can't be trusted. The learner sees why and the way
+  // out, never a plan that silently can't be made.
   return (
-    <div
-      className="lede"
-      style={{ maxWidth: 640, marginBottom: 34, padding: "14px 16px", background: "var(--surface)", borderLeft: "2px solid var(--sev)" }}
-    >
-      <div>
-        <p style={{ fontSize: 16 }}>{why}</p>
-        <div style={{ display: "flex", gap: 18, marginTop: 10, fontSize: 13 }}>
-          <a href={AT.advanced} style={{ color: "var(--accent-ink)" }}>
-            Test the connection
-          </a>
-          <a href={AT.advanced} style={{ color: "var(--accent-ink)" }}>
-            Choose another model
-          </a>
-        </div>
-      </div>
+    <div className="empty fade" style={{ textAlign: "left", padding: "0 0 24px" }}>
+      <Unusable
+        what={why}
+        regenerate={{ label: "Test the connection", onClick: () => window.location.assign(AT.advanced) }}
+        fallback={{ label: "Choose another model", onClick: () => window.location.assign(AT.advanced) }}
+      />
     </div>
   );
 }
@@ -99,15 +94,17 @@ export default function Today({
   /** Where yesterday's trace goes — the record of what happened lives in Coach. */
   onOpen: (space: "coach") => void;
 }) {
+  // surface today: loading — the day's plan is the thing Today generates; this is
+  // the "being built" state.
   if (!day.plan)
     return (
       <div className="today fade">
-        <div className="eyebrow">{day.loading ? "Planning your day…" : "Building a plan…"}</div>
-        <p className="sub">
-          {day.loading
-            ? "Reading what you did last time and what is due today. A few seconds."
-            : "One moment — if this stays here, open Settings and check your model."}
-        </p>
+        <div className="empty fade">
+          <Generating
+            what={day.loading ? "Planning your day…" : "Building a plan…"}
+            eta={day.loading ? "Reading what you did last time and what is due today — a few seconds" : "One moment — if this stays here, open Settings and check your model"}
+          />
+        </div>
       </div>
     );
 
@@ -127,11 +124,16 @@ export default function Today({
 
       <ModelWarning settings={settings} />
 
-      {/* §2.1: a plan built without the day's inputs is named as such, never
-          presented as the real thing. Reuses the .dep-note class PLAN-012 added —
-          a plan built from nothing and an activity opened out of order are the
-          same kind of notice. */}
-      {day.planSource === "fallback" && <div className="dep-note">{fallbackNote(plan)}</div>}
+      {/* surface today: error — the plan failed to build from history, so this is
+          a general day; the learner is told what they are looking at instead. */}
+      {day.planSource === "fallback" && (
+        <div className="empty fade" style={{ textAlign: "left", padding: "0 0 24px" }}>
+          <Failed
+            say={fallbackNote(plan)}
+            retry={{ label: "Rebuild on another topic", onClick: () => void day.changeTopic() }}
+          />
+        </div>
+      )}
 
       {/* The "your plan is ready" screen, demoted to a line you can open when you
           want it (§5, screen 5). Closed by default — the whole of the folding. */}
@@ -252,28 +254,22 @@ export default function Today({
         })}
       </div>
 
-      {/* §2.1: a finished day shows the summary and a preview of tomorrow. The
-          recap below is the model's sentence about the day; this is the app's.
-          The preview is the real plan for the next date, not a description of
-          one — so the line and the day the learner wakes up to cannot disagree.
-          buildDailyPlan is pure and cheap, so it is built inline rather than
-          memoised (a hook here would sit after the early return above). */}
+      {/* surface today: empty — a finished day has nothing left to generate. The
+          summary and tomorrow's preview stand in place of a to-do list, so the
+          screen is empty of *work*, not of information. */}
       {finished && (
-        <div className="lede" style={{ marginTop: 40, maxWidth: 640 }}>
-          <div className="bullet" />
-          <div>
-            <p>{daySummary(plan, day.weaknesses)}</p>
-            <p style={{ fontSize: 14, color: "var(--ink3)", marginTop: 10 }}>
-              {tomorrowPreview(
-                buildDailyPlan(settings, {
-                  date: todayKey(new Date(Date.now() + 24 * 60 * 60 * 1000)),
-                  dayIndex: plan.dayIndex + 1,
-                  dueVocab: day.due,
-                  weaknesses: day.weaknesses,
-                }),
-              )}
-            </p>
-          </div>
+        <div className="empty fade" style={{ textAlign: "left", marginTop: 32, padding: "28px 0 0", borderTop: "1px solid var(--line)" }}>
+          <Nothing
+            title="That's today done."
+            why={`${daySummary(plan, day.weaknesses)} ${tomorrowPreview(
+              buildDailyPlan(settings, {
+                date: todayKey(new Date(Date.now() + 24 * 60 * 60 * 1000)),
+                dayIndex: plan.dayIndex + 1,
+                dueVocab: day.due,
+                weaknesses: day.weaknesses,
+              }),
+            )}`}
+          />
         </div>
       )}
 

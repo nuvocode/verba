@@ -10,6 +10,7 @@ import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
 import { when } from "../lib/fmt";
 import Face from "./talk/Face";
 import Hints from "./Hints";
+import { Generating, Nothing, Failed } from "./States";
 
 // Where the reflection sends them, named by what the plan has next. The wording is the
 // day's, not this screen's — Talk never decides that reading (or anything) comes after.
@@ -118,13 +119,16 @@ export default function Talk({
     return (
       <div className="today fade">
         <div className="eyebrow">Talk · {settings.profile.targetLanguage}</div>
-        <h1 className="display" style={{ fontSize: 40, margin: "12px 0 10px" }}>
-          What are we practising?
-        </h1>
-        <p style={{ fontSize: 14, color: "var(--ink2)", maxWidth: 560, lineHeight: 1.6, marginBottom: 40 }}>
-          The coach plays the other side. Speak or type — corrections are collected as you go and handed back at the
-          end, so you never lose the thread mid-sentence.
-        </p>
+        {/* surface talk: empty — the picker *is* the empty state. It says what it
+            is in `Nothing`'s own headline and then offers the grid below. */}
+        <Nothing
+          title="What are we practising?"
+          why="The coach plays the other side. Pick a scenario — speak or type, and corrections are collected as you go and handed back at the end."
+        />
+        {talk.error && (
+          /* surface talk: error */
+          <Failed say={talk.error} retry={{ label: "Try again", onClick: () => talk.scenarios[0] && void talk.start(talk.scenarios[0]) }} />
+        )}
         <div className="grid3">
           {talk.scenarios.map((sc) => (
             <button key={sc.id} className="pick" onClick={() => void talk.start(sc)}>
@@ -135,7 +139,6 @@ export default function Talk({
             </button>
           ))}
         </div>
-        {talk.error && <div className="err">{talk.error}</div>}
 
         {past.length > 0 && (
           <>
@@ -171,11 +174,21 @@ export default function Talk({
     return (
       <div className="refl">
         <div className="eyebrow">Reflection · {talk.scenario?.title}</div>
-        <h1 className="display">{talk.busy ? "Looking back…" : "That went well."}</h1>
+        {/* surface talk: loading — the summary is content the model is still
+            writing; it gets Generating's shape until the reflection lands. */}
+        {!r && talk.busy && (
+          <Generating
+            what="Looking back…"
+            eta="About 10 seconds — it is capturing your vocabulary and writing your summary."
+          />
+        )}
 
-        {talk.error && <div className="err">{talk.error}</div>}
+        {!r && !talk.busy && <h1 className="display">That went well.</h1>}
 
-        {!r && talk.busy && <p style={{ color: "var(--ink3)" }}>Capturing vocabulary and writing your summary…</p>}
+        {talk.error && (
+          /* surface talk: error */
+          <Failed say={talk.error} retry={{ label: "Keep the conversation", onClick: talk.exitReflection }} />
+        )}
 
         {r && (
           <>

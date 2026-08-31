@@ -7,9 +7,10 @@ import { getPack } from "../lib/packs";
 import { CEFR_LEVELS } from "../lib/level";
 import { levelOf, levelGapNote, progressionSuggested, MIN_WEAKNESS_EVIDENCE, type Signal } from "../lib/model";
 import { addressed, weaknessCard } from "../lib/weakness";
-import { coachPanel, measured, headline, wins, daySeries, type Metric, type MetricPair } from "../lib/coachmetrics";
+import { coachPanel, measured, wins, daySeries, type Metric, type MetricPair } from "../lib/coachmetrics";
 import { recentMemories, recentMetricScores, weekStats, signalsSince } from "../lib/db";
 import { absolute, humanError } from "../lib/fmt";
+import { Generating, Nothing, Failed, Unusable } from "./States";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -29,12 +30,18 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
   const [trend, setTrend] = useState<number[]>([]);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  // A reply that came back with no usable report — the `Unusable` state. Distinct
+  // from `report === null` while loading, and from `error` (a thrown fetch).
+  const [broken, setBroken] = useState(false);
+  // Bumping this re-runs the report effect — the regeneration `Unusable` offers.
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     let live = true;
     (async () => {
       setBusy(true);
       setError("");
+      setBroken(false);
       try {
         const since = Date.now() - WEEK_MS;
         const [stats, scores, memories] = await Promise.all([
@@ -67,7 +74,13 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
           ],
           { json: true },
         );
-        if (live) setReport(parseWeeklyReport(raw));
+        const parsed = parseWeeklyReport(raw);
+        if (live) {
+          setReport(parsed);
+          // A reply with no usable report is broken content, not a failure — the
+          // measured grid stands, and the report slot offers regeneration.
+          setBroken(parsed === null);
+        }
       } catch (e: unknown) {
         if (live) {
           const { say, log } = humanError(e);
@@ -81,7 +94,7 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
     return () => {
       live = false;
     };
-  }, [settings.profile.targetLanguage, settings.provider, day.plan]);
+  }, [settings.profile.targetLanguage, settings.provider, day.plan, tick]);
 
   const bandIdx = Math.max(0, CEFR_LEVELS.indexOf(day.levelEstimate.label));
   // Position on the A1→C2 rail: the band itself, plus how far through it the
@@ -125,14 +138,50 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
       <div className="eyebrow">
         Coach · {weekRange()} · {settings.profile.targetLanguage}
       </div>
-      <h1 className="display">{busy ? "Reading your week…" : headline(panel)}</h1>
+      {/* The heading is the measured week's headline; the report slot below carries
+          the four content states the report (the one generated thing) owes. */}
 
-      {error && <div className="err">{error}</div>}
+      {/* surface coach: loading — the written report is the one AI call here, and
+          it is what `busy` waits on; the measured numbers below are already up. */}
+      {busy && !report && (
+        <div className="empty fade" style={{ textAlign: "left", padding: "24px 0" }}>
+          <Generating what="Reading your week…" eta="About 15 seconds — it is writing your weekly report." />
+        </div>
+      )}
 
-      {report?.report && (
+      {/* surface coach: error — the report call itself failed; the grid still stands. */}
+      {!busy && error && (
+        <div className="empty fade" style={{ textAlign: "left", padding: "24px 0" }}>
+          <Failed
+            say={error}
+            retry={{ label: "Try again", onClick: () => setTick((n) => n + 1) }}
+          />
+        </div>
+      )}
+
+      {/* A parsed report is the success state — its sentence stands in the lede. */}
+      {!busy && !error && report?.report && (
         <div className="lede" style={{ maxWidth: 640, marginBottom: 48 }}>
           <div className="bullet" />
           <p style={{ fontSize: 18, fontStyle: "italic", lineHeight: 1.6 }}>{report.report}</p>
+        </div>
+      )}
+
+      {/* surface coach: empty — no usable report and nothing failed; the week is
+          simply too quiet to write about, so the grid below is the substance. */}
+      {!busy && !error && !broken && !report && (
+        <div className="empty fade" style={{ textAlign: "left", padding: "24px 0" }}>
+          <Nothing why="Not enough of a week yet to write about. Practise a little and the numbers take shape." />
+        </div>
+      )}
+
+      {/* surface coach: unusable — a report reply that parsed to nothing. */}
+      {!busy && !error && broken && (
+        <div className="empty fade" style={{ textAlign: "left", padding: "24px 0" }}>
+          <Unusable
+            what="The weekly report came back empty."
+            regenerate={{ label: "Regenerate", onClick: () => setTick((n) => n + 1) }}
+          />
         </div>
       )}
 
