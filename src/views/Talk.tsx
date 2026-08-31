@@ -6,8 +6,9 @@ import type { Day } from "../lib/useDay";
 import type { Talk as TalkState } from "../lib/useTalk";
 import { talkSignals } from "../lib/signals";
 import { getPack } from "../lib/packs";
-import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
+import { sessionGroups, sessionMessages, type SessionDay, type SessionRow } from "../lib/db";
 import { when } from "../lib/fmt";
+import type { CorrectionCategory } from "../lib/prompts";
 import {
   bandSplit,
   duplicateScenario,
@@ -18,8 +19,19 @@ import {
 } from "../lib/scenarios";
 import Face from "./talk/Face";
 import Hints from "./Hints";
-import { Generating, Nothing, Failed } from "./States";
+import { Generating, Nothing, Failed, Unusable } from "./States";
 import { linkish } from "./settings/parts";
+
+// The reflection groups corrections by category, in this fixed order, with a
+// count per group. An empty group is not rendered. The set is Talk's own schema
+// (PLAN-020) — Read defines its own and the two never share a type.
+const CORRECTION_GROUPS: { category: CorrectionCategory; label: string }[] = [
+  { category: "grammar", label: "Grammar" },
+  { category: "vocabulary", label: "Vocabulary" },
+  { category: "wordOrder", label: "Word order" },
+  { category: "register", label: "Register" },
+  { category: "pronunciation", label: "Pronunciation" },
+];
 
 // Where the reflection sends them, named by what the plan has next. The wording is the
 // day's, not this screen's — Talk never decides that reading (or anything) comes after.
@@ -46,8 +58,9 @@ export default function Talk({
 }) {
   const scroll = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [past, setPast] = useState<SessionRow[]>([]);
+  const [past, setPast] = useState<SessionDay[]>([]);
   const [open, setOpen] = useState<SessionRow | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [transcript, setTranscript] = useState<{ role: string; content: string }[]>([]);
   // The inline edit panel over the picker grid — the same pattern Settings uses,
   // no route, no modal library. `editing` is the scenario being edited; null is
@@ -58,7 +71,7 @@ export default function Talk({
 
   // The picker is also the archive — reload it whenever we come back to it.
   useEffect(() => {
-    if (!talk.started) void listSessions().then(setPast).catch(() => {});
+    if (!talk.started) void sessionGroups().then(setPast).catch(() => {});
   }, [talk.started, talk.reflection]);
 
   useEffect(() => {
@@ -257,22 +270,70 @@ export default function Talk({
               Past conversations
             </div>
             <div className="spine">
-              {past.map((s) => {
-                const sc = talk.scenarioById(s.scenario);
-                return (
-                  <button className="spine-item" key={s.id} onClick={() => setOpen(s)}>
-                    <div style={{ flex: 1 }}>
-                      {/* Sessions from before titles existed — and any whose title call
-                          failed — still answer to their scenario's name. */}
-                      <div className="title">
-                        {sc.emoji} {s.title || sc.title}
+              {past.map((day) => (
+                <div key={day.day} style={{ marginBottom: 8 }}>
+                  <div className="meta" style={{ fontSize: 12, color: "var(--ink3)", margin: "10px 0 4px" }}>
+                    {when(day.at)}
+                  </div>
+                  {day.groups.map((g) => {
+                    const sc = talk.scenarioById(g.scenarioId);
+                    const key = `${day.day}:${g.scenarioId}`;
+                    const isOpen = expanded.has(key);
+                    return (
+                      <div key={key}>
+                        <button
+                          className="spine-item"
+                          onClick={() => {
+                            if (g.count > 1) {
+                              setExpanded((s) => {
+                                const next = new Set(s);
+                                if (next.has(key)) next.delete(key);
+                                else next.add(key);
+                                return next;
+                              });
+                            } else {
+                              setOpen(g.sessions[0]);
+                            }
+                          }}
+                        >
+                          <div style={{ flex: 1 }}>
+                            <div className="title">
+                              {sc.emoji} {g.title}
+                              {g.count > 1 && <span style={{ color: "var(--ink3)", fontSize: 12 }}> · {g.count} sessions</span>}
+                            </div>
+                            <div className="meta">{g.sessions[0].summary ?? "no summary — ended early"}</div>
+                          </div>
+                          <div className="st">{when(g.lastAt)}</div>
+                        </button>
+                        {isOpen &&
+                          g.sessions.map((s) => (
+                            <div key={s.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0 4px 20px" }}>
+                              <button className="linky" style={{ fontSize: 13 }} onClick={() => setOpen(s)}>
+                                {when(s.started_at)}
+                              </button>
+                              <button className="linky" style={{ fontSize: 13 }} onClick={() => void talk.resume(s.id)}>
+                                Resume
+                              </button>
+                              <button className="linky" style={{ fontSize: 13 }} onClick={() => void talk.start(sc)}>
+                                Restart
+                              </button>
+                            </div>
+                          ))}
+                        {g.count === 1 && (
+                          <div style={{ display: "flex", gap: 8, padding: "4px 0 4px 20px" }}>
+                            <button className="linky" style={{ fontSize: 13 }} onClick={() => void talk.resume(g.sessions[0].id)}>
+                              Resume
+                            </button>
+                            <button className="linky" style={{ fontSize: 13 }} onClick={() => void talk.start(sc)}>
+                              Restart
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <div className="meta">{s.summary ?? "no summary — ended early"}</div>
-                    </div>
-                    <div className="st">{when(s.started_at)}</div>
-                  </button>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           </>
         )}
@@ -331,23 +392,65 @@ export default function Talk({
               )}
             </div>
 
+            {/* The goal scorecard (PLAN-017's goalState, rendered). Each goal, its
+                final state, and one line of total — a missed goal is stated, not
+                scolded (same copy gate as PLAN-019). */}
+            {talk.goalState.length > 0 && (
+              <>
+                <div className="eyebrow" style={{ marginBottom: 16 }}>
+                  Goals
+                </div>
+                <div style={{ marginBottom: 36 }}>
+                  {talk.goalState.map((st, i) => {
+                    const g = talk.scenario?.goals?.[i];
+                    if (!g) return null;
+                    const mark = st === "met" ? "✓" : st === "missed" ? "✗" : "○";
+                    return (
+                      <div className={`goal ${st}`} key={i}>
+                        <span className="mk">{mark}</span>
+                        <span>{g}</span>
+                      </div>
+                    );
+                  })}
+                  <div style={{ marginTop: 10, fontSize: 13, color: "var(--ink3)" }}>
+                    {talk.goalState.filter((s) => s === "met").length} of {talk.goalState.length} met
+                  </div>
+                </div>
+              </>
+            )}
+
             {r.corrections.length > 0 && (
               <>
                 <div className="eyebrow" style={{ marginBottom: 16 }}>
                   Worth revisiting
                 </div>
                 <div style={{ marginBottom: 36 }}>
-                  {r.corrections.map((c, i) => (
-                    <div className="fix-row" key={i}>
-                      <span className={`d ${c.severity === "severe" ? "severe" : ""}`} />
-                      <div style={{ flex: 1 }}>
-                        <div className="l">
-                          <s>{c.original}</s> → <b>{c.fixed}</b>
+                  {/* Corrections are grouped by category, in a fixed order, with a
+                      count per group. An empty group is not rendered — the count is
+                      the group's headline, so a learner sees what there is to work
+                      on and how much of it. */}
+                  {CORRECTION_GROUPS.map(({ category, label }) => {
+                    const group = r.corrections.filter((c) => c.category === category);
+                    if (group.length === 0) return null;
+                    return (
+                      <div key={category} style={{ marginBottom: 22 }}>
+                        <div className="meta" style={{ fontSize: 12, color: "var(--ink3)", margin: "0 0 8px" }}>
+                          {label} · {group.length}
                         </div>
-                        {c.note && <div className="n">{c.note}</div>}
+                        {group.map((c, i) => (
+                          <div className="fix-row" key={i}>
+                            <span className={`d ${c.severity === "severe" ? "severe" : ""}`} />
+                            <div style={{ flex: 1 }}>
+                              <div className="l">
+                                <s>{c.original}</s> → <b>{c.fixed}</b>
+                              </div>
+                              {c.note && <div className="n">{c.note}</div>}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             )}
@@ -355,9 +458,9 @@ export default function Talk({
             {r.words.length > 0 && (
               <>
                 <div className="eyebrow" style={{ marginBottom: 14 }}>
-                  Kept in memory · drop the ones you already know
+                  Words to keep · drop the ones you already know, then keep the rest
                 </div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 40 }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
                   {r.words.map((w) => (
                     <div className="wchip" key={w.term}>
                       {w.term} <span>— {w.translation}</span>
@@ -367,7 +470,24 @@ export default function Talk({
                     </div>
                   ))}
                 </div>
+                <button className="btn sm" onClick={() => void talk.keepWords(r.words.map((w) => w.term))}>
+                  Keep these {r.words.length} →
+                </button>
               </>
+            )}
+
+            {/* A failed summary renders Unusable (PLAN-020): the write-up didn't
+                come back, everything else is saved, and regenerate is offered. */}
+            {!r.summary && (
+              <div className="empty fade" style={{ textAlign: "left", marginBottom: 40 }}>
+                {/* surface talk: unusable — the reflection's summary came back
+                    unusable, so the write-up is turned away and regenerate is
+                    the way out. Everything else from the session is saved. */}
+                <Unusable
+                  what="The write-up didn't come back. Everything else from this session is saved."
+                  regenerate={{ label: "Try the write-up again", onClick: () => void talk.regenerateSummary() }}
+                />
+              </div>
             )}
 
             {r.summary && (

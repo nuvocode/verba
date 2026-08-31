@@ -12,6 +12,86 @@ const DAY = 86_400_000;
 /** Relative under 7 days; older dates fall to absolute. */
 const RELATIVE_WINDOW = 7 * DAY;
 
+// ---- history folding (PLAN-020) --------------------------------------------
+// The pure half of `sessionGroups` lives here, not in db.ts, so a check can hold
+// it without a database in the room. `SessionRow` is the shape db.ts already
+// returns; it is defined here and re-exported so db.ts does not import fmt's
+// sibling and fmt does not import db.
+
+/** One past conversation, as the history list reads it. */
+export interface SessionRow {
+  id: number;
+  scenario: string;
+  started_at: number;
+  summary: string | null;
+  /** Written by the coach. NULL on sessions that predate titles, or whose title call failed. */
+  title: string | null;
+}
+
+/** One scenario's runs on a single day, newest first. */
+export interface SessionGroup {
+  scenarioId: string;
+  title: string; // "Lead Engineer Interview"
+  count: number; // 3
+  lastAt: number;
+  sessions: SessionRow[]; // newest first
+}
+
+/** A day of history, folded by scenario. */
+export interface SessionDay {
+  day: string;
+  /** The day's local-midnight timestamp — what `when()` renders for the header. */
+  at: number;
+  groups: SessionGroup[];
+}
+
+/** The day a timestamp belongs to, in the learner's local calendar. */
+export interface DayKey {
+  key: string;
+  /** Local midnight of that day, as a timestamp. */
+  at: number;
+}
+
+/**
+ * Fold a flat list of session rows into per-day, per-scenario groups. Runs on
+ * different days never fold across days. `dayOf` maps a timestamp to its day
+ * key and the day's local-midnight timestamp — two sessions on the same local
+ * day, however far apart in time, fold into that one day.
+ */
+export function foldSessions(rows: SessionRow[], dayOf: (at: number) => DayKey): SessionDay[] {
+  const byDay = new Map<string, { at: number; rows: SessionRow[] }>();
+  for (const r of rows) {
+    const { key, at } = dayOf(r.started_at);
+    const entry = byDay.get(key) ?? { at, rows: [] };
+    entry.rows.push(r);
+    byDay.set(key, entry);
+  }
+  const days: SessionDay[] = [];
+  for (const [day, { at, rows: dayRows }] of byDay) {
+    const byScenario = new Map<string, SessionRow[]>();
+    for (const r of dayRows) {
+      const list = byScenario.get(r.scenario) ?? [];
+      list.push(r);
+      byScenario.set(r.scenario, list);
+    }
+    const groups: SessionGroup[] = [];
+    for (const [scenarioId, runs] of byScenario) {
+      runs.sort((a, b) => b.started_at - a.started_at); // newest first
+      groups.push({
+        scenarioId,
+        title: runs[0].title ?? scenarioId,
+        count: runs.length,
+        lastAt: runs[0].started_at,
+        sessions: runs,
+      });
+    }
+    groups.sort((a, b) => b.lastAt - a.lastAt);
+    days.push({ day, at, groups });
+  }
+  days.sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
+  return days;
+}
+
 /**
  * The learner's locale — the one the interface is in, never `targetLanguage`.
  * Coerced onto the short list of locales the interface actually speaks, so the

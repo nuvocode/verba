@@ -55,12 +55,24 @@ assert(Math.abs(withLatency.value - noLatency.value) <= 5, "null latencies do no
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const useTalk = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
 const talk = readFileSync(join(ROOT, "src/views/Talk.tsx"), "utf8");
+const face = readFileSync(join(ROOT, "src/views/talk/Face.tsx"), "utf8");
 
 // No `setConfidence(...)` call remains — confidence is derived, never assigned.
 assert(!/setConfidence\s*\(/.test(useTalk), "useTalk.ts must not assign confidence (no setConfidence)");
 // No numeric literal is handed to a confidence setter or state initialiser.
 assert(!/confidence\s*=\s*\d/.test(useTalk), "useTalk.ts must not seed confidence with a number");
 assert(!/useState\s*\(\s*\d+\s*\)\s*;\s*\/\/.*confidence/.test(useTalk), "no numeric confidence initialiser");
+// The face must not default confidence to a number either — `undefined` is the
+// only honest default until MEASURES_AT turns exist (invariant 26). A slipped
+// `confidence = 50` in Face.tsx would smile at a number that was never measured.
+assert(
+  !/confidence\s*=\s*\d/.test(face),
+  "Face.tsx must not default confidence to a number — undefined until measured",
+);
+assert(
+  !/confidence\s*:\s*number\s*=\s*\d/.test(face),
+  "Face.tsx must not type-and-default confidence to a number",
+);
 // The screen renders `—` on the null branch — and it must sit on that branch, not
 // anywhere in the file. Same window method as surfaces.check: find the confidence
 // ternary and look for the em-dash within a window after it, so a `—` pasted at

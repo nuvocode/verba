@@ -6,7 +6,7 @@
 import assert from "node:assert";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { when, absolute, headerDate, humanError, SayError, HUMAN_ERRORS } from "./fmt.ts";
+import { when, absolute, headerDate, humanError, SayError, HUMAN_ERRORS, foldSessions, type SessionRow } from "./fmt.ts";
 
 // Repo root derived from this file's own location (src/lib/fmt.check.ts).
 const ROOT = new URL("../../", import.meta.url);
@@ -137,6 +137,76 @@ assert(
   dateProblems.length === 0,
   "invariant 22 broken — a view formats a date by hand: " + dateProblems.join("; "),
 );
+
+// --- history folding (PLAN-020) ----------------------------------------------
+// The pure helper is held here without a database in the room: three interview
+// runs on one day fold to one group of 3, and runs on different days never fold
+// across days.
+const srow = (id: number, scenario: string, started_at: number, title: string | null = null): SessionRow => ({
+  id,
+  scenario,
+  started_at,
+  summary: null,
+  title,
+});
+// The day key is the learner's local calendar, not UTC — the same rule
+// sessionGroups() uses. `at` is that day's local midnight.
+const dayOf = (d: string) => (at: number) => {
+  const dt = new Date(at);
+  return {
+    key: `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`,
+    at: new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime(),
+  };
+};
+
+// Three interview runs on one day fold to one group of 3.
+const sameDay = [
+  srow(1, "interview", 1_700_000_000_000, "Lead Engineer Interview"),
+  srow(2, "interview", 1_700_000_100_000, "Lead Engineer Interview"),
+  srow(3, "interview", 1_700_000_200_000, "Lead Engineer Interview"),
+];
+const folded = foldSessions(sameDay, dayOf("2026-08-31"));
+assert.equal(folded.length, 1, "one day → one day group");
+assert.equal(folded[0].groups.length, 1, "one scenario → one group");
+assert.equal(folded[0].groups[0].count, 3, "three runs fold to a group of 3");
+assert.equal(folded[0].groups[0].sessions.length, 3, "the group carries all three runs");
+assert.equal(folded[0].groups[0].sessions[0].id, 3, "the group is newest first");
+// The day carries its local-midnight timestamp, so the header renders through when().
+{
+  const first = new Date(sameDay[0].started_at);
+  assert.equal(
+    folded[0].at,
+    new Date(first.getFullYear(), first.getMonth(), first.getDate()).getTime(),
+    "the day's `at` is its local midnight",
+  );
+}
+
+// Two sessions on the same local day fold together even when the clock says
+// they are on different UTC dates — the day is the learner's, not UTC's.
+const localDay = [
+  srow(1, "interview", new Date(2026, 7, 31, 23, 30).getTime(), "Lead Engineer Interview"),
+  srow(2, "interview", new Date(2026, 7, 31, 0, 30).getTime(), "Lead Engineer Interview"),
+];
+const foldedLocal = foldSessions(localDay, dayOf("2026-08-31"));
+assert.equal(foldedLocal.length, 1, "two sessions on the same local day fold to one day");
+assert.equal(foldedLocal[0].groups[0].count, 2, "…and to one group of 2");
+
+// Runs on different days do not fold across days.
+const twoDays = [
+  srow(1, "interview", 1_700_000_000_000, "Lead Engineer Interview"),
+  srow(2, "interview", 1_700_000_000_000 + 86_400_000, "Lead Engineer Interview"),
+];
+const folded2 = foldSessions(twoDays, dayOf("2026-08-31"));
+assert.equal(folded2.length, 2, "two days → two day groups");
+assert.equal(folded2[0].groups[0].count, 1, "a run on its own day is a group of 1");
+
+// Two scenarios on one day stay separate groups.
+const twoScenarios = [
+  srow(1, "interview", 1_700_000_000_000, "Lead Engineer Interview"),
+  srow(2, "cafe", 1_700_000_100_000, "Ordering at a café"),
+];
+const folded3 = foldSessions(twoScenarios, dayOf("2026-08-31"));
+assert.equal(folded3[0].groups.length, 2, "two scenarios → two groups on the day");
 
 console.log("invariant 22 asserted: no raw model output, one formatter, on every surface");
 console.log("fmt.check OK");

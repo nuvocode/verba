@@ -35,7 +35,6 @@ const STATE_COMPONENT: Record<StateName, string> = {
 const ALLOWED_GENERATING_PENDINGS: Record<string, string> = {
   "read:unusable": "PLAN-022",
   "listen:unusable": "PLAN-026",
-  "talk:unusable": "PLAN-020",
 };
 
 // --- every row is well-formed -------------------------------------------------

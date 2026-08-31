@@ -40,7 +40,7 @@ export function buildSystem(
     `You MUST answer with ONLY a valid JSON object, no prose outside it, in this exact shape:`,
     `{`,
     `  "reply": "your natural conversational reply in ${s.profile.targetLanguage} (1-3 sentences)",`,
-    `  "corrections": [ { "original": "the learner's exact wording that was wrong", "fixed": "the corrected version", "note": "a short explanation written in ${s.profile.nativeLanguage}", "severity": "minor or severe" } ],`,
+    `  "corrections": [ { "original": "the learner's exact wording that was wrong", "fixed": "the corrected version", "note": "a short explanation written in ${s.profile.nativeLanguage}", "severity": "minor or severe", "category": "grammar | vocabulary | wordOrder | register | pronunciation" } ],`,
     `  "suggestions": [ "a short example reply the learner could send next, in ${s.profile.targetLanguage}", "another option" ],`,
     `  "goalsMet": [0, 2]`,
     `}`,
@@ -49,6 +49,7 @@ export function buildSystem(
     `- Do NOT correct the learner inside "reply". Put every correction only in the "corrections" array.`,
     `- Only add a correction for a real grammar, word-choice, or spelling mistake. If the learner's message was fine, return "corrections": [].`,
     `- "severity" is "severe" when the mistake breaks meaning or grammar rules, "minor" when it is understandable but unnatural.`,
+    `- "category" is which kind of mistake it is: grammar, vocabulary, wordOrder, register, or pronunciation. Pick the one that fits best.`,
     `- Give 2-3 "suggestions". Keep them natural and at the learner's level.`,
     `- "goalsMet" lists the index of every scenario goal the learner has JUST satisfied with their last message. An empty list is the normal answer. Never re-list a goal already met, and never credit a goal the learner only asked about.`,
     `- Never mention that you are returning JSON.`,
@@ -85,7 +86,25 @@ export interface Correction {
   fixed: string;
   note: string;
   severity: Severity;
+  /** Which kind of mistake this is — decided by the coach in the turn reply. */
+  category: CorrectionCategory;
 }
+
+/**
+ * The closed set of correction kinds. Talk's own schema — Read (PLAN-023) defines
+ * its own and the two never share a type (invariant 19). An unknown or missing
+ * category maps to "grammar" on parse: a wrong bucket is recoverable, an invented
+ * bucket per session is not.
+ */
+export type CorrectionCategory = "grammar" | "vocabulary" | "wordOrder" | "register" | "pronunciation";
+
+const CORRECTION_CATEGORIES: CorrectionCategory[] = [
+  "grammar",
+  "vocabulary",
+  "wordOrder",
+  "register",
+  "pronunciation",
+];
 
 export interface TurnResult {
   reply: string;
@@ -162,6 +181,9 @@ export function parseTurn(raw: string): TurnResult {
             // Unknown / missing severity is treated as minor: never escalate an
             // interruption the model didn't actually ask for.
             severity: c.severity === "severe" ? ("severe" as const) : ("minor" as const),
+            // Unknown / missing category maps to grammar — a wrong bucket is
+            // recoverable, an invented bucket per session is not.
+            category: CORRECTION_CATEGORIES.includes(c.category) ? c.category : ("grammar" as const),
           }))
       : [],
     suggestions: Array.isArray(obj?.suggestions)
@@ -233,6 +255,12 @@ export function summaryPrompt(s: Settings, pack?: LanguagePack): string {
     packGuidance(pack),
     `Answer with ONLY a JSON object: { "summary": "2-3 sentences on what was practised, written in ${s.profile.nativeLanguage}", "strengths": ["short point", ...], "focus": ["short thing to work on next", ...] }.`,
     `Base "strengths" and "focus" on the learner's actual messages. Keep each point under 12 words.`,
+    // One voice, across all history (PLAN-020 §2.2): the summary is a constraint,
+    // not a suggestion. Second person singular, past tense, one paragraph, no
+    // praise that is not tied to something in the transcript, never the learner's
+    // name. Old and new records must read alike.
+    `Write the "summary" in the second person singular ("you"), in the past tense, as one paragraph.`,
+    `Praise only what the transcript actually shows — never a general compliment, and never the learner's name.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -242,6 +270,25 @@ export interface SessionSummary {
   summary: string;
   strengths: string[];
   focus: string[];
+}
+
+/**
+ * `null` when the model did not return a usable summary. There is no fallback text.
+ *
+ * A failed summary writes nothing: the whole raw model reply must never become the
+ * summary (invariant 22). Returns `null` unless `obj.summary` is a string of ≥ 20
+ * characters that is not itself JSON-looking (no leading `{` or `[`).
+ */
+export function parseSummary(raw: string): SessionSummary | null {
+  const obj = extractJson(raw);
+  const s = typeof obj?.summary === "string" ? obj.summary.trim() : "";
+  if (s.length < 20) return null;
+  if (s.startsWith("{") || s.startsWith("[")) return null;
+  return {
+    summary: s,
+    strengths: Array.isArray(obj.strengths) ? obj.strengths.map(String) : [],
+    focus: Array.isArray(obj.focus) ? obj.focus.map(String) : [],
+  };
 }
 
 /**
@@ -276,15 +323,6 @@ export function parseTitle(raw: string): string {
   // prose is a failed call, and a failed call leaves the standing title alone.
   const bare = clean(raw ?? "");
   return !bare || bare.length > 60 ? "" : bare;
-}
-
-export function parseSummary(raw: string): SessionSummary {
-  const obj = extractJson(raw) ?? {};
-  return {
-    summary: typeof obj.summary === "string" ? obj.summary : raw.trim(),
-    strengths: Array.isArray(obj.strengths) ? obj.strengths.map(String) : [],
-    focus: Array.isArray(obj.focus) ? obj.focus.map(String) : [],
-  };
 }
 
 // ---- long-term memory: what the coach knows about the learner ----

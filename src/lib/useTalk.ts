@@ -31,6 +31,9 @@ import {
   addVocab,
   createSession,
   deleteVocabTerm,
+  getSession,
+  keepVocab,
+  sessionMessages,
   setSummary,
   setTitle,
   saveMemories,
@@ -270,6 +273,68 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     [settings, pack, say],
   );
 
+  /**
+   * Resume a past conversation: load its stored messages back into the session
+   * and keep writing to the same `sessions` row. The persona and the produced
+   * turns come back with it, so the reflection and confidence stay honest.
+   */
+  const resume = useCallback(
+    async (sessionIdToResume: number) => {
+      setError("");
+      setNotice("");
+      setReflecting(false);
+      setReflection(null);
+      setSuggestions([]);
+      setBusy(true);
+      try {
+        const rows = await sessionMessages(sessionIdToResume);
+        const sess = await getSession(sessionIdToResume);
+        const sc = listScenarios().find((s) => s.id === sess?.scenario) ?? BUNDLED_SCENARIOS.find((s) => s.id === "free")!;
+        setScenario(sc);
+        setPersona(sc.persona);
+        setGoalState((sc.goals ?? []).map(() => "pending" as const));
+        setMsgs(
+          rows.map((m) => ({
+            role: m.role === "user" ? "user" : "ai",
+            text: m.content,
+            corrections: [],
+            inline: false,
+          })),
+        );
+        // `produced` is deliberately left empty. It is rebuilt from the stored
+        // transcript, but which turn came from a suggestion is not stored — a
+        // resumed session would have to guess, and a guessed `fromSuggestion`
+        // would quietly poison confidence and the reflection. So a resumed
+        // session measures nothing it cannot recount: confidence starts over
+        // from the resumed point, and the reflection reports only the turns
+        // actually produced after resuming.
+        produced.current = [];
+        setProducedVersion((v) => v + 1);
+        voice.current = [];
+        sessionId.current = sessionIdToResume;
+        // The provider context is rebuilt from the stored transcript so the next
+        // turn continues the conversation rather than starting a new one.
+        const memories = await recentMemories(settings.profile.targetLanguage).catch(() => []);
+        history.current = [
+          { role: "system", content: buildSystem(settings, sc, sc.persona, pack, memories) },
+          ...rows.map((m) => ({
+            role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+            content: m.content,
+          })),
+        ];
+        titleStage.current = 2; // a resumed session is already named
+        coachReplyAt.current = null;
+      } catch (e: unknown) {
+        const { say: said, log } = humanError(e);
+        console.warn("[talk] resume failed:", log);
+        setError(said);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [settings, pack],
+  );
+
   const send = useCallback(
     async (text: string, fromSuggestion = false) => {
       const msg = text.trim();
@@ -413,7 +478,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     const userTexts = msgs.filter((m) => m.role === "user" && !m.isAsk).map((m) => m.text);
     const corrections = msgs.flatMap((m) => m.corrections);
     const words: { term: string; translation: string }[] = [];
-    let summary: SessionSummary = { summary: "", strengths: [], focus: [] };
+    // `null` when the summary call came back unusable — the DB row keeps NULL and
+    // the reflection renders Unusable (PLAN-020). No fallback text, ever.
+    let summary: SessionSummary | null = null;
 
     try {
       const provider = getProvider(settings);
@@ -425,12 +492,14 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       // only those can be dropped in the wrap-up: a term already in the deck carries
       // review history that a stray tap has no business erasing. `addVocab` is also
       // where the capture gate lives, so anything that isn't vocabulary never counts.
+      // Words land as *candidates* (PLAN-020) — nothing enters the deck until the
+      // learner presses "Keep these N".
       for (const it of parseVocab(vocabRaw)) {
         const added = await addVocab(settings.profile.targetLanguage, it, {
           capturedBy: "coach",
           surface: "talk",
           learnerLevel: levelOf(settings.profile),
-        }).catch(() => false);
+        }, "candidate").catch(() => false);
         if (added) words.push({ term: it.term, translation: it.translation });
       }
 
@@ -439,7 +508,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         { json: true },
       );
       summary = parseSummary(sumRaw);
-      if (sessionId.current) await setSummary(sessionId.current, summary.summary).catch(() => {});
+      // A failed summary writes nothing — `sessions.summary` stays NULL (invariant
+      // 22). The reflection renders Unusable and offers a regenerate.
+      if (summary && sessionId.current) await setSummary(sessionId.current, summary.summary).catch(() => {});
 
       // What the learner told us about themselves. Best-effort like the rest of the
       // wrap-up: a coach that fails to take a note is a coach that took no note, not
@@ -483,7 +554,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     // missed, and the reflection's scorecard reads it that way.
     setGoalState((gs) => gs.map((g) => (g === "pending" ? "missed" : g)));
     setReflection({
-      ...summary,
+      ...(summary ?? { summary: "", strengths: [], focus: [] }),
       turns: userTexts.length,
       corrections,
       words,
@@ -507,6 +578,53 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     },
     [settings.profile.targetLanguage],
   );
+
+  /**
+   * Commit the wrap-up's captured candidates to the deck — the "Keep these N"
+   * press. Nothing enters the deck without it (PLAN-020).
+   */
+  const keepWords = useCallback(
+    async (terms: string[]) => {
+      for (const t of terms) await keepVocab(settings.profile.targetLanguage, t).catch(() => {});
+      setReflection((r) => (r ? { ...r, words: [] } : r));
+    },
+    [settings.profile.targetLanguage],
+  );
+
+  /**
+   * Re-run the summary call after a failed one — the reflection's regenerate.
+   * Only the summary is retried; the rest of the wrap-up already landed.
+   */
+  const regenerateSummary = useCallback(async () => {
+    if (!scenario) return;
+    setBusy(true);
+    setError("");
+    try {
+      const provider = getProvider(settings);
+      const sumRaw = await provider.chat(
+        [...history.current, { role: "user", content: summaryPrompt(settings, pack) }],
+        { json: true },
+      );
+      const summary = parseSummary(sumRaw);
+      if (summary && sessionId.current) await setSummary(sessionId.current, summary.summary).catch(() => {});
+      setReflection((r) =>
+        r
+          ? {
+              ...r,
+              summary: summary?.summary ?? "",
+              strengths: summary?.strengths ?? [],
+              focus: summary?.focus ?? [],
+            }
+          : r,
+      );
+    } catch (e: unknown) {
+      const { say: said, log } = humanError(e);
+      console.warn("[talk] regenerate summary failed:", log);
+      setError(said);
+    } finally {
+      setBusy(false);
+    }
+  }, [scenario, settings, pack]);
 
   /** ⌘K → "ask the coach": a side question, answered in the learner's own language. */
   const ask = useCallback(
@@ -571,13 +689,30 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     userTurns,
     started: !!scenario,
     start,
+    resume,
     send,
     mic,
     end,
     ask,
     /** Remove one of the wrap-up's captured words from the deck again. */
     dropWord,
-    exitReflection: () => setReflecting(false),
+    /** Commit the wrap-up's candidates to the deck — "Keep these N". */
+    keepWords,
+    /** Re-run the summary call after a failed one — the reflection's regenerate. */
+    regenerateSummary,
+    /**
+     * Close the reflection. Any captured word still sitting as a *candidate* is
+     * dropped — the learner never pressed "Keep these N", so nothing enters the
+     * deck. Words they did keep are already gone from `reflection.words` (keepWords
+     * empties it), so this only ever touches the un-kept candidates.
+     */
+    exitReflection: () => {
+      const pending = reflection?.words ?? [];
+      if (pending.length) {
+        for (const w of pending) void deleteVocabTerm(settings.profile.targetLanguage, w.term).catch(() => {});
+      }
+      setReflecting(false);
+    },
     reset: () => setScenario(null),
     /** The scenario a plan block points at, falling back to free conversation. */
     scenarioById: (id?: string) =>

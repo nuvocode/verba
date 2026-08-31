@@ -48,8 +48,8 @@ export const SURFACES: SurfaceRow[] = [
       empty: { file: "src/views/Talk.tsx", marker: "surface talk: empty" },
       error: { file: "src/views/Talk.tsx", marker: "surface talk: error" },
       // PLAN-020 owns the reflection-summary parse; a reflection that comes back
-      // unusable is where it will surface, not here.
-      unusable: { pending: "PLAN-020" },
+      // unusable is where it surfaces.
+      unusable: { file: "src/views/Talk.tsx", marker: "surface talk: unusable" },
     },
   },
   {
