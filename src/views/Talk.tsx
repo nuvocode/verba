@@ -45,6 +45,7 @@ export default function Talk({
   onAdvance: (kind: ActivityKind) => void;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [past, setPast] = useState<SessionRow[]>([]);
   const [open, setOpen] = useState<SessionRow | null>(null);
   const [transcript, setTranscript] = useState<{ role: string; content: string }[]>([]);
@@ -69,6 +70,20 @@ export default function Talk({
     // `streaming` is in here so a reply that outgrows the viewport as it arrives
     // keeps its last line in view, rather than scrolling once it has finished.
   }, [talk.msgs.length, talk.busy, talk.streaming]);
+
+  // The draft lands in the box focused, cursor at the end — the learner edits it
+  // in place rather than hunting for the caret. Fires when the final text drops
+  // (the mic leaves "recording"), not on every keystroke.
+  useEffect(() => {
+    if (talk.micPhase === "" && talk.input) {
+      inputRef.current?.focus();
+      const el = inputRef.current;
+      if (el) {
+        const end = el.value.length;
+        el.setSelectionRange(end, end);
+      }
+    }
+  }, [talk.micPhase, talk.input]);
 
   // Which of the day's talking blocks this conversation closes out. Matched on the scenario
   // actually being practised — the plan's role-play names one, the conversation block is
@@ -467,9 +482,15 @@ export default function Talk({
             <div className="bar">
               <div className="wrap">
                 <input
+                  ref={inputRef}
                   dir={talk.dir}
                   value={talk.input}
-                  onChange={(e) => talk.setInput(e.target.value)}
+                  onChange={(e) => {
+                    // Typing during a recording stops it — the learner is taking
+                    // the box back, and the mic must not fight for it.
+                    if (talk.micPhase === "recording") void talk.mic();
+                    talk.setInput(e.target.value);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void talk.send(talk.input);
                     // The composer is the whole screen — Esc ends the session rather than
@@ -482,9 +503,12 @@ export default function Talk({
                   placeholder={`Answer in ${settings.profile.targetLanguage}…`}
                   autoFocus
                 />
-                {talk.listening && (
+                {/* The transcribing box covers the input only while the clip is in
+                    flight. During recording the box stays open — the meter below is
+                    the recording's sign, and the learner can still see their draft. */}
+                {talk.micPhase === "transcribing" && (
                   <div className="listening">
-                    <em>{talk.micPhase === "transcribing" ? "Transcribing…" : "Listening… (click ◉ when done)"}</em>
+                    <em>Transcribing…</em>
                     <i />
                     <i />
                     <i />
@@ -510,8 +534,15 @@ export default function Talk({
                 {talk.busy ? "Sending…" : "Send"}
               </button>
             </div>
-            {/* The keyboard half comes from the one table; the mouse half — click ◉
-                to speak — is a pointer instruction, so it stays beside it (§5.4). */}
+            {/* The live level meter while the mic is open — the recording is real,
+                and the bar says so. It gets its own class (no width transition):
+                the confidence meter below eases its bar, but a live level meter
+                that lags behind the voice reads as a broken one. */}
+            {talk.micPhase === "recording" && (
+              <div className="meter live" style={{ margin: "8px auto 0", maxWidth: 640, height: 4 }}>
+                <div style={{ width: `${Math.round(talk.micLevel * 100)}%` }} />
+              </div>
+            )}
             <div style={{ maxWidth: 640, margin: "10px auto 0", fontSize: 11, color: "var(--ink3)" }}>
               <Hints
                 settings={settings}
@@ -521,7 +552,13 @@ export default function Talk({
               />
               {settings.showHints && (
                 <span style={{ marginLeft: 22 }}>
-                  or click <span style={{ fontFamily: "var(--mono)" }}>◉</span> to speak
+                  {talk.micPhase === "recording" && talk.partials ? (
+                    "speak — the text appears as you go"
+                  ) : (
+                    <>
+                      or click <span style={{ fontFamily: "var(--mono)" }}>◉</span> to speak
+                    </>
+                  )}
                 </span>
               )}
             </div>

@@ -218,6 +218,9 @@ input { font: inherit; }
 .conf i { font-style: normal; font-size: 12px; color: var(--good); }
 .meter { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .meter > div { height: 100%; background: var(--accent); border-radius: 2px; transition: width .4s; }
+/* The live recording meter: no width transition, so the bar tracks the voice
+   instead of lagging behind it. The confidence meter keeps the eased bar. */
+.meter.live > div { transition: none; }
 
 /* The coach's face. Mouth frames come from lib/voice.ts, driven by the audio;
    the breathing and the blink are the character's own. It sits at the top of the

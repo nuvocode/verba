@@ -485,7 +485,7 @@ function MicTest({ settings, onChange }: SectionProps) {
       return;
     }
 
-    const said = stt.listen(locale);
+    const said = stt.listen({ locale });
     stop.current = () => {
       stt.cancel();
       closeMeter();
@@ -493,7 +493,7 @@ function MicTest({ settings, onChange }: SectionProps) {
       stop.current = null;
     };
     try {
-      setHeard((await said).trim());
+      setHeard((await said).text.trim());
     } catch (e) {
       setTrouble(micTrouble(e));
     } finally {
