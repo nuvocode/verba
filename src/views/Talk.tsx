@@ -295,7 +295,11 @@ export default function Talk({
           />
         )}
 
-        {!r && !talk.busy && <h1 className="display">That went well.</h1>}
+        {!r && !talk.busy && (
+          <h1 className="display">
+            {talk.scenario?.title} · {when(Date.now())}
+          </h1>
+        )}
 
         {talk.error && (
           /* surface talk: error */
@@ -317,13 +321,14 @@ export default function Talk({
                 <b>{r.words.length}</b>
                 <span>words captured</span>
               </div>
-              <div>
-                <b>
-                  {talk.confidence}
-                  {talk.confDelta > 0 && <i style={{ fontSize: 15, color: "var(--good)" }}> +{talk.confDelta}</i>}
-                </b>
-                <span>confidence</span>
-              </div>
+              {/* PLAN-016's rule: a value that cannot be computed is not displayed.
+                  Confidence is null until MEASURES_AT turns exist — render nothing. */}
+              {talk.confidence && (
+                <div>
+                  <b>{talk.confidence.value}</b>
+                  <span>confidence</span>
+                </div>
+              )}
             </div>
 
             {r.corrections.length > 0 && (
@@ -576,7 +581,7 @@ export default function Talk({
             mic={talk.micPhase === "recording"}
             waiting={talk.busy}
             corrections={talk.msgs.reduce((n, m) => n + m.corrections.length, 0)}
-            confidence={talk.confidence}
+            confidence={talk.confidence?.value ?? 0}
             coachTurns={coachSaid.length}
             coachSaid={coachSaid[coachSaid.length - 1] ?? ""}
             personaEmoji={talk.persona?.emoji}
@@ -619,16 +624,28 @@ export default function Talk({
           )}
 
           <div className="lbl">Confidence</div>
-          <div className="conf">
-            <b>{talk.confidence}</b>
-            {talk.confDelta > 0 && <i>+{talk.confDelta}</i>}
-          </div>
-          <div className="meter" style={{ marginBottom: 8 }}>
-            <div style={{ width: `${talk.confidence}%` }} />
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--ink3)", lineHeight: 1.5 }}>
-            How steadily you're producing language without help. Not a score — a signal.
-          </div>
+          {talk.confidence ? (
+            <>
+              <div className="conf">
+                <b>{talk.confidence.value}</b>
+              </div>
+              <div className="meter" style={{ marginBottom: 8 }}>
+                <div style={{ width: `${talk.confidence.value}%` }} />
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--ink3)", lineHeight: 1.5 }}>
+                Your unprompted-production rate over {talk.confidence.turns} turns. A signal, not a score.
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="conf">
+                <b>—</b>
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--ink3)", lineHeight: 1.5 }}>
+                Measuring. Three turns in, this starts reporting.
+              </div>
+            </>
+          )}
 
           <button
             className="btn sm ghost"

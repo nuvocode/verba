@@ -162,7 +162,7 @@ const LEDGER: Row[] = [
   {
     id: 26,
     claim: "Ölçüm başlamadan hiçbir ölçüm değeri gösterilmez.",
-    pending: "M1+ (Arayüz)",
+    assertedIn: [{ file: "src/lib/confidence.check.ts", marker: "invariant 26" }],
   },
   {
     id: 27,

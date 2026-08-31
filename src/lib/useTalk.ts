@@ -24,6 +24,8 @@ import { getPack } from "./packs";
 import { computeMetrics, estimateLevelV2 } from "./metrics";
 import { getSpeech, listenBlocker } from "./speech";
 import { humanError } from "./fmt";
+import { words } from "./text";
+import { confidence as computeConfidence } from "./confidence";
 import {
   addMessage,
   addVocab,
@@ -59,6 +61,10 @@ export interface Reflection extends SessionSummary {
 export interface ProducedTurn {
   text: string;
   fromSuggestion: boolean;
+  /** Word count in the learner's own message — the length component of confidence. */
+  words: number;
+  /** Time from the coach's line landing to the send, in ms; null if unknown. */
+  latencyMs: number | null;
 }
 
 /** A spoken turn as the mic observed it: the transcript and the envelope. */
@@ -68,8 +74,6 @@ export interface VoiceTurn {
   levels: number[];
   locale: string;
 }
-
-const CONF_START = 50;
 
 /**
  * Messages exchanged before the coach re-names the conversation. By the fourth
@@ -122,7 +126,6 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   const [streaming, setStreaming] = useState("");
   const [reflecting, setReflecting] = useState(false);
   const [reflection, setReflection] = useState<Reflection | null>(null);
-  const [confidence, setConfidence] = useState(CONF_START);
   // The coach's identity for this session, resolved once at start. A TTS fallback
   // mid-session does not re-pick a voice — the persona holds (§2.2).
   const [persona, setPersona] = useState<Persona | null>(null);
@@ -135,12 +138,19 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   // What the learner produced, and whether it was theirs. `msgs` cannot answer the
   // second question — a picked suggestion and a typed sentence are the same bubble.
   const produced = useRef<ProducedTurn[]>([]);
+  // `produced` is a ref (it is read by the reflection without re-rendering), but
+  // confidence is derived from it and must re-render. A version counter bumps on
+  // every push so the memo below recomputes without turning the ref into state.
+  const [producedVersion, setProducedVersion] = useState(0);
   // What each spoken turn observed, beside what it said. Accumulated in `mic()`
   // and handed to the reflection, where `voiceSignals` turns it into signals.
   const voice = useRef<VoiceTurn[]>([]);
   // How far the session's title has got: 0 unnamed, 1 named off the opening,
   // 2 re-named once the subject settled. Not a rolling rewrite — 2 is the end.
   const titleStage = useRef<0 | 1 | 2>(0);
+  // When the coach's last reply finished rendering — the reference point for the
+  // next send's latency. null until the first reply has landed.
+  const coachReplyAt = useRef<number | null>(null);
   const pack = getPack(settings.packId);
   const speech = useMemo(
     () => getSpeech(settings, setNotice),
@@ -160,6 +170,11 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       settings.sttTier,
     ],
   );
+
+  // Confidence is the unprompted-production rate, derived from what was actually
+  // produced — never seeded. `null` until MEASURES_AT turns exist (invariant 26).
+  // The length component measures against the learner's own level.
+  const confidence = useMemo(() => computeConfidence(produced.current, levelOf(settings.profile)), [producedVersion]);
 
   const userTurns = msgs.filter((m) => m.role === "user" && !m.isAsk).length;
 
@@ -205,11 +220,12 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       setSuggestions([]);
       setReflecting(false);
       setReflection(null);
-      setConfidence(CONF_START);
       setError("");
       setNotice("");
       titleStage.current = 0;
+      coachReplyAt.current = null;
       produced.current = [];
+      setProducedVersion((v) => v + 1);
       voice.current = [];
       setBusy(true);
       // What earlier conversations left behind. It rides in the system prompt, so
@@ -264,7 +280,12 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       setSuggestions([]);
       const idx = msgs.length;
       setMsgs((m) => [...m, { role: "user", text: msg, corrections: [], inline: false }]);
-      produced.current.push({ text: msg, fromSuggestion });
+      // Latency is the time from the coach's line landing to this send. The
+      // coach's reply was stamped when it finished rendering; the first turn has
+      // no prior reply, so its latency is unknown.
+      const latencyMs = coachReplyAt.current ? performance.now() - coachReplyAt.current : null;
+      produced.current.push({ text: msg, fromSuggestion, words: words(msg, pack?.speech.locale ?? "en").length, latencyMs });
+      setProducedVersion((v) => v + 1);
       history.current.push({ role: "user", content: msg });
       if (sessionId.current) await addMessage(sessionId.current, "user", msg).catch(() => {});
 
@@ -278,6 +299,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         const turn = parseTurn(raw);
         history.current.push({ role: "assistant", content: turn.reply });
         if (sessionId.current) await addMessage(sessionId.current, "assistant", turn.reply).catch(() => {});
+        // The coach's reply has landed — stamp it so the next send can measure
+        // its latency against it.
+        coachReplyAt.current = performance.now();
 
         const worst = turn.corrections.find((c) => c.severity === "severe") ?? turn.corrections[0];
         // Dropped in the same commit the real message lands in — anywhere earlier
@@ -321,10 +345,6 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
           nameSession("settled");
         }
 
-        // Confidence tracks unaided, accurate production — a picked suggestion is
-        // worth less than a sentence the learner found on their own.
-        const gain = worst ? (worst.severity === "severe" ? 0 : 2) : fromSuggestion ? 1 : 4;
-        setConfidence((c) => Math.min(100, c + gain));
         say(turn.reply);
       } catch (e: unknown) {
         const { say: said, log } = humanError(e);
@@ -546,8 +566,8 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     notice,
     reflecting,
     reflection,
+    /** The unprompted-production rate, or null until MEASURES_AT turns exist. */
     confidence,
-    confDelta: confidence - CONF_START,
     userTurns,
     started: !!scenario,
     start,
