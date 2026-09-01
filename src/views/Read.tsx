@@ -9,7 +9,7 @@ import AskSheet from "./read/AskSheet";
 import Passage from "./read/Passage";
 import Prompter from "./read/Prompter";
 import ReadingCheck from "./read/ReadingCheck";
-import { readSignals } from "../lib/signals";
+import { readSignals, voiceSignals } from "../lib/signals";
 import { dependencyMet, dependencyNote } from "../lib/learn";
 import { Generating, Nothing, Failed, Unusable } from "./States";
 
@@ -31,6 +31,7 @@ export default function Read({
   onAdvance,
   onCaptureKeys,
   onChange,
+  onSettings,
 }: {
   settings: Settings;
   read: ReadState;
@@ -41,6 +42,8 @@ export default function Read({
   onCaptureKeys: (captured: boolean) => void;
   /** The chosen view and pace are settings: they are meant to outlive the passage. */
   onChange: (patch: Partial<Settings>) => void;
+  /** Leave for Settings — the one action that changes the mic state. */
+  onSettings: () => void;
 }) {
   const block = day.plan?.activities.find((b) => b.kind === "read");
   const [asking, setAsking] = useState(false);
@@ -87,7 +90,11 @@ export default function Read({
       .map((q, i) => ({ q, given: c!.answers[i] ?? "", correct: c!.results[i] }))
       .filter((x) => x.correct !== undefined)
       .map((x) => ({ prompt: x.q.prompt, given: x.given, answer: x.q.answer, qKind: x.q.kind, correct: x.correct! }));
-    return readSignals(block.id, graded, read.saved);
+    // The teleprompter's measurement (PLAN-024): the voice turn the prompter
+    // observed rides the same pace/pronunciation path PLAN-018 established, so
+    // Coach reads the read-aloud the same way it reads a spoken talk turn.
+    const voice = read.voice ? voiceSignals(block.id, read.voice) : [];
+    return [...readSignals(block.id, graded, read.saved), ...voice];
   };
 
   const setView = (view: ReadView) => onChange({ readView: view });
@@ -220,6 +227,7 @@ export default function Read({
           onView={setView}
           onWpm={(prompterWpm) => onChange({ prompterWpm })}
           onDone={finish}
+          onSettings={onSettings}
         />
         {sheet}
       </>

@@ -22,8 +22,10 @@ import {
   type PassageLength,
   type ReadingText,
 } from "./reading";
-import { coherence, reuse, level, type PassageOutcome, type CoherenceMarkers } from "./passage";
+import { coherence, reuse, level, type PassageOutcome } from "./passage";
 import { validateNotes, type ReadNote } from "./notes";
+import { compare, type AloudReport } from "./readaloud";
+import type { VoiceTurn } from "./useTalk";
 import { scoreAnswer, type Question } from "./questions";
 import { computeMetrics } from "./metrics";
 import { getPack } from "./packs";
@@ -93,6 +95,11 @@ export function useRead(settings: Settings) {
   const [notes, setNotes] = useState<ReadNote[]>([]);
   const [notesFailed, setNotesFailed] = useState(false);
   const [notesBusy, setNotesBusy] = useState(false);
+  // The teleprompter's measurement (PLAN-024): what the mic observed during a
+  // read-aloud run, and the report `compare` produced from it. Null until a run
+  // with the mic on finishes.
+  const [voice, setVoice] = useState<VoiceTurn | null>(null);
+  const [report, setReport] = useState<AloudReport | null>(null);
   // What they asked for last, so the sheet opens where they left it. Session-only:
   // a topic is a mood, not a setting, and it has no business surviving a restart.
   const [ask, setAsk] = useState<Ask>({ length: DEFAULT_LENGTH, topic: "" });
@@ -170,17 +177,14 @@ export function useRead(settings: Settings) {
       setNotes([]);
       setNotesFailed(false);
       setNotesBusy(false);
+      setReport(null);
+      setVoice(null);
       const provider = getProvider(settings);
       const locale = pack?.speech.locale ?? "en";
       // The pack's stopword list, or the empty set — the coherence gate's fallback
       // (every word is content) applies when a pack carries none. A short-word
       // language (Japanese, Chinese) must not have every sentence rejected as empty.
       const stopwords = new Set<string>(pack?.stopwords ?? []);
-      // The pack's discourse markers and pronouns, or none — the connection test
-      // is skipped when a pack has not written them down.
-      const markers = pack?.markers
-        ? { discourse: new Set(pack.markers.discourse), pronouns: new Set(pack.markers.pronouns) }
-        : undefined;
       // The pack's negation words, or none — the contradiction test is skipped
       // when a pack has not written them down.
       const negations = pack?.negations ? new Set(pack.negations) : undefined;
@@ -215,14 +219,14 @@ export function useRead(settings: Settings) {
 
         // ---- step 3: coherence, sentence by sentence ----
         setStep("Checking it reads properly…");
-        let coherenceResult = coherence(t, locale, stopwords, markers, negations);
+        let coherenceResult = coherence(t, locale, stopwords, negations);
         if (!coherenceResult.ok) {
           // A failing sentence goes back alone; two failures on the same sentence
           // and the passage is rejected.
-          const rewritten = await rewriteFailing(t, coherenceResult, provider, settings, locale, stopwords, markers, negations);
+          const rewritten = await rewriteFailing(t, coherenceResult, provider, settings, locale, stopwords, negations);
           if (rewritten) {
             t = rewritten;
-            coherenceResult = coherence(t, locale, stopwords, markers, negations);
+            coherenceResult = coherence(t, locale, stopwords, negations);
           }
         }
         if (!coherenceResult.ok) {
@@ -242,7 +246,7 @@ export function useRead(settings: Settings) {
           if (t.sentences.length) {
             reuseResult = reuse(t, reuseWant);
             // A redraft can break coherence — re-check it before accepting.
-            const recheck = coherence(t, locale, stopwords, markers, negations);
+            const recheck = coherence(t, locale, stopwords, negations);
             if (!recheck.ok) return reject("The passage didn't hang together.", target);
           }
         }
@@ -294,7 +298,6 @@ export function useRead(settings: Settings) {
     settings: Settings,
     locale: string,
     stopwords: Set<string>,
-    markers?: CoherenceMarkers,
     negations?: Set<string>,
   ): Promise<ReadingText | null> {
     const sentences = [...t.sentences];
@@ -309,7 +312,7 @@ export function useRead(settings: Settings) {
       if (!rewritten) return null; // nothing usable came back — reject
       sentences[i] = rewritten;
       // Two failures on the same sentence and the passage is rejected.
-      const single = coherence({ title: t.title, sentences: [rewritten] }, locale, stopwords, markers, negations);
+      const single = coherence({ title: t.title, sentences: [rewritten] }, locale, stopwords, negations);
       if (!single.ok) return null;
     }
     return { title: t.title, sentences };
@@ -402,6 +405,8 @@ export function useRead(settings: Settings) {
     setSaved([]);
     setError("");
     setCheck(null);
+    setReport(null);
+    setVoice(null);
   }, []);
 
   /** Reopen a saved passage — sets it as the current text without re-generating or re-saving. */
@@ -523,6 +528,25 @@ export function useRead(settings: Settings) {
   /** Leave the check without recording anything — an escape hatch, not the happy path. */
   const skipCheck = useCallback(() => setCheck(null), []);
 
+  /**
+   * The teleprompter's measurement (PLAN-024): fold what the mic heard into a
+   * report against the words that should have been said. `expected` is the
+   * passage's words, `heard` the transcript, `ms` the run's duration, `targetWpm`
+   * the pace they were asked to match, `levels` the RMS envelope the mic observed.
+   * The report renders under the finished prompter, and the voice turn is kept so
+   * the read's signals can carry the pace/pronunciation observations through
+   * PLAN-018's path.
+   */
+  const measure = useCallback(
+    (expected: string[], heard: string, ms: number, targetWpm: number, levels: number[]) => {
+      const locale = pack?.speech.locale ?? "en";
+      const r = compare(expected, heard.split(/\s+/), ms, targetWpm, locale);
+      setReport(r);
+      setVoice({ text: heard, ms, levels, locale });
+    },
+    [pack],
+  );
+
   return {
     text,
     focusIdx,
@@ -578,6 +602,10 @@ export function useRead(settings: Settings) {
     notesBusy,
     /** Retry the notes call alone — asks only for notes, never regenerates the passage. */
     retryNotes: () => text && void generateNotes(text),
+    /** The teleprompter's measurement (PLAN-024) — the report and the voice turn. */
+    report,
+    voice,
+    measure,
   };
 }
 

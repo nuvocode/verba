@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { ReadView, Settings } from "../../lib/settings";
 import { levelOf } from "../../lib/model";
 import { tokens } from "../../lib/text";
@@ -35,6 +35,15 @@ export default function Passage({
   sheet: ReactNode;
 }) {
   const { text, focusIdx, popover } = read;
+
+  // The focused sentence is scrolled into view (PLAN-024) — arrow keys move the
+  // focus, and the sentence must be visible to be read. The margin note beside it
+  // is highlighted by the same `focusIdx` (see the `.notes` rail below).
+  const sentRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  useEffect(() => {
+    if (focusIdx < 0) return;
+    sentRefs.current[focusIdx]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [focusIdx]);
 
   // Enter keeps the word being explained. Only while a popover with a meaning is
   // open, and never while they are typing — the ask sheet's own Enter is its own.
@@ -80,6 +89,9 @@ export default function Passage({
           {text.sentences.map((s, i) => (
             <span
               key={i}
+              ref={(el) => {
+                sentRefs.current[i] = el;
+              }}
               className={`sent ${focusIdx === i ? "on" : ""}`}
               onClick={() => read.setFocusIdx(focusIdx === i ? -1 : i)}
             >

@@ -12,9 +12,12 @@ import {
   WPM_MAX,
   WPM_MIN,
 } from "../../lib/prompter";
+import { getSpeech, type ListenResult } from "../../lib/speech";
+import { tokens } from "../../lib/text";
 import { live } from "../../lib/keys";
 import ViewToggle from "./ViewToggle";
 import Hints from "../Hints";
+import { Nothing } from "../States";
 
 /**
  * The teleprompter: the same passage, read out loud, at a pace that doesn't wait for you.
@@ -26,6 +29,10 @@ import Hints from "../Hints";
  *
  * The speed lives in `settings` rather than in here, because the useful part is coming
  * back tomorrow to the pace you left off pushing yourself at.
+ *
+ * PLAN-024: when a microphone is available, the prompter listens while the column moves
+ * and measures the read against the words that should have been said. When it is not,
+ * it runs exactly as it always has and says there is no measurement.
  */
 export default function Prompter({
   settings,
@@ -34,6 +41,7 @@ export default function Prompter({
   onView,
   onWpm,
   onDone,
+  onSettings,
 }: {
   settings: Settings;
   read: ReadState;
@@ -42,6 +50,8 @@ export default function Prompter({
   onWpm: (wpm: number) => void;
   /** Finished with the reading block — mark it done and move the day on. */
   onDone: () => void;
+  /** Leave for Settings — the one action that changes the mic state. */
+  onSettings: () => void;
 }) {
   const { text } = read;
   const wpm = settings.prompterWpm;
@@ -53,6 +63,21 @@ export default function Prompter({
   const stage = useRef<HTMLDivElement>(null);
   const column = useRef<HTMLDivElement>(null);
   const fill = useRef<HTMLSpanElement>(null);
+
+  // The speech adapter and whether it can listen — the mic path (PLAN-024).
+  const speech = useMemo(() => getSpeech(settings), [settings]);
+  const listenRef = useRef<Promise<ListenResult> | null>(null);
+  const startedAt = useRef(0);
+
+  // The words that should have been said, cut by the target language's own rules —
+  // the same tokenizer the reader taps words with.
+  const expectedWords = useMemo(
+    () =>
+      (text?.sentences ?? []).flatMap((s) =>
+        tokens(s.target, read.locale).filter((t) => t.word).map((t) => t.text),
+      ),
+    [text, read.locale],
+  );
 
   // The column's position, its sentence offsets and its height are read and written 60
   // times a second. They are refs, not state: a render per frame would cost more than
@@ -132,7 +157,13 @@ export default function Prompter({
     setDone(false);
     paint();
     setRunning(true);
-  }, [paint]);
+    // A fresh run starts the mic listening (PLAN-024) — the measurement is of
+    // this run, not the last one.
+    if (speech.canListen) {
+      startedAt.current = performance.now();
+      listenRef.current = speech.listen({ onLevel: () => {}, silenceMs: 0 });
+    }
+  }, [paint, speech]);
 
   /** Stumbled, or want that sentence again: step the column a line either way. */
   const skip = useCallback(
@@ -150,6 +181,23 @@ export default function Prompter({
     setRunning((r) => !r);
   }, [done, restart]);
 
+  /**
+   * Stop the mic and fold what it heard into a report (PLAN-024). Runs once at
+   * the end of a read-aloud run. With no mic there is nothing to measure.
+   */
+  const finishRun = useCallback(async () => {
+    const p = listenRef.current;
+    if (!p) return;
+    listenRef.current = null;
+    try {
+      const heard = await p;
+      const ms = performance.now() - startedAt.current;
+      read.measure(expectedWords, heard.text, ms, wpmRef.current, heard.levels);
+    } catch {
+      /* a failed listen is not a failed read — the passage still finished */
+    }
+  }, [read, expectedWords]);
+
   const frame = useCallback(
     (t: number) => {
       const dt = Math.min((t - (last.current || t)) / 1000, 0.25); // a backgrounded tab must not teleport it
@@ -159,11 +207,13 @@ export default function Prompter({
       paint();
       if (ended(offset.current, height.current)) {
         setRunning(false);
+        // The run is over: stop the mic and measure what was heard (PLAN-024).
+        void finishRun();
         return setDone(true);
       }
       raf.current = requestAnimationFrame(frame);
     },
-    [paint, total],
+    [paint, total, finishRun],
   );
 
   useEffect(() => {
@@ -185,6 +235,15 @@ export default function Prompter({
     setDone(false);
     setRunning(false);
   }, [text]);
+
+  // Leaving the prompter (or replacing the passage) closes the mic — a dangling
+  // listen would keep recording after the view is gone.
+  useEffect(() => {
+    return () => {
+      if (listenRef.current) speech.cancel();
+      listenRef.current = null;
+    };
+  }, [speech]);
 
   // The keys of the exercise. They are this view's own — App stands its reading keys down
   // while the prompter is up (see the `readView` gate there), so nothing here is contested.
@@ -282,6 +341,31 @@ export default function Prompter({
           <p>
             {total} words at {wpm} wpm — {clock(secondsFor(total, wpm))} of speaking.
           </p>
+          {/* The measurement (PLAN-024): three plain numbers with units and
+              definitions (invariant 12), or the honest Nothing state when the
+              mic is off — never a blocked prompter. */}
+          {read.report ? (
+            <div className="aloud">
+              <div className="row">
+                <span className="v">{read.report.skipped.length}</span>
+                <span className="d">words skipped — expected words that never appeared in the transcript</span>
+              </div>
+              <div className="row">
+                <span className="v">{Math.round(read.report.wpm)} wpm</span>
+                <span className="d">spoken pace — words per minute from the transcript and the run's time</span>
+              </div>
+              <div className="row">
+                <span className="v">{Math.round(read.report.paceMatch * 100)}%</span>
+                <span className="d">off pace — how far your pace was from the {wpm} wpm you were asked to match</span>
+              </div>
+            </div>
+          ) : (
+            <Nothing
+              title="No measurement."
+              why="The microphone is off — the prompter ran, but nothing was measured. Turn it on in Settings → Speech to see how the read went."
+              action={{ label: "Settings → Speech", onClick: onSettings }}
+            />
+          )}
           <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
             <button className="btn sm" onClick={onDone}>
               Done reading →

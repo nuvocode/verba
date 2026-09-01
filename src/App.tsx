@@ -431,13 +431,17 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         // these stand down for as long as it is up.
         if (settings.readView === "passage") {
           const last = read.text.sentences.length - 1;
-          if (e.key === "ArrowRight") {
+          // From no focus, down/right focuses the first sentence; otherwise the
+          // arrows walk the focus one sentence at a time.
+          const next = read.focusIdx < 0 ? 0 : Math.min(read.focusIdx + 1, last);
+          const prev = read.focusIdx < 0 ? 0 : Math.max(read.focusIdx - 1, 0);
+          if (e.key === "ArrowRight" || e.key === "ArrowDown") {
             e.preventDefault();
-            return read.setFocusIdx(Math.min(read.focusIdx + 1, last));
+            return read.setFocusIdx(next);
           }
-          if (e.key === "ArrowLeft") {
+          if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
             e.preventDefault();
-            return read.setFocusIdx(Math.max(read.focusIdx - 1, 0));
+            return read.setFocusIdx(prev);
           }
           if (e.key.toLowerCase() === "t") return read.toggleBilingual();
         }
@@ -628,6 +632,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
             onAdvance={advance}
             onCaptureKeys={setCaptured}
             onChange={update}
+            onSettings={() => go("settings")}
           />
         )}
         {space === "listening" && (

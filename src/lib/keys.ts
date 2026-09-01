@@ -76,7 +76,10 @@ export const KEYS: Shortcut[] = [
   { keys: ["Escape"], label: "esc", does: "one level up", on: ["talk"] },
 
   // ---- read (close reading) ----
-  { keys: ["ArrowRight", "ArrowLeft"], label: "← →", does: "move focus", on: ["read"] },
+  // Arrows walk the sentence focus: right/down to the next, left/up to the
+  // previous, and from no focus, down focuses the first sentence. Esc clears the
+  // focus (the escape pill) — it does not leave Read.
+  { keys: ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"], label: "↑ ↓ ← →", does: "move focus", on: ["read"] },
   { keys: ["t"], label: "T", does: "bilingual mode", on: ["read"], when: "bilingual" },
   { keys: ["p"], label: "P", does: "read it out loud", on: ["read"] },
   { keys: ["Enter"], label: "↵", does: "keep the word", on: ["read"], when: "save" },
