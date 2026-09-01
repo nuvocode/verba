@@ -9,11 +9,13 @@ import {
   outlinePrompt,
   draftPrompt,
   rewritePrompt,
+  notesPrompt,
   parseOutline,
   parseReading,
   parseRewrite,
   parseWordExplanation,
   parseComprehension,
+  parseNotes,
   bareWord,
   LENGTHS,
   DEFAULT_LENGTH,
@@ -21,6 +23,7 @@ import {
   type ReadingText,
 } from "./reading";
 import { coherence, reuse, level, type PassageOutcome, type CoherenceMarkers } from "./passage";
+import { validateNotes, type ReadNote } from "./notes";
 import { scoreAnswer, type Question } from "./questions";
 import { computeMetrics } from "./metrics";
 import { getPack } from "./packs";
@@ -84,6 +87,12 @@ export function useRead(settings: Settings) {
   // it's generated; `checking` covers the wait while the questions are written.
   const [check, setCheck] = useState<CheckState | null>(null);
   const [checking, setChecking] = useState(false);
+  // The coach notes (PLAN-023): anchored to the passage, generated in a second
+  // call after the gates. `notesFailed` is true when that call came back empty or
+  // errored — the passage still renders, with a quiet line and a retry.
+  const [notes, setNotes] = useState<ReadNote[]>([]);
+  const [notesFailed, setNotesFailed] = useState(false);
+  const [notesBusy, setNotesBusy] = useState(false);
   // What they asked for last, so the sheet opens where they left it. Session-only:
   // a topic is a mood, not a setting, and it has no business surviving a restart.
   const [ask, setAsk] = useState<Ask>({ length: DEFAULT_LENGTH, topic: "" });
@@ -93,6 +102,43 @@ export function useRead(settings: Settings) {
   // Nothing to translate when the target and native language are the same — the
   // "native" line is just the sentence again. Bilingual mode has no meaning here.
   const canBilingual = settings.profile.targetLanguage.trim().toLowerCase() !== settings.profile.nativeLanguage.trim().toLowerCase();
+
+  /**
+   * Generate the coach notes for a passage (PLAN-023). Runs after the gates, in
+   * its own call. A failure is silent: the passage stands, `notesFailed` is set,
+   * and the reader can retry notes alone. `want` is half the sentence count.
+   */
+  const generateNotes = useCallback(
+    async (t: ReadingText) => {
+      if (!t.sentences.length) return;
+      setNotesBusy(true);
+      setNotesFailed(false);
+      const want = Math.floor(t.sentences.length / 2);
+      try {
+        const raw = await getProvider(settings).chat(
+          [
+            {
+              role: "user",
+              content: notesPrompt(settings, t, levelOf(settings.profile), settings.profile.nativeLanguage, want),
+            },
+          ],
+          { json: true },
+        );
+        const notes = validateNotes(parseNotes(raw), t, pack?.speech.locale ?? "en", want);
+        setNotes(notes);
+        // Zero notes is a valid outcome — nothing worth saying. It renders as
+        // nothing (no rail), not as a failure. Only an actual error sets the
+        // quiet line and the retry.
+        setNotesFailed(false);
+      } catch {
+        setNotes([]);
+        setNotesFailed(true);
+      } finally {
+        setNotesBusy(false);
+      }
+    },
+    [settings, pack],
+  );
 
   /**
    * Generate a fresh passage. `goal` folds the day's weak area into the text.
@@ -121,6 +167,9 @@ export function useRead(settings: Settings) {
       setPopover(null);
       setSaved([]);
       setCheck(null);
+      setNotes([]);
+      setNotesFailed(false);
+      setNotesBusy(false);
       const provider = getProvider(settings);
       const locale = pack?.speech.locale ?? "en";
       // The pack's stopword list, or the empty set — the coherence gate's fallback
@@ -211,6 +260,10 @@ export function useRead(settings: Settings) {
         setReusedWords(reuseResult?.hit ?? []);
         setText(t);
         await saveReading(settings.profile.targetLanguage, t.title, t, { length, topic, cefr: target }).catch(() => {});
+        // ---- notes: a second call, after the gates (PLAN-023) ----
+        // A failed notes call is not a failed passage — the passage renders with
+        // no notes and a quiet line, and the reader can retry notes alone.
+        await generateNotes(t);
       } catch (e: unknown) {
         const { say: said, log } = humanError(e);
         console.warn("[read] generate failed:", log);
@@ -226,7 +279,7 @@ export function useRead(settings: Settings) {
         setOutcome({ ok: false, why, fallback: fallback?.sentences?.length ? fallback : null });
       }
     },
-    [settings, pack, ask.length],
+    [settings, pack, ask.length, generateNotes],
   );
 
   /**
@@ -517,8 +570,14 @@ export function useRead(settings: Settings) {
     nextCheckQuestion,
     finishCheck,
     skipCheck,
-    /** Sentences carrying a coach note, with their index — the margin rail. */
-    notes: (text?.sentences ?? []).map((s, i) => ({ i, note: s.note })).filter((n): n is { i: number; note: string } => !!n.note),
+    /** The coach notes (PLAN-023) — anchored to the passage, capped at half its sentences. */
+    notes,
+    /** True when the notes call came back empty or errored — the passage still stands. */
+    notesFailed,
+    /** True while the notes call is running. */
+    notesBusy,
+    /** Retry the notes call alone — asks only for notes, never regenerates the passage. */
+    retryNotes: () => text && void generateNotes(text),
   };
 }
 

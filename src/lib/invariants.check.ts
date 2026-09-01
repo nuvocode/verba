@@ -117,17 +117,17 @@ const LEDGER: Row[] = [
   {
     id: 17,
     claim: "Hiçbir Coach Note, pasajda geçmeyen bir ifadeye atıfta bulunmaz.",
-    pending: "M1+ (İçerik üretimi)",
+    assertedIn: [{ file: "src/lib/notes.check.ts", marker: "invariant 17" }],
   },
   {
     id: 18,
     claim: "Not sayısı ≤ cümle sayısı / 2.",
-    pending: "M1+ (İçerik üretimi)",
+    assertedIn: [{ file: "src/lib/notes.check.ts", marker: "invariant 18" }],
   },
   {
     id: 19,
     claim: "Read notları Talk'un düzeltme şemasını kullanmaz.",
-    pending: "M1+ (İçerik üretimi)",
+    assertedIn: [{ file: "src/lib/notes.check.ts", marker: "invariant 19" }],
   },
   {
     id: 20,

@@ -129,19 +129,29 @@ export default function Passage({
       </div>
 
       <div className="notes">
-        {read.notes.map(({ i, note }) => (
+        {read.notes.map((n) => (
           <button
-            key={i}
-            className={`note ${focusIdx === i ? "on" : ""}`}
+            key={n.sentence}
+            className={`note ${focusIdx === n.sentence ? "on" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
-              read.setFocusIdx(i);
+              read.setFocusIdx(n.sentence);
             }}
           >
             <div className="h">✳ Coach note</div>
-            <div className="b">{note}</div>
+            <div className="b">{n.body}</div>
           </button>
         ))}
+        {/* A failed notes call is not a failed passage (PLAN-023): the passage
+            stands, with a quiet line and a retry that asks only for notes. */}
+        {read.notesFailed && (
+          <div className="note quiet">
+            <div className="b">Notes did not come back.</div>
+            <button className="btn sm ghost" onClick={() => void read.retryNotes()} disabled={read.notesBusy}>
+              {read.notesBusy ? "Asking…" : "Try notes again"}
+            </button>
+          </div>
+        )}
       </div>
       <div />
 

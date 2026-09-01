@@ -80,7 +80,10 @@ assert(strength({ interval: 999, ease: 2.5 }) === 1, "strength is capped at 1");
 assert(bareWord("¿Cuánto?") === "cuánto", "leading/trailing punctuation stripped");
 assert(bareWord("mercado,") === bareWord("Mercado"), "same word, same key");
 
-// --- reading notes: only some sentences carry one, and null is not a note ---
+// --- reading notes: notes are no longer part of the passage schema (PLAN-023) ---
+// A note used to hang off a sentence; it now has its own schema (ReadNote) and is
+// generated in a second call. The passage parser ignores any stray "note" field a
+// model still emits — it is not a sentence property anymore.
 const text = parseReading(
   JSON.stringify({
     title: "El mercado",
@@ -91,8 +94,8 @@ const text = parseReading(
   }),
 );
 assert(text.sentences.length === 2, "both sentences parsed");
-assert(text.sentences[0].note === undefined, "null note is dropped, not rendered as 'null'");
-assert(text.sentences[1].note === "“sino”, not “pero”.", "a real note survives");
+assert(!("note" in text.sentences[0]), "a stray note field is not a sentence property");
+assert(!("note" in text.sentences[1]), "…even when the model still emits one");
 
 // --- Coach round-trip: stored row → metrics → the same components ---
 const m = computeMetrics(["Quisiera un café con leche, por favor.", "¿Puedo pagar con tarjeta?"], {

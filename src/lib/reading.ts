@@ -13,7 +13,6 @@ import { questionInstructions, questionsShape, parseQuestions, type Question } f
 export interface Sentence {
   target: string; // sentence in the language being learned
   native: string; // its translation in the learner's language
-  note?: string; // optional coach note — shown in the reader's margin
 }
 
 export interface ReadingText {
@@ -57,9 +56,8 @@ export interface StoryOptions {
 
 const jsonShape =
   `Answer with ONLY a JSON object in this exact shape: ` +
-  `{ "title": "a short title in TARGET", "sentences": [ { "target": "one sentence in TARGET", "native": "its translation in NATIVE", "note": "optional one-line coach note in NATIVE about a grammar point or word choice in this sentence, or null" } ] }. ` +
-  `Split the text into individual sentences — one object per sentence — so the two languages line up. ` +
-  `Add a "note" to only 2-3 of the sentences — the ones that teach something worth pausing on. Use null elsewhere.`;
+  `{ "title": "a short title in TARGET", "sentences": [ { "target": "one sentence in TARGET", "native": "its translation in NATIVE" } ] }. ` +
+  `Split the text into individual sentences — one object per sentence — so the two languages line up.`;
 
 function base(s: Settings, pack?: LanguagePack): string {
   return [
@@ -270,6 +268,39 @@ export function parseComprehension(raw: string): Question[] {
   return parseQuestions((extractJson(raw) ?? {}).questions);
 }
 
+/**
+ * The notes call (PLAN-023): a second, separate generation that runs only after
+ * the passage has passed the gates. Notes are generated on their own so a model
+ * writing prose is not also annotating every line it writes — that is what
+ * produced note-per-sentence. `want` is the cap, half the sentence count, and the
+ * prompt says plainly that returning fewer is the right answer.
+ */
+export function notesPrompt(s: Settings, text: ReadingText, level: string, nativeLanguage: string, want: number): string {
+  const passage = text.sentences.map((x, i) => `${i + 1}. ${x.target}`).join("\n");
+  return [
+    `You are annotating a passage a ${s.profile.targetLanguage} learner at ${level} has just read. Their native language is ${nativeLanguage}.`,
+    `The passage, with sentence numbers:`,
+    passage,
+    `Write at most ${want} coach notes. A note names something in the passage and explains it — it never proposes a replacement.`,
+    `A note is one of five types:`,
+    `- lexis: a word or phrase worth knowing (e.g. "ran out of" — a phrasal verb).`,
+    `- structure: a grammar point (e.g. "had been waiting" — the past perfect continuous).`,
+    `- register: a tone or formality choice (e.g. "gonna" — informal).`,
+    `- culture: a cultural reference (e.g. "tapas" — a small-plates custom).`,
+    `- contrast: a word that contrasts with the learner's own language (e.g. "sino" vs "pero").`,
+    `Each note must quote the expression EXACTLY as it appears in the passage, including its inflection — the anchor is how the note is anchored to the text.`,
+    `Ask for what a learner at this level would not know, in priority order: lexis and structure first, then register, culture, contrast.`,
+    `Returning fewer than ${want} notes — even zero — is the right answer when there is nothing worth saying.`,
+    `Answer with ONLY a JSON object: { "notes": [ { "type": "lexis | structure | register | culture | contrast", "anchor": "the exact expression from the passage", "body": "one or two lines in ${nativeLanguage}" } ] }.`,
+  ].join("\n\n");
+}
+
+/** The notes array out of the model's raw reply — validation happens in notes.ts. */
+export function parseNotes(raw: string): unknown[] {
+  const obj = extractJson(raw) ?? {};
+  return Array.isArray(obj.notes) ? obj.notes : [];
+}
+
 export function parseReading(raw: string): ReadingText {
   const obj = extractJson(raw) ?? {};
   const sentences = Array.isArray(obj.sentences)
@@ -278,7 +309,6 @@ export function parseReading(raw: string): ReadingText {
         .map((x: any) => ({
           target: String(x.target ?? ""),
           native: String(x.native ?? ""),
-          note: x.note ? String(x.note) : undefined,
         }))
     : [];
   return { title: typeof obj.title === "string" ? obj.title : "", sentences };
