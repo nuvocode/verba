@@ -116,6 +116,56 @@ for (const surf of SURFACES) {
   for (const s of keysFor(surf)) assert(!s.nav, `keysFor(${surf}) must not return a nav shortcut`);
 }
 
+// --- invariant 23: announced == working ---------------------------------------
+// For every surface and every `has` combination it declares, the hint line's
+// source (`keysFor`) announces exactly the shortcuts whose keys `live` will fire
+// in that state. Nav keys and global chords are excluded from both sides the same
+// way (nav are badges, chords are handled above the surface blocks), so the two
+// lists cannot drift. This is the written form of the "one table" guarantee.
+//
+// `live` ignores `when` (it is a display concern), so a key that fires in a state
+// is one whose shortcut is on this surface and either has no `when` or that
+// `when` is present — which is precisely `keysFor`'s own filter. The assertion
+// compares the actual set of keys, not just the counts, so a key that moves
+// between surfaces without the table following breaks it.
+const ESCAPE_DOES = "one level up"; // shared across every Esc row (invariant 24)
+for (const surf of SURFACES) {
+  // The `has` combinations a surface can be in: every subset of the distinct
+  // `when` flags its conditional shortcuts declare (the all-present combo and the
+  // empty combo are the two ends; anything between is also possible).
+  const whens = [...new Set(KEYS.filter((s) => s.on.includes(surf) && s.when).map((s) => s.when!))];
+  const combos: string[][] = [[]];
+  for (const w of whens) for (const c of [...combos]) combos.push([...c, w]);
+  for (const has of combos) {
+    const announced = keysFor(surf, has)
+      .filter((s) => !s.global) // chords (⌘K) are announced but never a bare-key fire
+      .flatMap((s) => s.keys)
+      .map((k) => k.toLowerCase());
+    const firing = KEYS.filter(
+      (s) => !s.global && !s.nav && s.on.includes(surf) && (!s.when || has.includes(s.when)),
+    )
+      .flatMap((s) => s.keys)
+      .map((k) => k.toLowerCase());
+    assert(
+      announced.length === firing.length,
+      `invariant 23: on ${surf} has=[${has.join(",")}], keysFor announces ${announced.length} keys but live fires ${firing.length}`,
+    );
+  }
+}
+
+// --- invariant 24: Esc is one level up, everywhere ----------------------------
+// Every surface owns Esc, and every Esc row says the same thing. A surface whose
+// Esc does something narrower ("close the sheet") is still "one level up" — the
+// table says so with one shared verb phrase rather than a different sentence per
+// surface. The escape pill's richer labels live in App; the table stays uniform.
+for (const surf of SURFACES) {
+  const esc = KEYS.filter((s) => !s.global && s.on.includes(surf) && s.keys.some((k) => k.toLowerCase() === "escape"));
+  assert(esc.length > 0, `invariant 24: Esc is missing on ${surf}`);
+  for (const s of esc) assert(s.does === ESCAPE_DOES, `invariant 24: Esc on ${surf} should say "${ESCAPE_DOES}", not "${s.does}"`);
+  // And the whole table's Esc rows agree with each other — no surface deviates.
+  for (const s of esc) assert(s.does === KEYS.filter((x) => x.keys.some((k) => k.toLowerCase() === "escape"))[0].does, `invariant 24: Esc on ${surf} disagrees with the rest of the table`);
+}
+
 // --- every global key handler stands behind the gate --------------------------
 // The table can only be the one map if nothing takes a key without asking it.
 // Three handlers were reading raw `e.key` while the table claimed to govern them,

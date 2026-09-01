@@ -6,9 +6,32 @@ import type { Day } from "../lib/useDay";
 import type { Talk as TalkState } from "../lib/useTalk";
 import { talkSignals } from "../lib/signals";
 import { getPack } from "../lib/packs";
-import { listSessions, sessionMessages, type SessionRow } from "../lib/db";
+import { sessionGroups, sessionMessages, type SessionDay, type SessionRow } from "../lib/db";
+import { when } from "../lib/fmt";
+import type { CorrectionCategory } from "../lib/prompts";
+import {
+  bandSplit,
+  duplicateScenario,
+  removeImportedScenario,
+  saveScenario,
+  scenarioRegistry,
+  type Scenario,
+} from "../lib/scenarios";
 import Face from "./talk/Face";
 import Hints from "./Hints";
+import { Generating, Nothing, Failed, Unusable } from "./States";
+import { linkish } from "./settings/parts";
+
+// The reflection groups corrections by category, in this fixed order, with a
+// count per group. An empty group is not rendered. The set is Talk's own schema
+// (PLAN-020) — Read defines its own and the two never share a type.
+const CORRECTION_GROUPS: { category: CorrectionCategory; label: string }[] = [
+  { category: "grammar", label: "Grammar" },
+  { category: "vocabulary", label: "Vocabulary" },
+  { category: "wordOrder", label: "Word order" },
+  { category: "register", label: "Register" },
+  { category: "pronunciation", label: "Pronunciation" },
+];
 
 // Where the reflection sends them, named by what the plan has next. The wording is the
 // day's, not this screen's — Talk never decides that reading (or anything) comes after.
@@ -26,21 +49,36 @@ export default function Talk({
   talk,
   day,
   onAdvance,
+  onChange,
 }: {
   settings: Settings;
   talk: TalkState;
   day: Day;
   /** Close out a talking activity and go wherever the day goes next — the plan decides. */
   onAdvance: (kind: ActivityKind) => void;
+  /** The one door settings are written through — the subtitles toggle uses it. */
+  onChange: (patch: Partial<Settings>) => void;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
-  const [past, setPast] = useState<SessionRow[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [past, setPast] = useState<SessionDay[]>([]);
   const [open, setOpen] = useState<SessionRow | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [transcript, setTranscript] = useState<{ role: string; content: string }[]>([]);
+  // Which coach lines the learner has revealed while subtitles are off (PLAN-021).
+  // A revealed line shows its text; the rest show the "Coach spoke · Show this
+  // line" bar. Reset when a new conversation starts.
+  const [revealed, setRevealed] = useState<Set<number>>(new Set());
+  // The inline edit panel over the picker grid — the same pattern Settings uses,
+  // no route, no modal library. `editing` is the scenario being edited; null is
+  // the closed panel. `confirming` is the id of the scenario awaiting a delete.
+  const [editing, setEditing] = useState<Scenario | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [, bump] = useState(0); // scenarios live in localStorage — re-read after a change
 
   // The picker is also the archive — reload it whenever we come back to it.
   useEffect(() => {
-    if (!talk.started) void listSessions().then(setPast).catch(() => {});
+    if (!talk.started) void sessionGroups().then(setPast).catch(() => {});
   }, [talk.started, talk.reflection]);
 
   useEffect(() => {
@@ -52,6 +90,41 @@ export default function Talk({
     // `streaming` is in here so a reply that outgrows the viewport as it arrives
     // keeps its last line in view, rather than scrolling once it has finished.
   }, [talk.msgs.length, talk.busy, talk.streaming]);
+
+  // A new conversation opens with the curtain closed (PLAN-021): the reveal set
+  // is per-session, so starting or resuming a scenario resets it. The picker
+  // (started false) and the live conversation (started true) both land here.
+  useEffect(() => {
+    setRevealed(new Set());
+  }, [talk.started]);
+
+  // The streaming bubble's reveal is keyed to -1. When the stream empties — the
+  // turn lands and the bubble is replaced by the real message — that reveal must
+  // not linger, or the next streamed reply would start already shown. Each
+  // streamed bubble carries its own curtain.
+  useEffect(() => {
+    if (talk.streaming) return;
+    setRevealed((s) => {
+      if (!s.has(-1)) return s;
+      const next = new Set(s);
+      next.delete(-1);
+      return next;
+    });
+  }, [talk.streaming]);
+
+  // The draft lands in the box focused, cursor at the end — the learner edits it
+  // in place rather than hunting for the caret. Fires when the final text drops
+  // (the mic leaves "recording"), not on every keystroke.
+  useEffect(() => {
+    if (talk.micPhase === "" && talk.input) {
+      inputRef.current?.focus();
+      const el = inputRef.current;
+      if (el) {
+        const end = el.value.length;
+        el.setSelectionRange(end, end);
+      }
+    }
+  }, [talk.micPhase, talk.input]);
 
   // Which of the day's talking blocks this conversation closes out. Matched on the scenario
   // actually being practised — the plan's role-play names one, the conversation block is
@@ -83,7 +156,7 @@ export default function Talk({
     return (
       <div className="refl">
         <div className="eyebrow">
-          {new Date(open.started_at).toLocaleString()} · {talk.scenarioById(open.scenario).title}
+          {when(open.started_at, undefined, undefined, true)} · {talk.scenarioById(open.scenario).title}
         </div>
         <h1 className="display">Looking back.</h1>
 
@@ -113,28 +186,111 @@ export default function Talk({
     );
 
   // ---- no conversation open yet: pick a scenario ----
-  if (!talk.started)
+  if (!talk.started) {
+    const registry = scenarioRegistry();
+    const byId = new Map(registry.map((r) => [r.scenario.id, r.origin]));
+    const { main, easier } = bandSplit(talk.scenarios, levelOf(settings.profile));
+
     return (
       <div className="today fade">
         <div className="eyebrow">Talk · {settings.profile.targetLanguage}</div>
-        <h1 className="display" style={{ fontSize: 40, margin: "12px 0 10px" }}>
-          What are we practising?
-        </h1>
-        <p style={{ fontSize: 14, color: "var(--ink2)", maxWidth: 560, lineHeight: 1.6, marginBottom: 40 }}>
-          The coach plays the other side. Speak or type — corrections are collected as you go and handed back at the
-          end, so you never lose the thread mid-sentence.
-        </p>
+        {/* surface talk: empty — the picker *is* the empty state. It says what it
+            is in `Nothing`'s own headline and then offers the grid below. */}
+        <Nothing
+          title="What are we practising?"
+          why="The coach plays the other side. Pick a scenario — speak or type, and corrections are collected as you go and handed back at the end."
+        />
+        {talk.error && (
+          /* surface talk: error */
+          <Failed say={talk.error} retry={{ label: "Try again", onClick: () => talk.scenarios[0] && void talk.start(talk.scenarios[0]) }} />
+        )}
+
+        {editing && (
+          <ScenarioEditor
+            scenario={editing}
+            onSave={(next) => {
+              saveScenario(next);
+              setEditing(null);
+              bump((n) => n + 1);
+            }}
+            onCancel={() => setEditing(null)}
+          />
+        )}
+
         <div className="grid3">
-          {talk.scenarios.map((sc) => (
-            <button key={sc.id} className="pick" onClick={() => void talk.start(sc)}>
-              <div className="big">
-                {sc.emoji} {sc.title}
-              </div>
-              <div className="small">{sc.level ? `${sc.level[0]}–${sc.level[1]}` : "any level"}</div>
-            </button>
+          {main.map((sc) => (
+            <div className="pick-wrap" key={sc.id}>
+              <button className="pick" onClick={() => void talk.start(sc)}>
+                <div className="big">
+                  {sc.emoji} {sc.title}
+                </div>
+                <div className="small">{sc.level ? `${sc.level[0]}–${sc.level[1]}` : "any level"}</div>
+              </button>
+              {byId.get(sc.id) === "imported" && (
+                <span className="tag" title="Added by you — nobody reviewed it">
+                  yours
+                </span>
+              )}
+              {byId.get(sc.id) === "imported" && (
+                <div className="pick-actions">
+                  <button className="model" style={linkish} onClick={() => setEditing(sc)}>
+                    Edit
+                  </button>
+                  <button
+                    className="model"
+                    style={linkish}
+                    onClick={() => {
+                      // A duplicate of a bundled scenario is an import — it is
+                      // saved to the same key, and the bundled original is left
+                      // untouched. It shows up in the picker like any other.
+                      saveScenario(duplicateScenario(sc));
+                      bump((n) => n + 1);
+                    }}
+                  >
+                    Duplicate
+                  </button>
+                  {confirming === sc.id ? (
+                    <span className="pick-confirm">
+                      <button className="model" style={linkish} onClick={() => { removeImportedScenario(sc.id); setConfirming(null); bump((n) => n + 1); }}>
+                        Delete
+                      </button>
+                      <button className="model" style={linkish} onClick={() => setConfirming(null)}>
+                        Keep
+                      </button>
+                    </span>
+                  ) : (
+                    <button className="model" style={linkish} onClick={() => setConfirming(sc.id)}>
+                      Delete
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           ))}
         </div>
-        {talk.error && <div className="err">{talk.error}</div>}
+
+        {easier.length > 0 && (
+          <details className="setup" style={{ marginTop: 20 }}>
+            <summary>Easier — below your level</summary>
+            <div className="grid3" style={{ marginTop: 12 }}>
+              {easier.map((sc) => (
+                <div className="pick-wrap" key={sc.id}>
+                  <button className="pick" onClick={() => void talk.start(sc)}>
+                    <div className="big">
+                      {sc.emoji} {sc.title}
+                    </div>
+                    <div className="small">{sc.level ? `${sc.level[0]}–${sc.level[1]}` : "any level"}</div>
+                  </button>
+                  {byId.get(sc.id) === "imported" && (
+                    <span className="tag" title="Added by you — nobody reviewed it">
+                      yours
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
 
         {past.length > 0 && (
           <>
@@ -142,27 +298,76 @@ export default function Talk({
               Past conversations
             </div>
             <div className="spine">
-              {past.map((s) => {
-                const sc = talk.scenarioById(s.scenario);
-                return (
-                  <button className="spine-item" key={s.id} onClick={() => setOpen(s)}>
-                    <div style={{ flex: 1 }}>
-                      {/* Sessions from before titles existed — and any whose title call
-                          failed — still answer to their scenario's name. */}
-                      <div className="title">
-                        {sc.emoji} {s.title || sc.title}
+              {past.map((day) => (
+                <div key={day.day} style={{ marginBottom: 8 }}>
+                  <div className="meta" style={{ fontSize: 12, color: "var(--ink3)", margin: "10px 0 4px" }}>
+                    {when(day.at)}
+                  </div>
+                  {day.groups.map((g) => {
+                    const sc = talk.scenarioById(g.scenarioId);
+                    const key = `${day.day}:${g.scenarioId}`;
+                    const isOpen = expanded.has(key);
+                    return (
+                      <div key={key}>
+                        <button
+                          className="spine-item"
+                          onClick={() => {
+                            if (g.count > 1) {
+                              setExpanded((s) => {
+                                const next = new Set(s);
+                                if (next.has(key)) next.delete(key);
+                                else next.add(key);
+                                return next;
+                              });
+                            } else {
+                              setOpen(g.sessions[0]);
+                            }
+                          }}
+                        >
+                          <div style={{ flex: 1 }}>
+                            <div className="title">
+                              {sc.emoji} {g.title}
+                              {g.count > 1 && <span style={{ color: "var(--ink3)", fontSize: 12 }}> · {g.count} sessions</span>}
+                            </div>
+                            <div className="meta">{g.sessions[0].summary ?? "no summary — ended early"}</div>
+                          </div>
+                          <div className="st">{when(g.lastAt)}</div>
+                        </button>
+                        {isOpen &&
+                          g.sessions.map((s) => (
+                            <div key={s.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0 4px 20px" }}>
+                              <button className="linky" style={{ fontSize: 13 }} onClick={() => setOpen(s)}>
+                                {when(s.started_at)}
+                              </button>
+                              <button className="linky" style={{ fontSize: 13 }} onClick={() => void talk.resume(s.id)}>
+                                Resume
+                              </button>
+                              <button className="linky" style={{ fontSize: 13 }} onClick={() => void talk.start(sc)}>
+                                Restart
+                              </button>
+                            </div>
+                          ))}
+                        {g.count === 1 && (
+                          <div style={{ display: "flex", gap: 8, padding: "4px 0 4px 20px" }}>
+                            <button className="linky" style={{ fontSize: 13 }} onClick={() => void talk.resume(g.sessions[0].id)}>
+                              Resume
+                            </button>
+                            <button className="linky" style={{ fontSize: 13 }} onClick={() => void talk.start(sc)}>
+                              Restart
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <div className="meta">{s.summary ?? "no summary — ended early"}</div>
-                    </div>
-                    <div className="st">{new Date(s.started_at).toLocaleDateString()}</div>
-                  </button>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           </>
         )}
       </div>
     );
+  }
 
   // ---- reflection ----
   if (talk.reflecting) {
@@ -170,11 +375,25 @@ export default function Talk({
     return (
       <div className="refl">
         <div className="eyebrow">Reflection · {talk.scenario?.title}</div>
-        <h1 className="display">{talk.busy ? "Looking back…" : "That went well."}</h1>
+        {/* surface talk: loading — the summary is content the model is still
+            writing; it gets Generating's shape until the reflection lands. */}
+        {!r && talk.busy && (
+          <Generating
+            what="Looking back…"
+            eta="About 10 seconds — it is capturing your vocabulary and writing your summary."
+          />
+        )}
 
-        {talk.error && <div className="err">{talk.error}</div>}
+        {!r && !talk.busy && (
+          <h1 className="display">
+            {talk.scenario?.title} · {when(Date.now())}
+          </h1>
+        )}
 
-        {!r && talk.busy && <p style={{ color: "var(--ink3)" }}>Capturing vocabulary and writing your summary…</p>}
+        {talk.error && (
+          /* surface talk: error */
+          <Failed say={talk.error} retry={{ label: "Keep the conversation", onClick: talk.exitReflection }} />
+        )}
 
         {r && (
           <>
@@ -191,14 +410,42 @@ export default function Talk({
                 <b>{r.words.length}</b>
                 <span>words captured</span>
               </div>
-              <div>
-                <b>
-                  {talk.confidence}
-                  {talk.confDelta > 0 && <i style={{ fontSize: 15, color: "var(--good)" }}> +{talk.confDelta}</i>}
-                </b>
-                <span>confidence</span>
-              </div>
+              {/* PLAN-016's rule: a value that cannot be computed is not displayed.
+                  Confidence is null until MEASURES_AT turns exist — render nothing. */}
+              {talk.confidence && (
+                <div>
+                  <b>{talk.confidence.value}</b>
+                  <span>confidence</span>
+                </div>
+              )}
             </div>
+
+            {/* The goal scorecard (PLAN-017's goalState, rendered). Each goal, its
+                final state, and one line of total — a missed goal is stated, not
+                scolded (same copy gate as PLAN-019). */}
+            {talk.goalState.length > 0 && (
+              <>
+                <div className="eyebrow" style={{ marginBottom: 16 }}>
+                  Goals
+                </div>
+                <div style={{ marginBottom: 36 }}>
+                  {talk.goalState.map((st, i) => {
+                    const g = talk.scenario?.goals?.[i];
+                    if (!g) return null;
+                    const mark = st === "met" ? "✓" : st === "missed" ? "✗" : "○";
+                    return (
+                      <div className={`goal ${st}`} key={i}>
+                        <span className="mk">{mark}</span>
+                        <span>{g}</span>
+                      </div>
+                    );
+                  })}
+                  <div style={{ marginTop: 10, fontSize: 13, color: "var(--ink3)" }}>
+                    {talk.goalState.filter((s) => s === "met").length} of {talk.goalState.length} met
+                  </div>
+                </div>
+              </>
+            )}
 
             {r.corrections.length > 0 && (
               <>
@@ -206,17 +453,32 @@ export default function Talk({
                   Worth revisiting
                 </div>
                 <div style={{ marginBottom: 36 }}>
-                  {r.corrections.map((c, i) => (
-                    <div className="fix-row" key={i}>
-                      <span className={`d ${c.severity === "severe" ? "severe" : ""}`} />
-                      <div style={{ flex: 1 }}>
-                        <div className="l">
-                          <s>{c.original}</s> → <b>{c.fixed}</b>
+                  {/* Corrections are grouped by category, in a fixed order, with a
+                      count per group. An empty group is not rendered — the count is
+                      the group's headline, so a learner sees what there is to work
+                      on and how much of it. */}
+                  {CORRECTION_GROUPS.map(({ category, label }) => {
+                    const group = r.corrections.filter((c) => c.category === category);
+                    if (group.length === 0) return null;
+                    return (
+                      <div key={category} style={{ marginBottom: 22 }}>
+                        <div className="meta" style={{ fontSize: 12, color: "var(--ink3)", margin: "0 0 8px" }}>
+                          {label} · {group.length}
                         </div>
-                        {c.note && <div className="n">{c.note}</div>}
+                        {group.map((c, i) => (
+                          <div className="fix-row" key={i}>
+                            <span className={`d ${c.severity === "severe" ? "severe" : ""}`} />
+                            <div style={{ flex: 1 }}>
+                              <div className="l">
+                                <s>{c.original}</s> → <b>{c.fixed}</b>
+                              </div>
+                              {c.note && <div className="n">{c.note}</div>}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             )}
@@ -224,9 +486,9 @@ export default function Talk({
             {r.words.length > 0 && (
               <>
                 <div className="eyebrow" style={{ marginBottom: 14 }}>
-                  Kept in memory · drop the ones you already know
+                  Words to keep · drop the ones you already know, then keep the rest
                 </div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 40 }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
                   {r.words.map((w) => (
                     <div className="wchip" key={w.term}>
                       {w.term} <span>— {w.translation}</span>
@@ -236,7 +498,24 @@ export default function Talk({
                     </div>
                   ))}
                 </div>
+                <button className="btn sm" onClick={() => void talk.keepWords(r.words.map((w) => w.term))}>
+                  Keep these {r.words.length} →
+                </button>
               </>
+            )}
+
+            {/* A failed summary renders Unusable (PLAN-020): the write-up didn't
+                come back, everything else is saved, and regenerate is offered. */}
+            {!r.summary && (
+              <div className="empty fade" style={{ textAlign: "left", marginBottom: 40 }}>
+                {/* surface talk: unusable — the reflection's summary came back
+                    unusable, so the write-up is turned away and regenerate is
+                    the way out. Everything else from the session is saved. */}
+                <Unusable
+                  what="The write-up didn't come back. Everything else from this session is saved."
+                  regenerate={{ label: "Try the write-up again", onClick: () => void talk.regenerateSummary() }}
+                />
+              </div>
             )}
 
             {r.summary && (
@@ -306,9 +585,25 @@ export default function Talk({
                   <div className="who">{m.role === "ai" ? (m.isAsk ? "COACH · ASIDE" : "COACH") : "YOU"}</div>
                   {/* A ⌘K aside is answered in the learner's own language, so it
                       keeps the app's direction; everything else is target text. */}
-                  <div className="text" dir={m.isAsk ? undefined : talk.dir}>
-                    {m.text}
-                  </div>
+                  {m.role === "ai" && !m.isAsk && !settings.subtitles && !revealed.has(i) ? (
+                    /* Subtitles off (PLAN-021): the coach's line is a curtain, not
+                        a mode. The learner's own messages, the composer, corrections,
+                        suggestions, persona and goals are never hidden — only the
+                        coach's text is. Revealing is free: recorded, never scored. */
+                    <button
+                      className="reveal-bar"
+                      onClick={() => {
+                        setRevealed((s) => new Set(s).add(i));
+                        talk.reveal("line");
+                      }}
+                    >
+                      Coach spoke · Show this line
+                    </button>
+                  ) : (
+                    <div className="text" dir={m.isAsk ? undefined : talk.dir}>
+                      {m.text}
+                    </div>
+                  )}
 
                   {m.inline &&
                     m.corrections.map((c, j) => (
@@ -334,9 +629,25 @@ export default function Talk({
               {talk.streaming && (
                 <div className="msg ai">
                   <div className="who">COACH</div>
-                  <div className="text" dir={talk.dir}>
-                    {talk.streaming}
-                  </div>
+                  {settings.subtitles || revealed.has(-1) ? (
+                    <div className="text" dir={talk.dir}>
+                      {talk.streaming}
+                    </div>
+                  ) : (
+                    /* The streaming bubble is the coach's text too — hidden the
+                        same way, with the same free reveal. Its curtain is keyed
+                        to -1, and it is dropped the moment the stream empties, so
+                        the next streamed reply starts closed again. */
+                    <button
+                      className="reveal-bar"
+                      onClick={() => {
+                        setRevealed((s) => new Set(s).add(-1));
+                        talk.reveal("line");
+                      }}
+                    >
+                      Coach spoke · Show this line
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -352,13 +663,41 @@ export default function Talk({
             </div>
           </div>
 
+          {/* Subtitles off (PLAN-021): the global reveal. One press shows every
+              coach line at once — the same free action as "Show this line", never
+              a penalty. It only appears while there is something hidden to show. */}
+          {!settings.subtitles && (
+            <button
+              className="reveal-all"
+              onClick={() => {
+                setRevealed((s) => {
+                  const next = new Set(s);
+                  talk.msgs.forEach((m, i) => {
+                    if (m.role === "ai" && !m.isAsk) next.add(i);
+                  });
+                  next.add(-1); // the streaming bubble
+                  return next;
+                });
+                talk.reveal("all");
+              }}
+            >
+              Show all
+            </button>
+          )}
+
           <div className="composer">
             <div className="bar">
               <div className="wrap">
                 <input
+                  ref={inputRef}
                   dir={talk.dir}
                   value={talk.input}
-                  onChange={(e) => talk.setInput(e.target.value)}
+                  onChange={(e) => {
+                    // Typing during a recording stops it — the learner is taking
+                    // the box back, and the mic must not fight for it.
+                    if (talk.micPhase === "recording") void talk.mic();
+                    talk.setInput(e.target.value);
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void talk.send(talk.input);
                     // The composer is the whole screen — Esc ends the session rather than
@@ -371,9 +710,12 @@ export default function Talk({
                   placeholder={`Answer in ${settings.profile.targetLanguage}…`}
                   autoFocus
                 />
-                {talk.listening && (
+                {/* The transcribing box covers the input only while the clip is in
+                    flight. During recording the box stays open — the meter below is
+                    the recording's sign, and the learner can still see their draft. */}
+                {talk.micPhase === "transcribing" && (
                   <div className="listening">
-                    <em>{talk.micPhase === "transcribing" ? "Transcribing…" : "Listening… (click ◉ when done)"}</em>
+                    <em>Transcribing…</em>
                     <i />
                     <i />
                     <i />
@@ -388,6 +730,17 @@ export default function Talk({
               >
                 ◉
               </button>
+              {/* Subtitles (PLAN-021): the live control, permanently visible beside
+                  the mic. A labelled toggle, not a bare icon — the same fact as the
+                  Settings → Learning row, one home each. Toggling writes the setting
+                  immediately. */}
+              <button
+                className="subtitles-toggle"
+                onClick={() => onChange({ subtitles: !settings.subtitles })}
+                title="Show or hide the coach's text"
+              >
+                Subtitles {settings.subtitles ? "on" : "off"}
+              </button>
               {/* Both disabled reasons are covered, not silent (#42): the label
                   says the in-flight one, this line says the empty-box one. */}
               {!talk.busy && !talk.input.trim() && (
@@ -399,8 +752,15 @@ export default function Talk({
                 {talk.busy ? "Sending…" : "Send"}
               </button>
             </div>
-            {/* The keyboard half comes from the one table; the mouse half — click ◉
-                to speak — is a pointer instruction, so it stays beside it (§5.4). */}
+            {/* The live level meter while the mic is open — the recording is real,
+                and the bar says so. It gets its own class (no width transition):
+                the confidence meter below eases its bar, but a live level meter
+                that lags behind the voice reads as a broken one. */}
+            {talk.micPhase === "recording" && (
+              <div className="meter live" style={{ margin: "8px auto 0", maxWidth: 640, height: 4 }}>
+                <div style={{ width: `${Math.round(talk.micLevel * 100)}%` }} />
+              </div>
+            )}
             <div style={{ maxWidth: 640, margin: "10px auto 0", fontSize: 11, color: "var(--ink3)" }}>
               <Hints
                 settings={settings}
@@ -410,7 +770,13 @@ export default function Talk({
               />
               {settings.showHints && (
                 <span style={{ marginLeft: 22 }}>
-                  or click <span style={{ fontFamily: "var(--mono)" }}>◉</span> to speak
+                  {talk.micPhase === "recording" && talk.partials ? (
+                    "speak — the text appears as you go"
+                  ) : (
+                    <>
+                      or click <span style={{ fontFamily: "var(--mono)" }}>◉</span> to speak
+                    </>
+                  )}
                 </span>
               )}
             </div>
@@ -420,17 +786,19 @@ export default function Talk({
         <div className="rail">
           {/* The face reacts to what the session is already doing — every one of
               these is a count or a flag useTalk keeps anyway. See talk/face/.
-              Goals are deliberately not among them: they tick off by turn count
-              (see the ponytail below), and a coach smiling at a fake signal is
-              worse than one that doesn't smile. */}
+              Goals are deliberately not among them: a goal is a real signal now
+              (the coach reports it), but the face's smiles are earned by the
+              opening, a pleased emoji, and confidence — not by a checklist. */}
           <Face
             typing={talk.input.trim() !== ""}
             mic={talk.micPhase === "recording"}
             waiting={talk.busy}
             corrections={talk.msgs.reduce((n, m) => n + m.corrections.length, 0)}
-            confidence={talk.confidence}
+            confidence={talk.confidence?.value}
             coachTurns={coachSaid.length}
             coachSaid={coachSaid[coachSaid.length - 1] ?? ""}
+            personaEmoji={talk.persona?.emoji}
+            personaName={talk.persona?.name}
           />
 
           {goals.length > 0 && (
@@ -438,12 +806,14 @@ export default function Talk({
               <div className="lbl">Scenario goals</div>
               <div style={{ marginBottom: 30 }}>
                 {goals.map((g, i) => {
-                  // ponytail: goals tick off by turn count. Real per-goal detection
-                  // needs another model call per turn — not worth it for a side rail.
-                  const hit = talk.userTurns > i;
+                  const st = talk.goalState[i] ?? "pending";
+                  const mark = st === "met" ? "✓" : st === "missed" ? "✗" : "○";
+                  const label = st === "met" ? "met" : st === "missed" ? "missed" : "pending";
                   return (
-                    <div className={`goal ${hit ? "hit" : ""}`} key={g}>
-                      <span className="mk">{hit ? "✓" : "○"}</span>
+                    <div className={`goal ${st}`} key={g}>
+                      <span className="mk" title={label}>
+                        {mark}
+                      </span>
                       <span>{g}</span>
                     </div>
                   );
@@ -467,16 +837,28 @@ export default function Talk({
           )}
 
           <div className="lbl">Confidence</div>
-          <div className="conf">
-            <b>{talk.confidence}</b>
-            {talk.confDelta > 0 && <i>+{talk.confDelta}</i>}
-          </div>
-          <div className="meter" style={{ marginBottom: 8 }}>
-            <div style={{ width: `${talk.confidence}%` }} />
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--ink3)", lineHeight: 1.5 }}>
-            How steadily you're producing language without help. Not a score — a signal.
-          </div>
+          {talk.confidence ? (
+            <>
+              <div className="conf">
+                <b>{talk.confidence.value}</b>
+              </div>
+              <div className="meter" style={{ marginBottom: 8 }}>
+                <div style={{ width: `${talk.confidence.value}%` }} />
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--ink3)", lineHeight: 1.5 }}>
+                Your unprompted-production rate over {talk.confidence.turns} turns. A signal, not a score.
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="conf">
+                <b>—</b>
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--ink3)", lineHeight: 1.5 }}>
+                Measuring. Three turns in, this starts reporting.
+              </div>
+            </>
+          )}
 
           <button
             className="btn sm ghost"
@@ -487,6 +869,134 @@ export default function Talk({
             End session → reflection
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The inline edit form over the picker grid — the same pattern Settings uses,
+ * no route, no modal library. Edits title, emoji, setup, goals (max 5), band and
+ * persona; saving writes the edited copy over the original via `saveScenario`.
+ * A bundled scenario is never edited in place — the caller duplicates it first.
+ */
+function ScenarioEditor({
+  scenario,
+  onSave,
+  onCancel,
+}: {
+  scenario: Scenario;
+  onSave: (next: Scenario) => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(scenario.title);
+  const [emoji, setEmoji] = useState(scenario.emoji);
+  const [setup, setSetup] = useState(scenario.setup);
+  const [goals, setGoals] = useState<string[]>((scenario.goals ?? []).slice(0, 5));
+  const [level, setLevel] = useState<[string, string] | undefined>(scenario.level);
+  const [name, setName] = useState(scenario.persona.name);
+  const [role, setRole] = useState(scenario.persona.role);
+  const [pEmoji, setPEmoji] = useState(scenario.persona.emoji);
+  const [voiceHint, setVoiceHint] = useState(scenario.persona.voiceHint ?? "");
+  const [err, setErr] = useState("");
+
+  const setGoal = (i: number, v: string) => setGoals((g) => g.map((x, j) => (j === i ? v : x)));
+  const addGoal = () => setGoals((g) => (g.length < 5 ? [...g, ""] : g));
+  const dropGoal = (i: number) => setGoals((g) => g.filter((_, j) => j !== i));
+
+  const save = () => {
+    const trimmed = goals.map((g) => g.trim()).filter(Boolean);
+    if (!title.trim() || !setup.trim() || !name.trim() || !role.trim() || !pEmoji.trim()) {
+      setErr("Title, setup, and the persona's name, role and emoji are all required.");
+      return;
+    }
+    if (trimmed.length > 5) {
+      setErr("A scenario can have at most 5 goals.");
+      return;
+    }
+    onSave({
+      ...scenario,
+      title: title.trim(),
+      emoji: emoji.trim() || "💬",
+      setup: setup.trim(),
+      goals: trimmed.length ? trimmed : undefined,
+      level,
+      persona: { name: name.trim(), role: role.trim(), emoji: pEmoji.trim(), voiceHint: voiceHint.trim() || undefined },
+    });
+  };
+
+  return (
+    <div className="scenario-editor" style={{ border: "1px solid var(--line)", borderRadius: 11, padding: 18, marginBottom: 20 }}>
+      <div className="eyebrow" style={{ marginBottom: 12 }}>
+        Edit scenario
+      </div>
+      <div className="field">
+        <label>Title</label>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Emoji</label>
+        <input value={emoji} onChange={(e) => setEmoji(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Setup</label>
+        <textarea value={setup} onChange={(e) => setSetup(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Goals (max 5)</label>
+        {goals.map((g, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+            <input value={g} onChange={(e) => setGoal(i, e.target.value)} placeholder={`Goal ${i + 1}`} />
+            <button className="model" style={linkish} onClick={() => dropGoal(i)}>
+              remove
+            </button>
+          </div>
+        ))}
+        {goals.length < 5 && (
+          <button className="model" style={linkish} onClick={addGoal}>
+            + add goal
+          </button>
+        )}
+      </div>
+      <div className="field">
+        <label>Band (min–max, e.g. A2–B2)</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={level?.[0] ?? ""}
+            onChange={(e) => setLevel((l) => [e.target.value.toUpperCase(), l?.[1] ?? ""])}
+            placeholder="min"
+          />
+          <input
+            value={level?.[1] ?? ""}
+            onChange={(e) => setLevel((l) => [l?.[0] ?? "", e.target.value.toUpperCase()])}
+            placeholder="max"
+          />
+        </div>
+      </div>
+      <div className="field">
+        <label>Persona — name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Persona — role</label>
+        <input value={role} onChange={(e) => setRole(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Persona — emoji</label>
+        <input value={pEmoji} onChange={(e) => setPEmoji(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Persona — voice hint (optional)</label>
+        <input value={voiceHint} onChange={(e) => setVoiceHint(e.target.value)} />
+      </div>
+      {err && <div className="err">{err}</div>}
+      <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+        <button className="btn sm" onClick={save}>
+          Save →
+        </button>
+        <button className="btn sm ghost" onClick={onCancel}>
+          Cancel
+        </button>
       </div>
     </div>
   );

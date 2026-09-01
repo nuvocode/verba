@@ -53,12 +53,18 @@ export interface FaceProps {
   waiting?: boolean;
   /** Corrections delivered so far this session. Watched for increases, not read. */
   corrections?: number;
-  /** The confidence signal shown in the rail. Watched for a full step, not read. */
-  confidence?: number;
+  /** The confidence signal shown in the rail. Watched for a full step, not read.
+   *  `undefined` until MEASURES_AT turns exist (invariant 26) — the face must
+   *  not smile at a confidence that has not been measured yet. */
+  confidence?: number | undefined;
   /** Coach turns spoken this session — the first one is the greeting. */
   coachTurns?: number;
   /** What the coach said last. Read only for the marks it uses when it is pleased. */
   coachSaid?: string;
+  /** The persona's avatar — an emoji until there is art. Shown beside the face. */
+  personaEmoji?: string;
+  /** The persona's name, shown under the face. */
+  personaName?: string;
 }
 
 /**
@@ -70,9 +76,11 @@ export default function Face({
   mic = false,
   waiting = false,
   corrections = 0,
-  confidence = 0,
+  confidence,
   coachTurns = 0,
   coachSaid = "",
+  personaEmoji,
+  personaName,
 }: FaceProps) {
   const [mouth, setMouth] = useState<voice.Mouth>("rest");
   const [blinking, setBlinking] = useState(false);
@@ -146,15 +154,23 @@ export default function Face({
   // on screen as text either way; the brow is only its echo, and a coach that
   // withholds a smile to raise an eyebrow at you is the character v1.5 shipped.
   const seen = useRef({ corrections, coachTurns });
-  const smiledAt = useRef(confidence);
+  const smiledAt = useRef<number | undefined>(undefined);
   useEffect(() => {
     const was = seen.current;
     seen.current = { corrections, coachTurns };
     if (still.current) return;
 
+    // Confidence is undefined until MEASURES_AT turns exist (invariant 26). The
+    // first real value seeds the reference point; until then there is nothing to
+    // climb from, so the earned-smile branch is skipped — the opening turn and a
+    // pleased coach still smile on their own.
+    if (confidence !== undefined && smiledAt.current === undefined) smiledAt.current = confidence;
+    const since = smiledAt.current;
+
     const spoke = rose(was.coachTurns, coachTurns);
     const warm =
-      (spoke && (coachTurns === 1 || looksPleased(coachSaid))) || earnedSmile(smiledAt.current, confidence);
+      (spoke && (coachTurns === 1 || looksPleased(coachSaid))) ||
+      (confidence !== undefined && since !== undefined && earnedSmile(since, confidence));
     const kind: Cue["kind"] | null = warm ? "smiling" : rose(was.corrections, corrections) ? "raised" : null;
     if (!kind) return;
 
@@ -162,7 +178,7 @@ export default function Face({
     // reactions to one turn, arriving a sentence apart, is a face out of sync
     // with its own conversation.
     owed.current = kind === "smiling" ? performance.now() : 0;
-    if (kind === "smiling") smiledAt.current = confidence;
+    if (kind === "smiling" && confidence !== undefined) smiledAt.current = confidence;
     fire(kind);
   }, [corrections, confidence, coachTurns, coachSaid, fire]);
 
@@ -237,6 +253,9 @@ export default function Face({
           <Glasses />
           <MouthPart mouth={mouth} smiling={smiling} />
         </g>
+        {personaEmoji ? `${personaEmoji} ` : ""}
+        {personaName ?? "Coach"}
+      
       </svg>
       <div className="lbl">Coach</div>
     </div>

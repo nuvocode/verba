@@ -19,15 +19,21 @@ import {
   type Correction,
   type SessionSummary,
 } from "./prompts";
-import { BUNDLED_SCENARIOS, listScenarios, type Scenario } from "./scenarios";
+import { BUNDLED_SCENARIOS, listScenarios, type Persona, type Scenario } from "./scenarios";
 import { getPack } from "./packs";
 import { computeMetrics, estimateLevelV2 } from "./metrics";
 import { getSpeech, listenBlocker } from "./speech";
+import { humanError } from "./fmt";
+import { words } from "./text";
+import { confidence as computeConfidence } from "./confidence";
 import {
   addMessage,
   addVocab,
   createSession,
   deleteVocabTerm,
+  getSession,
+  keepVocab,
+  sessionMessages,
   setSummary,
   setTitle,
   saveMemories,
@@ -50,15 +56,29 @@ export interface Reflection extends SessionSummary {
   corrections: Correction[];
   words: { term: string; translation: string }[];
   produced: ProducedTurn[];
+  /** What each spoken turn observed, beside what it said — feeds `voiceSignals`. */
+  voice: VoiceTurn[];
+  /** Times the learner asked to see the coach's text (PLAN-021) — recorded, never scored. */
+  reveals: { what: "line" | "all" }[];
 }
 
 /** One thing the learner actually sent, and whether they found it themselves. */
 export interface ProducedTurn {
   text: string;
   fromSuggestion: boolean;
+  /** Word count in the learner's own message — the length component of confidence. */
+  words: number;
+  /** Time from the coach's line landing to the send, in ms; null if unknown. */
+  latencyMs: number | null;
 }
 
-const CONF_START = 50;
+/** A spoken turn as the mic observed it: the transcript and the envelope. */
+export interface VoiceTurn {
+  text: string;
+  ms: number;
+  levels: number[];
+  locale: string;
+}
 
 /**
  * Messages exchanged before the coach re-names the conversation. By the fourth
@@ -98,6 +118,8 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   // Cloud STT has two phases the learner can feel: the mic is open, then the clip
   // is in flight. One "Listening…" bar covering both is a lie for the second half.
   const [micPhase, setMicPhase] = useState<"" | "recording" | "transcribing">("");
+  // The live level meter while the mic is open — 0–1, straight off the analyser.
+  const [micLevel, setMicLevel] = useState(0);
   const [error, setError] = useState("");
   // Not an error: something degraded (a local speech server went away) and the
   // conversation carried on. Raised once per adapter, and cleared when the next
@@ -109,16 +131,35 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   const [streaming, setStreaming] = useState("");
   const [reflecting, setReflecting] = useState(false);
   const [reflection, setReflection] = useState<Reflection | null>(null);
-  const [confidence, setConfidence] = useState(CONF_START);
+  // The coach's identity for this session, resolved once at start. A TTS fallback
+  // mid-session does not re-pick a voice — the persona holds (§2.2).
+  const [persona, setPersona] = useState<Persona | null>(null);
+  // How far each scenario goal has got. Starts all pending; a returned index moves
+  // one to met (never back); end() marks whatever is still pending as missed.
+  const [goalState, setGoalState] = useState<("pending" | "met" | "missed")[]>([]);
 
   const history = useRef<ChatMessage[]>([]); // full provider context, incl. system
   const sessionId = useRef<number | null>(null);
   // What the learner produced, and whether it was theirs. `msgs` cannot answer the
   // second question — a picked suggestion and a typed sentence are the same bubble.
   const produced = useRef<ProducedTurn[]>([]);
+  // `produced` is a ref (it is read by the reflection without re-rendering), but
+  // confidence is derived from it and must re-render. A version counter bumps on
+  // every push so the memo below recomputes without turning the ref into state.
+  const [producedVersion, setProducedVersion] = useState(0);
+  // What each spoken turn observed, beside what it said. Accumulated in `mic()`
+  // and handed to the reflection, where `voiceSignals` turns it into signals.
+  const voice = useRef<VoiceTurn[]>([]);
+  // Times the learner asked to see the coach's text (PLAN-021). Recorded, never
+  // scored — the reflection carries them so `talkSignals` can write a reveal
+  // signal per ask, and nothing counts them against the learner.
+  const reveals = useRef<{ what: "line" | "all" }[]>([]);
   // How far the session's title has got: 0 unnamed, 1 named off the opening,
   // 2 re-named once the subject settled. Not a rolling rewrite — 2 is the end.
   const titleStage = useRef<0 | 1 | 2>(0);
+  // When the coach's last reply finished rendering — the reference point for the
+  // next send's latency. null until the first reply has landed.
+  const coachReplyAt = useRef<number | null>(null);
   const pack = getPack(settings.packId);
   const speech = useMemo(
     () => getSpeech(settings, setNotice),
@@ -139,14 +180,21 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     ],
   );
 
+  // Confidence is the unprompted-production rate, derived from what was actually
+  // produced — never seeded. `null` until MEASURES_AT turns exist (invariant 26).
+  // The length component measures against the learner's own level.
+  const confidence = useMemo(() => computeConfidence(produced.current, levelOf(settings.profile)), [producedVersion]);
+
   const userTurns = msgs.filter((m) => m.role === "user" && !m.isAsk).length;
 
   const say = useCallback(
     (text: string) => {
       if (settings.speak && speech.canSpeak)
-        void speech.speak(text, { locale: pack?.speech.locale, voiceHint: pack?.speech.voiceHint }).catch(() => {});
+        void speech
+          .speak(text, { locale: pack?.speech.locale, voiceHint: persona?.voiceHint || pack?.speech.voiceHint })
+          .catch(() => {});
     },
-    [settings.speak, speech, pack],
+    [settings.speak, speech, pack, persona],
   );
 
   /**
@@ -175,22 +223,28 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   const start = useCallback(
     async (sc: Scenario, goal?: string) => {
       setScenario(sc);
+      setPersona(sc.persona);
+      setGoalState((sc.goals ?? []).map(() => "pending" as const));
       setMsgs([]);
       setSuggestions([]);
       setReflecting(false);
       setReflection(null);
-      setConfidence(CONF_START);
       setError("");
       setNotice("");
       titleStage.current = 0;
+      coachReplyAt.current = null;
       produced.current = [];
+      setProducedVersion((v) => v + 1);
+      voice.current = [];
+      reveals.current = [];
       setBusy(true);
       // What earlier conversations left behind. It rides in the system prompt, so
       // every call made off this history — the turns, the wrap-up, the vocabulary
       // capture — is talking to a coach that has read it.
       const memories = await recentMemories(settings.profile.targetLanguage).catch(() => []);
       const system =
-        buildSystem(settings, sc, pack, memories) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
+        buildSystem(settings, sc, sc.persona, pack, memories) +
+        (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
       history.current = [{ role: "system", content: system }];
       try {
         try {
@@ -214,14 +268,79 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         setMsgs([{ role: "ai", text: turn.reply, corrections: [], inline: false }]);
         setSuggestions(turn.suggestions);
         say(turn.reply);
-      } catch (e: any) {
-        setError(String(e?.message ?? e));
+      } catch (e: unknown) {
+        const { say: said, log } = humanError(e);
+        console.warn("[talk] start failed:", log);
+        setError(said);
       } finally {
         setStreaming(""); // a half-streamed reply is not a turn — it must not linger
         setBusy(false);
       }
     },
     [settings, pack, say],
+  );
+
+  /**
+   * Resume a past conversation: load its stored messages back into the session
+   * and keep writing to the same `sessions` row. The persona and the produced
+   * turns come back with it, so the reflection and confidence stay honest.
+   */
+  const resume = useCallback(
+    async (sessionIdToResume: number) => {
+      setError("");
+      setNotice("");
+      setReflecting(false);
+      setReflection(null);
+      setSuggestions([]);
+      setBusy(true);
+      try {
+        const rows = await sessionMessages(sessionIdToResume);
+        const sess = await getSession(sessionIdToResume);
+        const sc = listScenarios().find((s) => s.id === sess?.scenario) ?? BUNDLED_SCENARIOS.find((s) => s.id === "free")!;
+        setScenario(sc);
+        setPersona(sc.persona);
+        setGoalState((sc.goals ?? []).map(() => "pending" as const));
+        setMsgs(
+          rows.map((m) => ({
+            role: m.role === "user" ? "user" : "ai",
+            text: m.content,
+            corrections: [],
+            inline: false,
+          })),
+        );
+        // `produced` is deliberately left empty. It is rebuilt from the stored
+        // transcript, but which turn came from a suggestion is not stored — a
+        // resumed session would have to guess, and a guessed `fromSuggestion`
+        // would quietly poison confidence and the reflection. So a resumed
+        // session measures nothing it cannot recount: confidence starts over
+        // from the resumed point, and the reflection reports only the turns
+        // actually produced after resuming.
+        produced.current = [];
+        setProducedVersion((v) => v + 1);
+        voice.current = [];
+        reveals.current = [];
+        sessionId.current = sessionIdToResume;
+        // The provider context is rebuilt from the stored transcript so the next
+        // turn continues the conversation rather than starting a new one.
+        const memories = await recentMemories(settings.profile.targetLanguage).catch(() => []);
+        history.current = [
+          { role: "system", content: buildSystem(settings, sc, sc.persona, pack, memories) },
+          ...rows.map((m) => ({
+            role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+            content: m.content,
+          })),
+        ];
+        titleStage.current = 2; // a resumed session is already named
+        coachReplyAt.current = null;
+      } catch (e: unknown) {
+        const { say: said, log } = humanError(e);
+        console.warn("[talk] resume failed:", log);
+        setError(said);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [settings, pack],
   );
 
   const send = useCallback(
@@ -234,7 +353,12 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       setSuggestions([]);
       const idx = msgs.length;
       setMsgs((m) => [...m, { role: "user", text: msg, corrections: [], inline: false }]);
-      produced.current.push({ text: msg, fromSuggestion });
+      // Latency is the time from the coach's line landing to this send. The
+      // coach's reply was stamped when it finished rendering; the first turn has
+      // no prior reply, so its latency is unknown.
+      const latencyMs = coachReplyAt.current ? performance.now() - coachReplyAt.current : null;
+      produced.current.push({ text: msg, fromSuggestion, words: words(msg, pack?.speech.locale ?? "en").length, latencyMs });
+      setProducedVersion((v) => v + 1);
       history.current.push({ role: "user", content: msg });
       if (sessionId.current) await addMessage(sessionId.current, "user", msg).catch(() => {});
 
@@ -248,6 +372,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         const turn = parseTurn(raw);
         history.current.push({ role: "assistant", content: turn.reply });
         if (sessionId.current) await addMessage(sessionId.current, "assistant", turn.reply).catch(() => {});
+        // The coach's reply has landed — stamp it so the next send can measure
+        // its latency against it.
+        coachReplyAt.current = performance.now();
 
         const worst = turn.corrections.find((c) => c.severity === "severe") ?? turn.corrections[0];
         // Dropped in the same commit the real message lands in — anywhere earlier
@@ -266,6 +393,19 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         });
         setSuggestions(turn.suggestions);
 
+        // A goal the coach says was just met ticks — and only that one. A returned
+        // index moves a pending goal to met and never moves it back; a goal already
+        // met is left alone, and an index past the list is ignored.
+        if (turn.goalsMet.length) {
+          setGoalState((gs) => {
+            const next = [...gs];
+            for (const i of turn.goalsMet) {
+              if (i >= 0 && i < next.length && next[i] === "pending") next[i] = "met";
+            }
+            return next;
+          });
+        }
+
         // The session is named off its first real exchange — that is also the turn
         // it starts showing up in the history list — and re-named exactly once,
         // when enough has been said for the subject to be the subject.
@@ -278,13 +418,11 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
           nameSession("settled");
         }
 
-        // Confidence tracks unaided, accurate production — a picked suggestion is
-        // worth less than a sentence the learner found on their own.
-        const gain = worst ? (worst.severity === "severe" ? 0 : 2) : fromSuggestion ? 1 : 4;
-        setConfidence((c) => Math.min(100, c + gain));
         say(turn.reply);
-      } catch (e: any) {
-        setError(String(e?.message ?? e));
+      } catch (e: unknown) {
+        const { say: said, log } = humanError(e);
+        console.warn("[talk] send failed:", log);
+        setError(said);
       } finally {
         setStreaming(""); // a half-streamed reply is not a turn — it must not linger
         setBusy(false);
@@ -293,7 +431,11 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     [busy, scenario, msgs, settings, say, nameSession],
   );
 
-  /** Push-to-talk: click to open the mic, click again to stop and transcribe. */
+  /**
+   * Push-to-talk: click to open the mic, click again to stop. The transcript
+   * lands in the input box as an editable draft — nothing is sent automatically.
+   * Partials (where the tier can produce them) fill the box as they arrive.
+   */
   const mic = useCallback(async () => {
     if (busy) return;
     if (micPhase === "recording") {
@@ -307,13 +449,31 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
 
     setError("");
     setMicPhase("recording");
+    setMicLevel(0);
     try {
-      const heard = await speech.listen(pack?.speech.locale);
-      if (heard.trim()) setInput(heard);
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
+      const heard = await speech.listen({
+        locale: pack?.speech.locale,
+        onLevel: setMicLevel,
+        onPartial: (text) => setInput(text),
+        // The moment the recorder actually stops, the mic is closed and the clip
+        // is in flight — that is the "transcribing" phase. Fired by record() on
+        // rec.onstop, so it covers silence auto-stop and a hand stop alike.
+        onStopped: () => setMicPhase("transcribing"),
+      });
+      // The final text lands in the box, focused and editable — the draft. The
+      // envelope is kept for the voice signals; the learner's own words are what
+      // the conversation measures, so a spoken turn is a produced turn too.
+      if (heard.text.trim()) {
+        setInput(heard.text);
+        voice.current.push({ text: heard.text, ms: heard.ms, levels: heard.levels, locale: pack?.speech.locale ?? "en" });
+      }
+    } catch (e: unknown) {
+      const { say: said, log } = humanError(e);
+      console.warn("[talk] transcribe failed:", log);
+      setError(said);
     } finally {
       setMicPhase("");
+      setMicLevel(0);
     }
   }, [busy, micPhase, speech, pack, settings]);
 
@@ -326,7 +486,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     const userTexts = msgs.filter((m) => m.role === "user" && !m.isAsk).map((m) => m.text);
     const corrections = msgs.flatMap((m) => m.corrections);
     const words: { term: string; translation: string }[] = [];
-    let summary: SessionSummary = { summary: "", strengths: [], focus: [] };
+    // `null` when the summary call came back unusable — the DB row keeps NULL and
+    // the reflection renders Unusable (PLAN-020). No fallback text, ever.
+    let summary: SessionSummary | null = null;
 
     try {
       const provider = getProvider(settings);
@@ -338,12 +500,14 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       // only those can be dropped in the wrap-up: a term already in the deck carries
       // review history that a stray tap has no business erasing. `addVocab` is also
       // where the capture gate lives, so anything that isn't vocabulary never counts.
+      // Words land as *candidates* (PLAN-020) — nothing enters the deck until the
+      // learner presses "Keep these N".
       for (const it of parseVocab(vocabRaw)) {
         const added = await addVocab(settings.profile.targetLanguage, it, {
           capturedBy: "coach",
           surface: "talk",
           learnerLevel: levelOf(settings.profile),
-        }).catch(() => false);
+        }, "candidate").catch(() => false);
         if (added) words.push({ term: it.term, translation: it.translation });
       }
 
@@ -352,7 +516,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         { json: true },
       );
       summary = parseSummary(sumRaw);
-      if (sessionId.current) await setSummary(sessionId.current, summary.summary).catch(() => {});
+      // A failed summary writes nothing — `sessions.summary` stays NULL (invariant
+      // 22). The reflection renders Unusable and offers a regenerate.
+      if (summary && sessionId.current) await setSummary(sessionId.current, summary.summary).catch(() => {});
 
       // What the learner told us about themselves. Best-effort like the rest of the
       // wrap-up: a coach that fails to take a note is a coach that took no note, not
@@ -385,12 +551,25 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       } catch {
         /* metrics are best-effort */
       }
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
+    } catch (e: unknown) {
+      const { say: said, log } = humanError(e);
+      console.warn("[talk] end failed:", log);
+      setError(said);
     } finally {
       setBusy(false);
     }
-    setReflection({ ...summary, turns: userTexts.length, corrections, words, produced: produced.current });
+    // Whatever is still pending when the session closes was never met — it is
+    // missed, and the reflection's scorecard reads it that way.
+    setGoalState((gs) => gs.map((g) => (g === "pending" ? "missed" : g)));
+    setReflection({
+      ...(summary ?? { summary: "", strengths: [], focus: [] }),
+      turns: userTexts.length,
+      corrections,
+      words,
+      produced: produced.current,
+      voice: voice.current,
+      reveals: reveals.current,
+    });
   }, [scenario, busy, msgs, settings, pack]);
 
   /**
@@ -408,6 +587,62 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     },
     [settings.profile.targetLanguage],
   );
+
+  /**
+   * Commit the wrap-up's captured candidates to the deck — the "Keep these N"
+   * press. Nothing enters the deck without it (PLAN-020).
+   */
+  const keepWords = useCallback(
+    async (terms: string[]) => {
+      for (const t of terms) await keepVocab(settings.profile.targetLanguage, t).catch(() => {});
+      setReflection((r) => (r ? { ...r, words: [] } : r));
+    },
+    [settings.profile.targetLanguage],
+  );
+
+  /**
+   * Re-run the summary call after a failed one — the reflection's regenerate.
+   * Only the summary is retried; the rest of the wrap-up already landed.
+   */
+  const regenerateSummary = useCallback(async () => {
+    if (!scenario) return;
+    setBusy(true);
+    setError("");
+    try {
+      const provider = getProvider(settings);
+      const sumRaw = await provider.chat(
+        [...history.current, { role: "user", content: summaryPrompt(settings, pack) }],
+        { json: true },
+      );
+      const summary = parseSummary(sumRaw);
+      if (summary && sessionId.current) await setSummary(sessionId.current, summary.summary).catch(() => {});
+      setReflection((r) =>
+        r
+          ? {
+              ...r,
+              summary: summary?.summary ?? "",
+              strengths: summary?.strengths ?? [],
+              focus: summary?.focus ?? [],
+            }
+          : r,
+      );
+    } catch (e: unknown) {
+      const { say: said, log } = humanError(e);
+      console.warn("[talk] regenerate summary failed:", log);
+      setError(said);
+    } finally {
+      setBusy(false);
+    }
+  }, [scenario, settings, pack]);
+
+  /**
+   * The learner asked to see the coach's text (PLAN-021). Recorded, never scored:
+   * the reveal rides into the reflection so `talkSignals` writes one assisted
+   * comprehension signal per ask, and nothing counts it against the learner.
+   */
+  const reveal = useCallback((what: "line" | "all") => {
+    reveals.current.push({ what });
+  }, []);
 
   /** ⌘K → "ask the coach": a side question, answered in the learner's own language. */
   const ask = useCallback(
@@ -430,8 +665,10 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         // and laid out as a scenario turn — it would carry the wrong voice here.
         const raw = await getProvider(settings).chat(ctx);
         setMsgs((m) => [...m, { role: "ai", text: raw.trim(), corrections: [], inline: false, isAsk: true }]);
-      } catch (e: any) {
-        setError(String(e?.message ?? e));
+      } catch (e: unknown) {
+        const { say: said, log } = humanError(e);
+        console.warn("[talk] ask failed:", log);
+        setError(said);
       } finally {
         setBusy(false);
       }
@@ -442,6 +679,10 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   return {
     scenario,
     scenarios: listScenarios(),
+    /** The coach's identity for this session, resolved once at start. */
+    persona,
+    /** How far each scenario goal has got: pending, met, or missed. */
+    goalState,
     /** Writing direction of the target language — target text is laid out with it. */
     dir: pack?.direction ?? "ltr",
     msgs,
@@ -453,22 +694,45 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     busy,
     listening: micPhase !== "",
     micPhase,
+    /** The live level meter while the mic is open — 0–1. */
+    micLevel,
+    /** Whether the serving STT tier can stream partials into the draft. */
+    partials: speech.partials,
     error,
     notice,
     reflecting,
     reflection,
+    /** The unprompted-production rate, or null until MEASURES_AT turns exist. */
     confidence,
-    confDelta: confidence - CONF_START,
     userTurns,
     started: !!scenario,
     start,
+    resume,
     send,
     mic,
     end,
+    /** The learner asked to see the coach's text — recorded, never scored. */
+    reveal,
     ask,
     /** Remove one of the wrap-up's captured words from the deck again. */
     dropWord,
-    exitReflection: () => setReflecting(false),
+    /** Commit the wrap-up's candidates to the deck — "Keep these N". */
+    keepWords,
+    /** Re-run the summary call after a failed one — the reflection's regenerate. */
+    regenerateSummary,
+    /**
+     * Close the reflection. Any captured word still sitting as a *candidate* is
+     * dropped — the learner never pressed "Keep these N", so nothing enters the
+     * deck. Words they did keep are already gone from `reflection.words` (keepWords
+     * empties it), so this only ever touches the un-kept candidates.
+     */
+    exitReflection: () => {
+      const pending = reflection?.words ?? [];
+      if (pending.length) {
+        for (const w of pending) void deleteVocabTerm(settings.profile.targetLanguage, w.term).catch(() => {});
+      }
+      setReflecting(false);
+    },
     reset: () => setScenario(null),
     /** The scenario a plan block points at, falling back to free conversation. */
     scenarioById: (id?: string) =>

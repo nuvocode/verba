@@ -6,7 +6,7 @@
 //
 // A metric that cannot be computed has value `null`, and null is not rendered.
 // An empty week is an honest empty screen (§0, principle 1).
-import { turnStats, signalLabel, signalMiss } from "./model.ts";
+import { turnStats, signalLabel, signalMiss, isAssistedReveal } from "./model.ts";
 import type { Signal } from "./model.ts";
 
 export type MetricId =
@@ -44,7 +44,14 @@ export function coachMetrics(signals: Signal[], now: number): Metric[] {
   // drifts across the day boundary and would count a signal daySeries leaves out,
   // so the two would disagree at the edge. The window starts at the midnight six
   // days before today and runs to `now`.
-  const inWindow = signals.filter((s) => s.observedAt >= dayKey(now) - 6 * 24 * 60 * 60 * 1000 && s.observedAt <= now);
+  //
+  // A reveal (PLAN-021) is a comprehension signal the learner asked for — recorded,
+  // never scored. It is excluded from the window entirely, so it moves no metric
+  // and no sample: a learner who asks for help is not measured as having done more
+  // (or less) than one who did not.
+  const inWindow = signals.filter(
+    (s) => s.observedAt >= dayKey(now) - 6 * 24 * 60 * 60 * 1000 && s.observedAt <= now && !isAssistedReveal(s),
+  );
 
   // complexity — mean words per sentence over unprompted turns
   const turns = inWindow.filter((s) => s.kind === "unpromptedTurn");
@@ -67,6 +74,10 @@ export function coachMetrics(signals: Signal[], now: number): Metric[] {
   const consistencyValue = inWindow.length === 0 ? null : new Set(inWindow.map((s) => dayKey(s.observedAt))).size;
 
   // comprehension — 100 * correct / answered
+  // Reveals (PLAN-021) are already excluded from the window above — they are
+  // recorded, never scored, so they move no metric and no sample. A listening
+  // question answered with the transcript open is *not* a reveal: it is a genuine
+  // answer with an `assisted` note, counted like any other (PLAN-026).
   const comprehension = inWindow.filter((s) => s.kind === "comprehension");
   const answered = comprehension.length;
   const correct = comprehension.filter((s) => !signalMiss(s)).length;
@@ -244,6 +255,11 @@ export function wins(panel: MetricPair[]): string[] {
  * One entry per day of the window, oldest first — the series invariant 9 asks for.
  * `active` is what the seven boxes mark, `count` is what the line draws. The two
  * come from one pass so a box and its point can never disagree.
+ *
+ * A reveal (PLAN-021) is excluded here exactly as it is in `coachMetrics`: it is
+ * recorded, never scored, so a day whose only signal is a reveal is not an active
+ * day. The two must agree — a reveal must not light a box that consistency would
+ * not count, or the seven boxes and the reported number would part ways.
  */
 export function daySeries(signals: Signal[], now: number, days = 7): { active: boolean; count: number }[] {
   const today = dayKey(now);
@@ -251,7 +267,9 @@ export function daySeries(signals: Signal[], now: number, days = 7): { active: b
   for (let i = days - 1; i >= 0; i--) {
     const dayStart = today - i * 24 * 60 * 60 * 1000;
     const dayEnd = dayStart + 24 * 60 * 60 * 1000;
-    const count = signals.filter((s) => s.observedAt >= dayStart && s.observedAt < dayEnd).length;
+    const count = signals.filter(
+      (s) => s.observedAt >= dayStart && s.observedAt < dayEnd && !isAssistedReveal(s),
+    ).length;
     out.push({ active: count > 0, count });
   }
   return out;

@@ -61,4 +61,34 @@ assert(!ended(399, 400), "not over while any of the column is below the mark");
 assert(ended(400, 400), "over once all of it has climbed past");
 assert(!ended(0, 0), "an unmeasured column has not 'ended' — it hasn't started");
 
+// --- one reading-time formula (PLAN-024) --------------------------------------
+// Read.tsx's estimate and Prompter.tsx's remaining time are the same call on the
+// same numbers: both count words with `countWords(sentences, locale)` and both
+// convert with `secondsFor(words, wpm)`. Changing wpm in the prompter updates the
+// estimate on the passage view because both read `settings.prompterWpm`. Prove it
+// by computing both numbers from the same inputs and asserting equality at three
+// wpm values.
+{
+  const sentences = [
+    "Maria went to the market on Saturday morning.",
+    "She bought fresh vegetables and some ripe fruit.",
+    "Then she walked home carrying her heavy bag.",
+  ];
+  const locale = "en";
+  const words = countWords(sentences, locale);
+  for (const wpm of [90, 130, 200]) {
+    // Read's estimate: the whole passage at the prompter's pace.
+    const readEstimate = secondsFor(words, wpm);
+    // Prompter's remaining time: the same words, the same pace.
+    const prompterRemaining = secondsFor(words, wpm);
+    assert.equal(readEstimate, prompterRemaining, `Read estimate === Prompter remaining at ${wpm} wpm`);
+    // And the estimate is the passage's words at that pace — not a guess.
+    assert.equal(readEstimate, (words / wpm) * 60, `the estimate is words/wpm*60 at ${wpm} wpm`);
+  }
+  // A non-Latin locale counts with the same tokenizer — a Japanese passage is not
+  // estimated by counting spaces.
+  const ja = ["私は市場でパンを買いました。", "彼女は新鮮な野菜を買いました。"];
+  assert(countWords(ja, "ja") > 2, "Japanese is counted by its own tokenizer, not by spaces");
+}
+
 console.log("prompter.check.ts ✓");

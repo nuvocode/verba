@@ -280,4 +280,54 @@ const turn = (words: number, sentences: number, at = NOW) =>
   assert.equal(active, consistency, "invariant 9: a signal just outside the day window is not counted by consistency");
 }
 
+// PLAN-021: a reveal is recorded, never scored — a day whose only signal is a
+// reveal is not an active day. daySeries and coachMetrics must agree, or the
+// seven boxes and the reported consistency would part ways.
+{
+  const reveal = sig("comprehension", { label: "reading comprehension", correct: true, assisted: true, source: "talk-subtitles", what: "line" }, NOW);
+  const series = daySeries([reveal], NOW);
+  assert.equal(series[6].active, false, "a day with only a reveal is not an active day");
+  assert.equal(series[6].count, 0, "…and it draws no point");
+  const consistency = coachMetrics([reveal], NOW).find((m) => m.id === "consistency")!.value;
+  assert.equal(consistency, null, "a reveal-only window measures no consistency");
+  // A reveal beside a real signal still leaves the day active — the reveal just
+  // does not add to it.
+  const mixed = daySeries([reveal, turn(5, 1, NOW)], NOW);
+  assert.equal(mixed[6].active, true, "a real signal keeps the day active beside a reveal");
+  assert.equal(mixed[6].count, 1, "the reveal does not add to the day's count");
+}
+
+// PLAN-026: a talk reveal still moves no metric, even beside a full signal set.
+{
+  const base = [
+    sig("comprehension", { label: "c", correct: true }),
+    sig("comprehension", { label: "c", correct: false }),
+    turn(5, 1),
+  ];
+  const baseMetrics = coachMetrics(base, NOW);
+  const withReveal = [...base, sig("comprehension", { label: "talk subtitles", correct: true, assisted: true, source: "talk-subtitles", what: "line", definition: "you asked to see the coach's text" })];
+  const revealMetrics = coachMetrics(withReveal, NOW);
+  for (const m of baseMetrics) {
+    const other = revealMetrics.find((x) => x.id === m.id)!;
+    assert.equal(other.value, m.value, `talk reveal must not move metric ${m.id}`);
+    assert.equal(other.sample, m.sample, `talk reveal must not move ${m.id}'s sample`);
+  }
+}
+
+// PLAN-026: a listening question answered with the transcript open is a real
+// answer, not a reveal — it counts toward comprehension and makes the day active.
+{
+  const answered = [
+    sig("comprehension", { label: "listening comprehension", correct: true, assisted: true, source: "listen-transcript", definition: "you had the transcript open for this chapter" }),
+    sig("comprehension", { label: "listening comprehension", correct: true, assisted: true, source: "listen-transcript", definition: "you had the transcript open for this chapter" }),
+    sig("comprehension", { label: "listening comprehension", correct: false, assisted: true, source: "listen-transcript", definition: "you had the transcript open for this chapter" }),
+  ];
+  const m = coachMetrics(answered, NOW);
+  assert.equal(m.find((x) => x.id === "comprehension")!.value, 67, "3 transcript-answered questions, 2 right → comprehension 67");
+  assert.equal(m.find((x) => x.id === "comprehension")!.sample, 3, "…all three stand on the metric");
+  const series = daySeries(answered, NOW);
+  assert.equal(series[6].active, true, "a day whose only signals are transcript-answered questions is active");
+  assert.equal(series[6].count, 3, "…and draws all three points");
+}
+
 console.log("coachmetrics.check OK");

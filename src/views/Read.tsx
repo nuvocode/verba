@@ -9,8 +9,9 @@ import AskSheet from "./read/AskSheet";
 import Passage from "./read/Passage";
 import Prompter from "./read/Prompter";
 import ReadingCheck from "./read/ReadingCheck";
-import { readSignals } from "../lib/signals";
+import { readSignals, voiceSignals } from "../lib/signals";
 import { dependencyMet, dependencyNote } from "../lib/learn";
+import { Generating, Nothing, Failed, Unusable } from "./States";
 
 /**
  * The reading screen: one passage, two ways to work it.
@@ -30,6 +31,7 @@ export default function Read({
   onAdvance,
   onCaptureKeys,
   onChange,
+  onSettings,
 }: {
   settings: Settings;
   read: ReadState;
@@ -40,6 +42,8 @@ export default function Read({
   onCaptureKeys: (captured: boolean) => void;
   /** The chosen view and pace are settings: they are meant to outlive the passage. */
   onChange: (patch: Partial<Settings>) => void;
+  /** Leave for Settings — the one action that changes the mic state. */
+  onSettings: () => void;
 }) {
   const block = day.plan?.activities.find((b) => b.kind === "read");
   const [asking, setAsking] = useState(false);
@@ -86,7 +90,11 @@ export default function Read({
       .map((q, i) => ({ q, given: c!.answers[i] ?? "", correct: c!.results[i] }))
       .filter((x) => x.correct !== undefined)
       .map((x) => ({ prompt: x.q.prompt, given: x.given, answer: x.q.answer, qKind: x.q.kind, correct: x.correct! }));
-    return readSignals(block.id, graded, read.saved);
+    // The teleprompter's measurement (PLAN-024): the voice turn the prompter
+    // observed rides the same pace/pronunciation path PLAN-018 established, so
+    // Coach reads the read-aloud the same way it reads a spoken talk turn.
+    const voice = read.voice ? voiceSignals(block.id, read.voice) : [];
+    return [...readSignals(block.id, graded, read.saved), ...voice];
   };
 
   const setView = (view: ReadView) => onChange({ readView: view });
@@ -113,31 +121,58 @@ export default function Read({
   if (!read.text)
     return (
       <>
+        {day.plan && dependencyNote(day.plan, day.done, "read") && (
+          <div className="dep-note">{dependencyNote(day.plan, day.done, "read")}</div>
+        )}
         <div className="empty fade">
-          {day.plan && dependencyNote(day.plan, day.done, "read") && (
-            <div className="dep-note">{dependencyNote(day.plan, day.done, "read")}</div>
+          {/* surface read: loading */}
+          {read.busy && (
+            <Generating
+              what={`Writing you a ${levelOf(settings.profile)} story…`}
+              eta="About 20 seconds on this model — it keeps words from your conversations warm."
+              step={read.step ?? undefined}
+            />
           )}
-          <h2>{read.busy ? "Writing you a passage…" : "Nothing to read yet."}</h2>
-          <p>
-            {read.busy
-              ? `A ${levelOf(settings.profile)} story about ${read.ask.topic || day.plan?.theme || "everyday life"}, in ${settings.profile.targetLanguage}.`
-              : "The coach writes a story at your level that reuses the words from your conversations."}
-          </p>
+
+          {/* surface read: unusable — a passage that failed the gates is never
+              shown (PLAN-022). The learner sees that it was turned away, a
+              regenerate, and — where one exists — the most recent saved passage
+              at the same level. */}
+          {!read.busy && read.outcome && !read.outcome.ok && (
+            <Unusable
+              what={read.outcome.why}
+              fallback={
+                read.outcome.fallback
+                  ? { label: "Read a saved passage instead", onClick: () => void read.openFallback() }
+                  : undefined
+              }
+              regenerate={{ label: "Try again", onClick: () => void generate({}) }}
+            />
+          )}
+
+          {/* surface read: empty */}
+          {!read.busy && !read.error && !read.outcome && (
+            <Nothing
+              why="The coach writes a story at your level that reuses the words from your conversations."
+              action={{ label: `Today's passage — ${day.plan?.theme ?? "everyday life"}`, onClick: () => void generate({}) }}
+            />
+          )}
+
+          {/* surface read: error */}
+          {!read.busy && read.error && (
+            <Failed say={read.error} retry={{ label: "Try again", onClick: () => void generate({}) }} />
+          )}
+
           {!read.busy && (
-            <>
-              <button className="btn" onClick={() => void generate({})}>
-                Today's passage — {day.plan?.theme ?? "everyday life"} →
-              </button>
-              <button
-                className="link"
-                title="Off-plan: a passage that is not part of today"
-                onClick={() => setAsking(true)}
-              >
-                Something else
-              </button>
-            </>
+            <button
+              className="link"
+              title="Off-plan: a passage that is not part of today"
+              onClick={() => setAsking(true)}
+            >
+              Something else
+            </button>
           )}
-          {read.error && <div className="err" style={{ maxWidth: 520, margin: "20px auto 0" }}>{read.error}</div>}
+
           {!read.busy && read.library.length > 0 && (() => {
             // The chip row only offers levels the library actually has, in CEFR order.
             const levels = CEFR_LEVELS.filter((l) => read.library.some((r) => r.cefr === l));
@@ -192,6 +227,7 @@ export default function Read({
           onView={setView}
           onWpm={(prompterWpm) => onChange({ prompterWpm })}
           onDone={finish}
+          onSettings={onSettings}
         />
         {sheet}
       </>

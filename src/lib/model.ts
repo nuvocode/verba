@@ -155,6 +155,26 @@ export function turnStats(s: Signal): { words: number; sentences: number; chars:
   return { words, sentences, chars };
 }
 
+/**
+ * The fourth — and last — structural payload reader: is this a *reveal* — a
+ * comprehension signal with no answer behind it, written solely because the
+ * learner asked to see the coach's text (PLAN-021)?
+ *
+ * Name-faithful on purpose: only Talk's subtitles reveal is a reveal. Listen's
+ * `assisted` flag (PLAN-026) sits on top of a real, answered question — that
+ * question measured the learner's understanding, so it stays in the metrics and
+ * must never be dropped here. The two are different facts: a reveal is synthetic
+ * (there is no right or wrong to it), an assisted answer is a genuine observation
+ * with assistance noted. Coach reads that flag off the payload when it wants to
+ * report it as a fact; it does not filter the answer out.
+ */
+export function isAssistedReveal(s: Signal): boolean {
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return false;
+  const { assisted, source } = p as { assisted?: unknown; source?: unknown };
+  return assisted === true && source === "talk-subtitles";
+}
+
 // --- §1.4 VocabItem ------------------------------------------------------------
 
 export type VocabItem = {

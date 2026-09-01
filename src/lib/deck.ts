@@ -19,6 +19,7 @@ export interface DeckCard {
   captured_by: string;
   source_surface: string;
   level_band: string | null;
+  status: string;
 }
 
 /** A card parked this long is not being learned any more; it is known. */

@@ -21,4 +21,19 @@ export const pack: LanguagePack = {
   promptHint:
     "Use tú for a friendly register unless the scenario calls for usted. Prefer everyday peninsular or neutral Latin-American vocabulary.",
   speech: { locale: "es-ES", voiceHint: "Spanish", recommendedVoices: ["piper-es", "kokoro"] },
+  stopwords: [
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "y", "o", "u", "de", "del", "a", "al", "en", "por",
+    "para", "con", "sin", "sobre", "entre", "hasta", "desde", "durante", "es", "son", "era", "eran", "fue", "fueron",
+    "ser", "estar", "está", "están", "estaba", "estaban", "yo", "tú", "él", "ella", "nosotros", "vosotros", "ellos",
+    "ellas", "usted", "ustedes", "mi", "mis", "tu", "tus", "su", "sus", "nuestro", "nuestra", "este", "esta", "estos",
+    "estas", "ese", "esa", "esos", "esas", "aquel", "aquella", "que", "quien", "cual", "cuando", "donde", "como",
+    "porque", "si", "no", "sí", "ya", "también", "muy", "más", "menos", "todo", "toda", "todos", "todas", "otro",
+    "otra", "otros", "otras", "mismo", "misma", "mismos", "mismas", "cada", "algo", "nada", "alguien", "nadie",
+    "hay", "había", "hubo", "tiene", "tienen", "tenía", "tenían", "puede", "pueden", "podía", "podían", "quiere",
+    "quieren", "quería", "querían", "hace", "hacen", "hacía", "hacían", "va", "van", "iba", "iban", "fue", "fueron",
+    "está", "están", "estaba", "estaban", "se", "le", "les", "me", "te", "nos", "os", "lo", "la", "los", "las",
+  ],
+  negations: [
+    "no", "nunca", "jamás", "tampoco", "ni", "nada", "nadie", "ninguno", "ninguna", "ningunos", "ningunas",
+  ],
 };

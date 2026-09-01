@@ -23,6 +23,7 @@
  */
 
 import { parseBackup, restore, collect, deviceId, type Backup } from "./backup.ts";
+import { SayError } from "./fmt.ts";
 
 /** Reached lazily so this module's pure half stays runnable outside Tauri (vault.check.ts). */
 const rust = async () => (await import("@tauri-apps/api/core")).invoke;
@@ -204,7 +205,7 @@ export async function push(appVersion: string): Promise<Meta> {
  */
 export async function pull(): Promise<void> {
   const { meta, backup, bytes } = await load(vaultDir());
-  if (!meta || !backup) throw new Error("That folder has no Verba data in it yet.");
+  if (!meta || !backup) throw new SayError("That folder has no Verba data in it yet.");
   await restore(backup);
   setState({ syncedAt: meta.updatedAt, dirty: false, bytes, error: "" });
 }

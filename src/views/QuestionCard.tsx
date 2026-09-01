@@ -1,9 +1,14 @@
 import type { Question } from "../lib/questions";
+import type { ListenOption } from "../lib/listening";
 
 /**
  * One comprehension question — a multiple choice or a fill-in-the-blank — with its
  * after-answer state. Shared by every activity that runs the check (listening,
  * reading), so the question looks and behaves the same wherever it appears.
+ *
+ * Listening passes `options` as `ListenOption[]` (text + why) and `hideMiss` to
+ * render its own richer miss panel (PLAN-026) below the card; reading uses the
+ * built-in answer + line.
  */
 export default function QuestionCard({
   q,
@@ -11,14 +16,19 @@ export default function QuestionCard({
   result,
   dir,
   onChange,
+  hideMiss = false,
 }: {
-  q: Question;
+  /** A shared question, or a listening question whose options carry `why` labels. */
+  q: Question | (Omit<Question, "options"> & { options?: ListenOption[] });
   value: string;
   result: boolean | undefined; // undefined until the answer is checked
   dir: string;
   onChange: (v: string) => void;
+  /** Suppress the built-in miss display — the caller renders its own panel. */
+  hideMiss?: boolean;
 }) {
   const done = result !== undefined;
+  const opts = q.options as ListenOption[] | undefined;
   return (
     <div className={`listen-q ${done ? (result ? "ok" : "miss") : ""}`}>
       <div className="listen-q-prompt" dir={q.kind === "cloze" ? dir : undefined}>
@@ -27,14 +37,14 @@ export default function QuestionCard({
 
       {q.kind === "mcq" ? (
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-          {q.options?.map((opt) => (
+          {opts?.map((opt) => (
             <button
-              key={opt}
-              className={`chip ${value === opt ? "on" : ""}`}
+              key={opt.text}
+              className={`chip ${value === opt.text ? "on" : ""}`}
               disabled={done}
-              onClick={() => onChange(opt)}
+              onClick={() => onChange(opt.text)}
             >
-              {opt}
+              {opt.text}
             </button>
           ))}
         </div>
@@ -49,7 +59,7 @@ export default function QuestionCard({
         />
       )}
 
-      {done && !result && (
+      {done && !result && !hideMiss && (
         <div className="listen-fix">
           <div>
             Answer: <strong dir={dir}>{q.answer}</strong>

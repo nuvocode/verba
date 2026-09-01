@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { ReadView, Settings } from "../../lib/settings";
 import { levelOf } from "../../lib/model";
 import { tokens } from "../../lib/text";
@@ -36,6 +36,15 @@ export default function Passage({
 }) {
   const { text, focusIdx, popover } = read;
 
+  // The focused sentence is scrolled into view (PLAN-024) — arrow keys move the
+  // focus, and the sentence must be visible to be read. The margin note beside it
+  // is highlighted by the same `focusIdx` (see the `.notes` rail below).
+  const sentRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  useEffect(() => {
+    if (focusIdx < 0) return;
+    sentRefs.current[focusIdx]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [focusIdx]);
+
   // Enter keeps the word being explained. Only while a popover with a meaning is
   // open, and never while they are typing — the ask sheet's own Enter is its own.
   const canSave = !!popover && !popover.saved && !!popover.lemma;
@@ -62,6 +71,10 @@ export default function Passage({
         <div className="topline">
           <div className="eyebrow">
             Generated for you · {levelOf(settings.profile)} · ~{Math.max(1, Math.round(text.sentences.length / 3))} min
+            {/* The reuse claim is conditional (PLAN-022, invariant 21): it prints
+                the gate's hit count, or nothing at all. The copy reads the gate's
+                output, never the request. */}
+            {read.reusedWords.length > 0 && ` · reuses ${read.reusedWords.length} of your words`}
           </div>
           <ViewToggle view={view} onView={onView} />
         </div>
@@ -76,6 +89,9 @@ export default function Passage({
           {text.sentences.map((s, i) => (
             <span
               key={i}
+              ref={(el) => {
+                sentRefs.current[i] = el;
+              }}
               className={`sent ${focusIdx === i ? "on" : ""}`}
               onClick={() => read.setFocusIdx(focusIdx === i ? -1 : i)}
             >
@@ -125,19 +141,29 @@ export default function Passage({
       </div>
 
       <div className="notes">
-        {read.notes.map(({ i, note }) => (
+        {read.notes.map((n) => (
           <button
-            key={i}
-            className={`note ${focusIdx === i ? "on" : ""}`}
+            key={n.sentence}
+            className={`note ${focusIdx === n.sentence ? "on" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
-              read.setFocusIdx(i);
+              read.setFocusIdx(n.sentence);
             }}
           >
             <div className="h">✳ Coach note</div>
-            <div className="b">{note}</div>
+            <div className="b">{n.body}</div>
           </button>
         ))}
+        {/* A failed notes call is not a failed passage (PLAN-023): the passage
+            stands, with a quiet line and a retry that asks only for notes. */}
+        {read.notesFailed && (
+          <div className="note quiet">
+            <div className="b">Notes did not come back.</div>
+            <button className="btn sm ghost" onClick={() => void read.retryNotes()} disabled={read.notesBusy}>
+              {read.notesBusy ? "Asking…" : "Try notes again"}
+            </button>
+          </div>
+        )}
       </div>
       <div />
 
@@ -146,12 +172,11 @@ export default function Passage({
           <div className="eyebrow" style={{ fontSize: 10, marginBottom: 8 }}>
             Sentence {focusIdx + 1} of {text.sentences.length}
           </div>
+          {/* invariant 25: a note lives in the margin rail, never here. This bar
+              keeps only what the margin lacks — the counter and the translation.
+              Focusing a sentence highlights its note beside it; repeating it here
+              would show the same fact twice. */}
           {read.canBilingual && <div className="en">{focused.native}</div>}
-          {focused.note && (
-            <div className="nt">
-              <span style={{ color: "var(--accent-ink)" }}>✳</span> {focused.note}
-            </div>
-          )}
         </div>
       )}
 

@@ -3,6 +3,7 @@ import { newCard, schedule, DAILY_REVIEW_CAP, type Grade } from "./srs";
 import { worthLearning, tooEasyToAutoAdd } from "./vocab";
 import { planMemory, type Memory, type MemoryWrite } from "./prompts";
 import { markDirty } from "./vault";
+import { foldSessions, type SessionRow, type SessionDay } from "./fmt";
 import type { Signal, SignalKind } from "./model";
 
 let dbPromise: Promise<Database> | null = null;
@@ -165,6 +166,15 @@ async function init(): Promise<Database> {
   await db.execute("ALTER TABLE vocab ADD COLUMN captured_by TEXT NOT NULL DEFAULT 'learner'").catch(() => {});
   await db.execute("ALTER TABLE vocab ADD COLUMN source_surface TEXT NOT NULL DEFAULT ''").catch(() => {});
   await db.execute("ALTER TABLE vocab ADD COLUMN level_band TEXT").catch(() => {});
+  // PLAN-020: captured words land as *candidates* the learner approves, not as
+  // deck cards. `status` is 'candidate' until "Keep these N" commits them to
+  // 'kept'. Existing rows default to 'kept' so no deck changes under anyone.
+  await db.execute("ALTER TABLE vocab ADD COLUMN status TEXT NOT NULL DEFAULT 'kept'").catch(() => {});
+  // PLAN-025: a listening session remembers which chapter was in progress, so
+  // re-entering Listen resumes there rather than at chapter 1. Position within a
+  // chapter is deliberately not stored — a chapter is short, and restarting it is
+  // better than resuming mid-sentence. Older rows default to 0 (chapter 1).
+  await db.execute("ALTER TABLE listening_sessions ADD COLUMN chapter_idx INTEGER NOT NULL DEFAULT 0").catch(() => {});
   await migrateVocabToPerLanguage(db);
   return db;
 }
@@ -233,14 +243,7 @@ export async function addMessage(sessionId: number, role: string, content: strin
   ]);
 }
 
-export interface SessionRow {
-  id: number;
-  scenario: string;
-  started_at: number;
-  summary: string | null;
-  /** Written by the coach. NULL on sessions that predate titles, or whose title call failed. */
-  title: string | null;
-}
+export type { SessionRow, SessionGroup, SessionDay } from "./fmt";
 
 /** Past conversations, newest first. Sessions that never got a message are noise — skip them. */
 export async function listSessions(limit = 50): Promise<SessionRow[]> {
@@ -261,12 +264,45 @@ export async function sessionMessages(sessionId: number): Promise<{ role: string
   );
 }
 
+/** One session row, or null when it is gone. Used by resume to rehydrate a conversation. */
+export async function getSession(sessionId: number): Promise<SessionRow | null> {
+  const db = await getDb();
+  const rows = await db.select<SessionRow[]>(
+    "SELECT id, scenario, started_at, summary, title FROM sessions WHERE id = $1",
+    [sessionId],
+  );
+  return rows[0] ?? null;
+}
+
 export async function setSummary(sessionId: number, summary: string): Promise<void> {
   await write("UPDATE sessions SET summary = $1 WHERE id = $2", [summary, sessionId]);
 }
 
 export async function setTitle(sessionId: number, title: string): Promise<void> {
   await write("UPDATE sessions SET title = $1 WHERE id = $2", [title, sessionId]);
+}
+
+// ---- history groups & folds ----
+
+/**
+ * The history, grouped by day (via `when()`'s calendar) and within a day folded
+ * by scenario. A group with `count > 1` renders as one row that expands.
+ * The pure folding lives in `foldSessions` (lib/fmt.ts) so a check can hold it
+ * without a database in the room.
+ */
+export async function sessionGroups(): Promise<SessionDay[]> {
+  const rows = await listSessions(200);
+  // The day key is the learner's local calendar, not UTC: two sessions on the
+  // same local day — even hours apart — fold into that one day. `at` is that
+  // day's local midnight, so the header renders through `when()` like every
+  // other date (PLAN-015), never a raw key.
+  return foldSessions(rows, (at) => {
+    const d = new Date(at);
+    return {
+      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
+      at: new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(),
+    };
+  });
 }
 
 // ---- vocabulary / SRS ----
@@ -285,6 +321,8 @@ export interface VocabRow {
   captured_by: string;
   source_surface: string;
   level_band: string | null;
+  /** 'kept' is in the deck; 'candidate' awaits the learner's "Keep these N". */
+  status: string;
 }
 
 // Every read and write below is scoped to one language: a deck belongs to the
@@ -304,6 +342,7 @@ export async function addVocab(
   lang: string,
   item: { term: string; translation: string; example: string; type?: string; levelBand?: string | null },
   origin: { capturedBy: "learner" | "coach"; surface: string; learnerLevel: string },
+  status: "kept" | "candidate" = "kept",
 ): Promise<boolean> {
   if (!worthLearning(item).ok) return false;
   // invariant 16: the tutor does not put words two bands below the learner in
@@ -312,8 +351,8 @@ export async function addVocab(
   // INSERT OR IGNORE keeps existing SRS progress if the term was already captured.
   const r = await write(
     `INSERT OR IGNORE INTO vocab (lang, term, translation, example, ease, interval, due, reps, lapses,
-                                  type, captured_by, source_surface, level_band, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+                                  type, captured_by, source_surface, level_band, status, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
     [
       lang,
       item.term.trim(),
@@ -328,6 +367,7 @@ export async function addVocab(
       origin.capturedBy,
       origin.surface,
       item.levelBand ?? null,
+      status,
       Date.now(),
     ],
   );
@@ -337,6 +377,14 @@ export async function addVocab(
 /** The learner dropping a card. A deck they cannot prune is a deck they stop opening. */
 export async function deleteVocab(id: number): Promise<void> {
   await write("DELETE FROM vocab WHERE id = $1", [id]);
+}
+
+/**
+ * Commit a captured candidate to the deck — the "Keep these N" press. Only a
+ * row that is still a candidate is moved; a term already kept is left alone.
+ */
+export async function keepVocab(lang: string, term: string): Promise<void> {
+  await write("UPDATE vocab SET status = 'kept' WHERE lang = $1 AND term = $2 AND status = 'candidate'", [lang, term]);
 }
 
 /**
@@ -362,18 +410,24 @@ export async function deleteVocabTerm(lang: string, term: string): Promise<void>
  * handful of over-counted rows, and only until the learner clears the group.
  */
 const REVIEWABLE = "TRIM(COALESCE(translation, '')) <> '' AND term NOT GLOB '*[0-9]*'";
+// Only 'kept' cards are in the deck — 'candidate' rows await the learner's
+// "Keep these N" and must not surface in reviews or counts (PLAN-020).
+const KEPT = "status = 'kept'";
 
 export async function dueVocab(lang: string, now = Date.now(), limit = DAILY_REVIEW_CAP): Promise<VocabRow[]> {
   const db = await getDb();
   return db.select<VocabRow[]>(
-    `SELECT * FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE} ORDER BY due ASC LIMIT $3`,
+    `SELECT * FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE} AND ${KEPT} ORDER BY due ASC LIMIT $3`,
     [lang, now, limit],
   );
 }
 
 export async function allVocab(lang: string): Promise<VocabRow[]> {
   const db = await getDb();
-  return db.select<VocabRow[]>("SELECT * FROM vocab WHERE lang = $1 ORDER BY created_at DESC", [lang]);
+  return db.select<VocabRow[]>(
+    `SELECT * FROM vocab WHERE lang = $1 AND ${KEPT} ORDER BY created_at DESC`,
+    [lang],
+  );
 }
 
 /**
@@ -387,11 +441,11 @@ export async function vocabCounts(
 ): Promise<{ total: number; due: number; today: number }> {
   const db = await getDb();
   const total = await db.select<{ n: number }[]>(
-    `SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND ${REVIEWABLE}`,
+    `SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND ${REVIEWABLE} AND ${KEPT}`,
     [lang],
   );
   const due = await db.select<{ n: number }[]>(
-    `SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE}`,
+    `SELECT COUNT(*) AS n FROM vocab WHERE lang = $1 AND due <= $2 AND ${REVIEWABLE} AND ${KEPT}`,
     [lang, now],
   );
   return { total: total[0]?.n ?? 0, due: due[0]?.n ?? 0, today: Math.min(due[0]?.n ?? 0, DAILY_REVIEW_CAP) };
@@ -455,6 +509,20 @@ export async function getReading(id: number): Promise<unknown | null> {
   return rows[0] ? JSON.parse(rows[0].text) : null;
 }
 
+/**
+ * The most recent saved passage at a given level — the fallback a rejected
+ * generation offers (PLAN-022). Returns a parsed ReadingText, or null when the
+ * learner has no saved passage at that level. Query only: the schema is untouched.
+ */
+export async function latestReadingAtLevel(lang: string, cefr: string): Promise<unknown | null> {
+  const db = await getDb();
+  const rows = await db.select<{ text: string }[]>(
+    "SELECT text FROM reading_sessions WHERE lang = $1 AND cefr = $2 ORDER BY created_at DESC LIMIT 1",
+    [lang, cefr],
+  );
+  return rows[0] ? JSON.parse(rows[0].text) : null;
+}
+
 // ---- listening sessions ----
 
 /** Store a finished listening piece with the learner's answers and comprehension accuracy. */
@@ -465,10 +533,53 @@ export async function saveListening(
   answers: unknown,
   accuracy: number,
 ): Promise<void> {
+  // A finished session supersedes any in-progress row for the same piece — the
+  // learner got to the end, so there is nothing left to resume.
+  await write("DELETE FROM listening_sessions WHERE lang = $1 AND title = $2 AND accuracy = -1", [lang, title]);
   await write(
     "INSERT INTO listening_sessions (lang, title, piece, answers, accuracy, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
     [lang, title, JSON.stringify(piece), JSON.stringify(answers), accuracy, Date.now()],
   );
+}
+
+/**
+ * Write the chapter a listening session is in, so re-entering Listen resumes
+ * there rather than at chapter 1 (PLAN-025). Position within a chapter is
+ * deliberately not stored — a chapter is short, and restarting it is better than
+ * resuming mid-sentence.
+ *
+ * An unfinished session is marked with `accuracy = -1` (a finished row always
+ * carries a real 0..1), so `latestListeningProgress` can tell "in progress" from
+ * "done". One in-progress row per piece: writing again replaces the old one.
+ */
+export async function saveListeningProgress(
+  lang: string,
+  title: string,
+  piece: unknown,
+  chapterIdx: number,
+): Promise<void> {
+  await write("DELETE FROM listening_sessions WHERE lang = $1 AND title = $2 AND accuracy = -1", [lang, title]);
+  await write(
+    "INSERT INTO listening_sessions (lang, title, piece, answers, accuracy, chapter_idx, created_at) VALUES ($1, $2, $3, '[]', -1, $4, $5)",
+    [lang, title, JSON.stringify(piece), chapterIdx, Date.now()],
+  );
+}
+
+/** The chapter a listening session was in when it was left — null when none is in progress. */
+export async function latestListeningProgress(lang: string): Promise<{ title: string; piece: unknown; chapterIdx: number } | null> {
+  const db = await getDb();
+  const rows = await db.select<{ title: string; piece: string; chapter_idx: number }[]>(
+    "SELECT title, piece, chapter_idx FROM listening_sessions WHERE lang = $1 AND accuracy = -1 ORDER BY created_at DESC LIMIT 1",
+    [lang],
+  );
+  if (!rows[0]) return null;
+  let piece: unknown = null;
+  try {
+    piece = JSON.parse(rows[0].piece);
+  } catch {
+    return null; // a corrupt in-progress row is not worth resuming — start fresh
+  }
+  return { title: rows[0].title, piece, chapterIdx: rows[0].chapter_idx };
 }
 
 // ---- Phase 3: level metrics v2 ----

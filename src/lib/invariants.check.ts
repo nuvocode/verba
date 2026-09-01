@@ -117,57 +117,57 @@ const LEDGER: Row[] = [
   {
     id: 17,
     claim: "Hiçbir Coach Note, pasajda geçmeyen bir ifadeye atıfta bulunmaz.",
-    pending: "M1+ (İçerik üretimi)",
+    assertedIn: [{ file: "src/lib/notes.check.ts", marker: "invariant 17" }],
   },
   {
     id: 18,
     claim: "Not sayısı ≤ cümle sayısı / 2.",
-    pending: "M1+ (İçerik üretimi)",
+    assertedIn: [{ file: "src/lib/notes.check.ts", marker: "invariant 18" }],
   },
   {
     id: 19,
     claim: "Read notları Talk'un düzeltme şemasını kullanmaz.",
-    pending: "M1+ (İçerik üretimi)",
+    assertedIn: [{ file: "src/lib/notes.check.ts", marker: "invariant 19" }],
   },
   {
     id: 20,
     claim: "Kalite kapılarından geçmemiş içerik gösterilmez.",
-    pending: "M1+ (İçerik üretimi)",
+    assertedIn: [{ file: "src/lib/passage.check.ts", marker: "invariant 20" }],
   },
   {
     id: 21,
     claim: 'Bir pasaj "yeniden kullanım" iddiasıyla üretildiyse hedef kelimelerin ≥ %50\'sini içerir.',
-    pending: "M1+ (İçerik üretimi)",
+    assertedIn: [{ file: "src/lib/passage.check.ts", marker: "invariant 21" }],
   },
   {
     id: 22,
     claim: "Ham model çıktısı (JSON, stack trace) hiçbir kullanıcı yüzeyinde görünmez.",
-    pending: "M1+ (Arayüz)",
+    assertedIn: [{ file: "src/lib/prompts.check.ts", marker: "invariant 22" }],
   },
   {
     id: 23,
     claim: "Ekranda ilan edilen kısayol sayısı === çalışan kısayol sayısı.",
-    pending: "M1+ (Arayüz)",
+    assertedIn: [{ file: "src/lib/keys.check.ts", marker: "invariant 23" }],
   },
   {
     id: 24,
     claim: '`Esc` her yüzeyde "bir seviye yukarı" anlamındadır.',
-    pending: "M1+ (Arayüz)",
+    assertedIn: [{ file: "src/lib/keys.check.ts", marker: "invariant 24" }],
   },
   {
     id: 25,
     claim: "Aynı bilgi aynı anda iki yerde gösterilmez.",
-    pending: "M1+ (Arayüz)",
+    assertedIn: [{ file: "src/lib/surfaces.check.ts", marker: "invariant 25" }],
   },
   {
     id: 26,
     claim: "Ölçüm başlamadan hiçbir ölçüm değeri gösterilmez.",
-    pending: "M1+ (Arayüz)",
+    assertedIn: [{ file: "src/lib/confidence.check.ts", marker: "invariant 26" }],
   },
   {
     id: 27,
     claim: "Her yüzey dört durumu (yükleniyor / boş / hata / bozuk içerik) uygular.",
-    pending: "M1+ (Arayüz)",
+    assertedIn: [{ file: "src/lib/surfaces.check.ts", marker: "invariant 27" }],
   },
 ];
 

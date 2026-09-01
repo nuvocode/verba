@@ -55,7 +55,7 @@ const pack = getPack("ja");
 assert(pack, "the bundled Japanese pack must resolve");
 const plan = buildDailyPlan(s, { date: "2026-07-12", dayIndex: 1, dueVocab: 0 });
 const carriers: [string, string][] = [
-  ["buildSystem", buildSystem(s, BUNDLED_SCENARIOS[0], pack)],
+  ["buildSystem", buildSystem(s, BUNDLED_SCENARIOS[0], BUNDLED_SCENARIOS[0].persona, pack)],
   ["vocabPrompt", vocabPrompt(s, pack)],
   ["summaryPrompt", summaryPrompt(s, pack)],
   ["placementPrompt", placementPrompt(s, pack)],

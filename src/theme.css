@@ -123,6 +123,13 @@ input { font: inherit; }
    tap target inside a 19px title and pushed it into the line below. */
 .pick .rec { display: inline-block; margin-left: 9px; padding: 2px 8px; border: 1px solid var(--accent); border-radius: 20px; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); vertical-align: middle; }
 .pick.on .tag { color: var(--accent); }
+/* The picker card's wrapper: the card plus the imported mark and the inline
+   Edit / Duplicate / Delete row. The card is the tap target; the actions sit
+   under it, only for learner-made scenarios. */
+.pick-wrap { position: relative; }
+.pick-wrap .tag { position: absolute; top: 10px; right: 10px; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
+.pick-actions { display: flex; gap: 12px; padding: 8px 4px 0; font-size: 12px; }
+.pick-confirm { display: inline-flex; gap: 12px; }
 /* the quiet native-language line + its inline picker */
 .native { margin-top: 22px; font-size: 13.5px; color: var(--ink2); }
 .plan-row .native { margin-top: 0; font-size: inherit; color: inherit; }
@@ -176,6 +183,15 @@ input { font: inherit; }
 .msg .corr .body b { font-weight: 600; color: var(--ink); }
 .msg .noted { font-size: 11px; color: var(--ink3); margin-top: 7px; display: flex; align-items: center; gap: 6px; }
 .msg .noted i { width: 5px; height: 5px; border-radius: 50%; background: var(--warn); display: inline-block; }
+/* Subtitles off (PLAN-021): the coach's line is a curtain, not a mode. The
+   reveal bar says the message exists and offers the free reveal — full width,
+   so it reads as a placeholder for the hidden line, not a separate message. */
+.reveal-bar { display: block; width: 100%; max-width: 560px; text-align: left; border: 1px dashed var(--line); background: var(--bg2); color: var(--ink3); border-radius: 8px; padding: 12px 14px; font-size: 13px; cursor: pointer; }
+.reveal-bar:hover { border-color: var(--accent); color: var(--accent-ink); }
+.reveal-all { display: block; max-width: 640px; margin: 0 auto 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink2); border-radius: 8px; padding: 9px 14px; font-size: 12.5px; cursor: pointer; }
+.reveal-all:hover { border-color: var(--accent); color: var(--accent-ink); }
+.subtitles-toggle { height: 46px; flex: none; padding: 0 14px; border: 1px solid var(--line); color: var(--ink2); background: var(--surface); border-radius: 9px; font-size: 12.5px; cursor: pointer; }
+.subtitles-toggle:hover { border-color: var(--accent); color: var(--accent-ink); }
 .typing { font-size: 13px; color: var(--ink3); animation: vpulse 1.2s ease infinite; margin-bottom: 20px; }
 .composer { flex: none; padding: 16px 48px 26px; }
 .composer .bar { max-width: 640px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
@@ -198,8 +214,10 @@ input { font: inherit; }
 .rail .lbl { font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink3); margin-bottom: 14px; }
 .goal { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 9px; }
 .goal .mk { color: var(--ink3); font-size: 12px; width: 14px; flex: none; }
-.goal.hit .mk { color: var(--good); }
-.goal.hit span { color: var(--ink3); text-decoration: line-through; }
+.goal.met .mk { color: var(--good); }
+.goal.met span { color: var(--ink3); text-decoration: line-through; }
+.goal.missed .mk { color: var(--sev); }
+.goal.missed span { color: var(--ink3); }
 .sugg { display: flex; gap: 10px; align-items: flex-start; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 11px 12px; margin-bottom: 8px; width: 100%; text-align: left; }
 .sugg:hover { border-color: var(--accent); }
 .sugg .k { font-family: var(--mono); font-size: 10px; color: var(--ink3); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; flex: none; margin-top: 1px; }
@@ -209,6 +227,9 @@ input { font: inherit; }
 .conf i { font-style: normal; font-size: 12px; color: var(--good); }
 .meter { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .meter > div { height: 100%; background: var(--accent); border-radius: 2px; transition: width .4s; }
+/* The live recording meter: no width transition, so the bar tracks the voice
+   instead of lagging behind it. The confidence meter keeps the eased bar. */
+.meter.live > div { transition: none; }
 
 /* The coach's face. Mouth frames come from lib/voice.ts, driven by the audio;
    the breathing and the blink are the character's own. It sits at the top of the
@@ -482,10 +503,14 @@ input { font: inherit; }
 .ask .len.on .n { color: var(--ink2); }
 
 /* ---------- listening ---------- */
-.listen { max-width: 640px; margin: 0 auto; padding: 40px 24px 80px; }
+/* The page balances (PLAN-026): a three-row grid — head, player, work — that fills
+   the viewport. The transport is vertically centred in its row and the question
+   block grows into the space rather than the page ending halfway down. No fixed
+   pixel heights; dvh and minmax, so it survives a resized window. */
+.listen { height: 100dvh; display: grid; grid-template-rows: auto minmax(0, auto) minmax(0, 1fr); max-width: 640px; margin: 0 auto; padding: 40px 24px 24px; }
 .listen-head { margin-bottom: 24px; }
 .listen-title { font-family: var(--serif); font-size: 26px; font-weight: 500; margin-top: 6px; }
-.listen-play { margin-bottom: 34px; min-height: 46px; display: flex; align-items: center; }
+.listen-play { min-height: 46px; display: flex; align-items: center; }
 .speaking { display: flex; align-items: center; gap: 4px; }
 .speaking em { font-style: normal; font-size: 13px; color: var(--accent-ink); margin-right: 10px; }
 .speaking i { width: 3px; height: 18px; background: var(--accent); border-radius: 2px; animation: vbar .7s ease infinite; }
@@ -493,7 +518,25 @@ input { font: inherit; }
 .speaking i:nth-child(4) { animation-delay: .3s; }
 .speaking i:nth-child(5) { animation-delay: .45s; }
 .speaking i:nth-child(6) { animation-delay: .6s; }
+/* The timeline transport (PLAN-025): play/pause, back-10s, the position bar and
+   the speed knob. A control that cannot work is not shown — the seekable flag
+   decides which of these render, so nothing here is ever disabled. */
+.listen-transport { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.listen-row { display: flex; align-items: center; gap: 10px; }
+.listen-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line); appearance: none; cursor: pointer; min-width: 0; }
+.listen-bar::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); }
+.listen-bar::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); }
+.listen-time { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ink2); min-width: 40px; text-align: right; }
+.listen-rate { display: flex; align-items: center; gap: 2px; }
+.listen-rate button { border: 1px solid transparent; background: transparent; color: var(--ink2); font-size: 12px; padding: 3px 7px; border-radius: 6px; cursor: pointer; }
+.listen-rate button.active { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft, transparent); }
+.listen-note { font-size: 13px; color: var(--ink2); }
+.listen-note button { margin-left: 6px; }
 .listen-hint { color: var(--ink2); font-size: 14px; }
+/* The work row grows into the space; when the question block (or an open
+   transcript) is taller than the window, it scrolls rather than pushing the
+   transport off-screen. */
+.listen-work { min-height: 0; overflow-y: auto; }
 .listen-count { margin-bottom: 12px; }
 .listen-qs { display: flex; flex-direction: column; gap: 22px; margin-bottom: 28px; }
 .listen-q { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
@@ -503,9 +546,15 @@ input { font: inherit; }
 .listen-input { width: 100%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 7px; padding: 10px 12px; font-size: 14px; outline: none; font-family: inherit; }
 .listen-input:focus { border-color: var(--ink3); }
 .listen-fix { margin-top: 14px; font-size: 13px; color: var(--ink2); }
+.listen-why { margin-top: 6px; color: var(--ink2); }
 .listen-line { margin-top: 6px; font-style: italic; color: var(--ink3); }
 .listen-good { margin-top: 12px; font-size: 13px; color: var(--good); }
 .listen-after { display: flex; flex-direction: column; gap: 20px; align-items: flex-start; }
+/* The miss panel (PLAN-026): the right answer, why the chosen one was wrong, a
+   replay of the line it came from, and the source line only if the transcript is
+   open. */
+.listen-miss { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; margin-top: 18px; padding: 16px 18px; border: 1px solid var(--warn); border-radius: 12px; }
+.listen-miss .listen-fix { margin-top: 0; }
 .listen-transcript p { font-size: 15px; line-height: 1.6; margin: 0 0 10px; }
 .listen-transcript .tr-native { color: var(--ink2); }
 

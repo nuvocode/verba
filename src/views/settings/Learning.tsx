@@ -363,6 +363,14 @@ export default function Learning({
           onClick={() => onChange({ showHints: !settings.showHints })}
         />
       </div>
+      <div data-setting="subtitles">
+        <ToggleRow
+          title="Subtitles"
+          desc="Show the coach's lines as they are spoken. Turn them off to practise listening — asking for the text back is recorded and costs nothing."
+          on={settings.subtitles}
+          onClick={() => onChange({ subtitles: !settings.subtitles })}
+        />
+      </div>
     </>
   );
 }

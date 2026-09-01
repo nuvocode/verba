@@ -5,16 +5,24 @@
 // Run: node --experimental-strip-types src/lib/speech.check.ts
 import assert from "node:assert";
 import {
+  bundledStt,
+  bundledTts,
+  deepgram,
   deepgramHelp,
+  elevenLabs,
   getSpeech,
   listenBlocker,
   micRoute,
   micTrouble,
   migrateSpeech,
+  openaiStt,
+  openaiTts,
   pruneBundled,
   prunedNote,
+  record,
   resolveTier,
   tierName,
+  webSpeech,
 } from "./speech.ts";
 
 // --- the original bug: an ElevenLabs key must not decide dictation ---
@@ -263,5 +271,259 @@ assert.match(micRoute("Mozilla/5.0 (X11; Linux x86_64)"), /privacy settings/, "s
 assert.equal(tierName("native", "tts"), "your system voice");
 assert.equal(tierName("native", "stt"), "your system's speech recognition");
 assert.notEqual(tierName("cloud", "tts"), tierName("cloud", "stt"), "the two halves use different cloud services");
+
+// ---- PLAN-018: every tier's partials flag matches what it can do ----
+// Asserted by construction over the exported factories: a tier either streams
+// partials (bundled whisper, a local server) or it does not (cloud, the OS).
+assert.equal(bundledStt("whisper-base").partials, true, "bundled whisper streams partials");
+assert.equal(openaiStt("http://localhost:8000/v1", "m").partials, true, "a local server streams partials");
+assert.equal(deepgram("key").partials, false, "Deepgram is record-then-transcribe — no partials");
+assert.equal(webSpeech().partials, false, "the OS recogniser has no partials");
+
+// ---- PLAN-018: record() measures the envelope and stops on silence ----
+// Headless node has no mic, no MediaRecorder, no AudioContext — give it fakes
+// that drive the analyser frames the silence detector reads.
+{
+  let rafCb: (() => void) | null = null;
+  (globalThis as any).requestAnimationFrame = (cb: () => void) => {
+    rafCb = cb;
+    return 1;
+  };
+  (globalThis as any).cancelAnimationFrame = () => {
+    rafCb = null;
+  };
+
+  class FakeAnalyser {
+    level = 0;
+    getByteTimeDomainData(buf: Uint8Array) {
+      // A constant level fills the buffer with a constant sample; RMS reads it back.
+      const v = Math.max(0, Math.min(255, Math.round(this.level * 128) + 128));
+      buf.fill(v);
+    }
+  }
+  let currentCtx: { analyser: FakeAnalyser } | null = null;
+  (globalThis as any).AudioContext = class {
+    analyser = new FakeAnalyser();
+    constructor() {
+      currentCtx = this;
+    }
+    createMediaStreamSource() {
+      return { connect: () => {} };
+    }
+    createAnalyser() {
+      return this.analyser;
+    }
+    // pcm16k() decodes the clip before handing it to whisper; the fake returns a
+    // short buffer so the decode path runs without a real audio engine.
+    async decodeAudioData() {
+      return { duration: 0.1 };
+    }
+    close() {
+      return Promise.resolve();
+    }
+  };
+  // pcm16k() re-renders the decoded clip at 16 kHz through an OfflineAudioContext.
+  (globalThis as any).OfflineAudioContext = class {
+    destination = {};
+    createBufferSource() {
+      return { buffer: null, connect: () => {}, start: () => {} };
+    }
+    async startRendering() {
+      return { getChannelData: () => new Float32Array(1600) };
+    }
+  };
+
+  let stopped = false;
+  class FakeMediaRecorder {
+    static instances: FakeMediaRecorder[] = [];
+    state = "inactive";
+    mimeType = "audio/webm";
+    startedWith: number | undefined;
+    ondataavailable: ((e: any) => void) | null = null;
+    onstop: (() => void) | null = null;
+    onerror: ((e: any) => void) | null = null;
+    constructor() {
+      FakeMediaRecorder.instances.push(this);
+    }
+    start(timeslice?: number) {
+      // A real MediaRecorder throws InvalidStateError if start() is called while
+      // already recording. The fake must too, or a tier that double-starts would
+      // pass here and crash on a real webview.
+      if (this.state === "recording") {
+        const err = new Error("Failed to execute 'start' on 'MediaRecorder': The MediaRecorder's state is 'recording'.");
+        (err as any).name = "InvalidStateError";
+        throw err;
+      }
+      this.state = "recording";
+      this.startedWith = timeslice;
+    }
+    stop() {
+      this.state = "inactive";
+      stopped = true;
+      this.onstop?.();
+    }
+  }
+  (globalThis as any).MediaRecorder = FakeMediaRecorder;
+  Object.defineProperty(globalThis, "navigator", {
+    value: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [] }) } },
+    configurable: true,
+  });
+
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  let t = 0;
+  const frames = (level: number, n: number) => {
+    if (currentCtx) currentCtx.analyser.level = level;
+    for (let i = 0; i < n; i++) {
+      t += 16; // ~60 fps, as requestAnimationFrame actually runs
+      rafCb?.(t);
+    }
+  };
+
+  // Quiet before any speech must not stop the recording — a learner thinking for
+  // a few seconds is not a finished recording.
+  stopped = false;
+  const levels: number[] = [];
+  const p1 = record(() => {}, { silenceMs: 200, onLevel: (l) => levels.push(l) });
+  await flush(); // let mic() resolve and the analyser attach
+  frames(0, 10); // ten quiet frames, no speech yet
+  assert.equal(stopped, false, "quiet before any speech must not stop the recording");
+
+  // Speech, then enough quiet to trip the stop.
+  frames(0.1, 5); // speech
+  frames(0, 15); // 15 quiet frames = 240 ms > 200 ms silenceMs
+  const r1 = await p1;
+  assert.equal(stopped, true, "silence after speech must stop the recording on its own");
+  assert(r1.ms > 0, "the recording reports how long it ran");
+  assert(r1.levels.length > 0, "the recording returns a non-empty envelope");
+  assert(levels.length > 0, "onLevel is fed the live meter");
+
+  // A recording that never sees speech must not self-stop on silence — only the
+  // cap (or a hand stop) ends it. Capture the recorder via onStart and stop it
+  // by hand, as cancel() would.
+  stopped = false;
+  let rec2: any = null;
+  const p2 = record((r) => (rec2 = r), { maxMs: 10_000, silenceMs: 200 });
+  await flush();
+  frames(0, 20); // still quiet — silence must not have stopped it
+  assert.equal(stopped, false, "a recording that never saw speech must not self-stop on silence");
+  rec2.stop(); // hand stop, as cancel() does
+  const r2 = await p2;
+  assert(r2.ms >= 0, "a hand-stopped recording still resolves with the record shape");
+  assert(r2.levels.length > 0, "the envelope is measured even when nothing was said");
+
+  // ---- review: record() passes the timeslice through to rec.start() ----
+  // A tier that wants partials asks for a timeslice; record() is the one place
+  // that calls start(), and it must hand the timeslice over. The fake records
+  // what it was started with.
+  stopped = false;
+  const p3 = record(() => {}, { timeslice: 1000 });
+  await flush();
+  const rec3 = FakeMediaRecorder.instances[FakeMediaRecorder.instances.length - 1];
+  assert.equal(rec3.startedWith, 1000, "record() passes the timeslice to rec.start()");
+  rec3.stop();
+  await p3;
+
+  // ---- review: a tier's listen() runs over the fake recorder, partials flow ----
+  // Drive bundledStt (in-process whisper) end to end over the fakes: the recorder
+  // is started with a timeslice, chunks feed the partial re-transcription, and
+  // onStopped fires the moment the recorder stops. The invoke mock stands in for
+  // the Rust whisper call.
+  {
+    (globalThis as any).window = {
+      __TAURI_INTERNALS__: {
+        invoke: async (cmd: string) => (cmd === "bundled_stt" ? "hola" : ""),
+      },
+    };
+    const partials: string[] = [];
+    let stoppedFired = false;
+    const stt = bundledStt("whisper-base");
+    const p4 = stt.listen({
+      onPartial: (t) => partials.push(t),
+      onStopped: () => (stoppedFired = true),
+    });
+    await flush(); // let mic() resolve and the analyser attach
+    const rec4 = FakeMediaRecorder.instances[FakeMediaRecorder.instances.length - 1];
+    assert.equal(rec4.startedWith, 1000, "bundledStt asks for a timeslice so partials can see the growing clip");
+    frames(0.1, 5); // speech, so the recording is real
+    // Feed a chunk the way the recorder would — this is what the partial
+    // re-transcription reads.
+    rec4.ondataavailable?.({ data: new Blob(["audio"], { type: "audio/webm" }) });
+    // The partial timer re-transcribes every ~1 s; give it a beat to run.
+    await new Promise((r) => setTimeout(r, 1200));
+    assert(partials.length > 0, "partials actually flow through the tier's listen()");
+    rec4.stop(); // as cancel() would — resolves the pending listen()
+    const r4 = await p4;
+    assert.equal(stoppedFired, true, "onStopped fires the moment the recorder stops");
+    assert.equal(r4.text, "hola", "the final transcription is the one that counts");
+    assert(r4.levels.length > 0, "the tier's listen() returns the measured envelope");
+  }
+}
+
+// ---- PLAN-025: every tier's seekable flag matches whether it exposes clip ----
+// A seekable tier hands back a clip and speaks it to the end; the OS-voice tier
+// has no bytes, so it must be false and carry no clip.
+assert.equal(bundledTts("piper-es", 0).seekable, true, "bundled is a byte tier — seekable");
+assert.equal(openaiTts("http://localhost:8000/v1", "kokoro", "af_heart").seekable, true, "a local server is a byte tier — seekable");
+assert.equal(elevenLabs("key").seekable, true, "a cloud tier is a byte tier — seekable");
+assert.equal(webSpeech().seekable, false, "the OS voice speaks outside the webview — not seekable");
+for (const t of [bundledTts("piper-es", 0), openaiTts("http://localhost:8000/v1", "m", "v"), elevenLabs("key"), webSpeech()]) {
+  assert.equal(typeof t.clip !== "undefined", t.seekable, "seekable and clip() appear together");
+}
+// The composite adapter surfaces the serving tier's seekable flag.
+assert.equal(getSpeech({ bundledTtsModel: "piper-es", offline: true }).seekable, true, "a bundled voice → the composite is seekable");
+assert.equal(getSpeech({}).seekable, false, "the OS voice → the composite is not seekable");
+
+// ---- PLAN-025: a clip's release revokes its URL, safely twice ----
+// Headless node has no HTMLAudioElement and no browser URL factory, so stub the
+// bits `clip()` touches and feed `bundledTts` bytes through a fake Tauri invoke
+// (as the STT test does) — no network, and the real URL constructor stays intact
+// for anything else. The check is about the *contract*: release is idempotent.
+{
+  const RealURL: typeof URL = (globalThis as any).URL;
+  const revoked: string[] = [];
+  (globalThis as any).URL = function (input: string, base?: string | URL) {
+    return new RealURL(input, base);
+  } as typeof URL;
+  (globalThis as any).URL.prototype = RealURL.prototype;
+  Object.assign((globalThis as any).URL, {
+    createObjectURL: () => "blob:plan025",
+    revokeObjectURL: (u: string) => void revoked.push(u),
+  });
+  (globalThis as any).Audio = class {
+    src: string;
+    constructor(src: string) {
+      this.src = src;
+    }
+    addEventListener() {}
+    play() {
+      return Promise.resolve();
+    }
+  };
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke: async () => new ArrayBuffer(8), // bundledTts → WAV bytes
+    },
+  };
+  const tier = bundledTts("piper-es", 0);
+  const c = await tier.clip!("hola");
+  assert.equal(c.el.src, "blob:plan025", "clip hands back an element on the object URL");
+  c.release();
+  c.release();
+  assert.equal(revoked.length, 1, "release revokes the URL once, and a second call is a safe no-op");
+}
+
+// ---- PLAN-025: speak() still resolves on a tier where clip() rejects ----
+// Blank text rejects from clip(); speak() guards the same way and resolves rather
+// than throwing — the "nothing to say" case must never wedge a button.
+{
+  const tier = openaiTts("http://localhost:8000/v1", "m", "v");
+  await tier.speak("   "); // must not throw
+  let clipped = false;
+  await tier.clip!("  ").then(
+    () => assert.fail("clip() of blank text must reject"),
+    () => (clipped = true),
+  );
+  assert.equal(clipped, true, "clip() rejects on blank text");
+}
 
 console.log("speech.check: ok");

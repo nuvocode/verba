@@ -55,9 +55,12 @@ assert(m.messages === 2 && m.words === 5, "word and message counts");
 assert(Math.abs(m.errorRate - 0.5) < 1e-9, "error rate = corrections / messages");
 assert(m.uniqueWords === 5 && Math.abs(m.typeTokenRatio - 1) < 1e-9, "all-distinct words → TTR 1");
 
-// --- coaching parsers: tolerant of fences/prose ---
+// --- coaching parsers: tolerant of fences/prose, honest about garbage ---
 const rep = parseWeeklyReport('```json\n{"report":"You practised a lot."}\n```');
-assert(rep.report === "You practised a lot.", "weekly report parsed through fence");
+assert(rep?.report === "You practised a lot.", "weekly report parsed through fence");
+// A reply with no report is `null`, not the raw text — the Unusable state is the
+// way out (§3.2), and handing the raw reply to the screen is what PLAN-015 forbids.
+assert(parseWeeklyReport("no json here") === null, "a report that fails to parse is null, never raw text");
 const drills = parseDrills('{"drills":[{"prompt":"Di algo","hint":"h","example":"e","area":"a"},{"nope":1}]}');
 assert(drills.length === 1 && drills[0].prompt === "Di algo", "drills without a prompt are dropped");
 const recap = parseRecap("garbage, no json");

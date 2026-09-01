@@ -25,7 +25,7 @@ function norm(s: string): string {
 }
 
 /** Did the answer land? Exact for mcq, punctuation/case-insensitive for cloze. */
-export function scoreAnswer(q: Question, given: string): boolean {
+export function scoreAnswer(q: Pick<Question, "answer">, given: string): boolean {
   const g = norm(given);
   return !!g && g === norm(q.answer);
 }

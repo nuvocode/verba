@@ -188,7 +188,9 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         case "listen":
           go("listening");
           if (!listening.piece && !listening.busy)
-            void listening.generate({ interests: day.plan?.theme, goal: activity?.goal });
+            void listening.resume().then((resumed) => {
+              if (!resumed) void listening.generate({ interests: day.plan?.theme, goal: activity?.goal });
+            });
           break;
         case "memory":
           go("memory");
@@ -288,7 +290,9 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         run: () => {
           go("listening");
           if (!listening.piece && !listening.busy)
-            void listening.generate({ interests: day.plan?.theme });
+            void listening.resume().then((resumed) => {
+              if (!resumed) void listening.generate({ interests: day.plan?.theme });
+            });
         },
       },
       {
@@ -406,9 +410,21 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       // announce them, not the hint line.
       if (!keyLive(space, e.key)) return;
 
+      // A chord is not a bare key. ⌘K is handled above; anything else held with a
+      // modifier (⌘, ⌃, ⌥) must not trip a single-letter shortcut — the learner
+      // is reaching for a browser or OS chord, not the app's table.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
       if (space === "talk" && !talk.reflecting && /^[1-3]$/.test(e.key)) {
         const s = talk.suggestions[Number(e.key) - 1];
         if (s) return void talk.send(s, true);
+      }
+      // Subtitles (PLAN-021): `s` toggles the coach's text. The composer has
+      // focus while the learner is typing, so `live()` already stands it down
+      // there — this only fires when the box is not the target.
+      if (space === "talk" && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        return update({ subtitles: !settings.subtitles });
       }
       if (space === "read" && read.text) {
         // P is the door between the two views, and it is open from both sides.
@@ -419,13 +435,17 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         // these stand down for as long as it is up.
         if (settings.readView === "passage") {
           const last = read.text.sentences.length - 1;
-          if (e.key === "ArrowRight") {
+          // From no focus, down/right focuses the first sentence; otherwise the
+          // arrows walk the focus one sentence at a time.
+          const next = read.focusIdx < 0 ? 0 : Math.min(read.focusIdx + 1, last);
+          const prev = read.focusIdx < 0 ? 0 : Math.max(read.focusIdx - 1, 0);
+          if (e.key === "ArrowRight" || e.key === "ArrowDown") {
             e.preventDefault();
-            return read.setFocusIdx(Math.min(read.focusIdx + 1, last));
+            return read.setFocusIdx(next);
           }
-          if (e.key === "ArrowLeft") {
+          if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
             e.preventDefault();
-            return read.setFocusIdx(Math.max(read.focusIdx - 1, 0));
+            return read.setFocusIdx(prev);
           }
           if (e.key.toLowerCase() === "t") return read.toggleBilingual();
         }
@@ -448,6 +468,25 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         if (listening.playing) listening.stop();
         else void listening.play();
         return;
+      }
+      // The transcript toggle (PLAN-026): `t` opens or closes it. Opening it once
+      // marks the chapter assisted — recorded, never scored.
+      if (space === "listening" && e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        listening.reveal();
+        return;
+      }
+      // Replay the line a wrong answer came from (PLAN-026): `r` plays
+      // spans[lineIdx] and stops at its end. Only live while a miss panel is
+      // showing the replay button — the hint line announces it only then.
+      if (space === "listening" && e.key.toLowerCase() === "r") {
+        const q = listening.chapter?.questions[listening.progress.step];
+        const miss = listening.progress.results[listening.progress.step] === false;
+        if (q && miss) {
+          e.preventDefault();
+          listening.replayRange(q.lineIdx);
+          return;
+        }
       }
 
       // The nav keys come from the one table, and only where they are actually
@@ -607,7 +646,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
 
       <div className="body">
         {space === "today" && <Today settings={settings} day={day} onBegin={begin} onOpen={go} />}
-        {space === "talk" && <Talk settings={settings} talk={talk} day={day} onAdvance={advance} />}
+        {space === "talk" && <Talk settings={settings} talk={talk} day={day} onAdvance={advance} onChange={update} />}
         {space === "read" && (
           <Read
             settings={settings}
@@ -616,6 +655,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
             onAdvance={advance}
             onCaptureKeys={setCaptured}
             onChange={update}
+            onSettings={() => go("settings")}
           />
         )}
         {space === "listening" && (
