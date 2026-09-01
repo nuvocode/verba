@@ -3,7 +3,7 @@ id: PLAN-019
 title: Talk — confidence is measured, not seeded
 branch: plan/m5-surface-contracts
 base: master
-status: ready
+status: done
 executor: unassigned
 created: 2026-08-31
 issue: https://github.com/nuvocode/verba/issues/57

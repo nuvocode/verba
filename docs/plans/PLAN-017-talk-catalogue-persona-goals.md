@@ -3,7 +3,7 @@ id: PLAN-017
 title: Talk — the catalogue sorts itself, the persona holds, the goals are real
 branch: plan/m5-surface-contracts
 base: master
-status: ready
+status: done
 executor: unassigned
 created: 2026-08-31
 issue: https://github.com/nuvocode/verba/issues/55

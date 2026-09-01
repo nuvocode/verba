@@ -27,18 +27,18 @@ whose states are undefined has nothing to hold on to.
 
 | # | Plan | Closes | Files |
 |---|---|---|---|
-| 1 | [PLAN-015](PLAN-015-house-format.md) — one formatter, no raw model output | #61 (a) | 5 |
-| 2 | [PLAN-016](PLAN-016-four-states.md) — four states, one place per fact | **#61** | 8 |
-| 3 | [PLAN-017](PLAN-017-talk-catalogue-persona-goals.md) — catalogue, persona, live goals | **#55** | 6 |
-| 4 | [PLAN-018](PLAN-018-talk-voice-primary.md) — voice is the main road | **#56** | 6 |
-| 5 | [PLAN-019](PLAN-019-talk-confidence.md) — confidence is measured, not seeded | #57 (a) | 4 |
-| 6 | [PLAN-020](PLAN-020-talk-reflection-history.md) — reflection and history | **#57** | 5 |
-| 7 | [PLAN-021](PLAN-021-talk-subtitles.md) — subtitles you can hide | **#79** | 5 |
-| 8 | [PLAN-022](PLAN-022-read-passage-contract.md) — the passage generation contract | **#58** | 5 |
-| 9 | [PLAN-023](PLAN-023-read-note-contract.md) — the note contract | #59 (a) | 5 |
-| 10 | [PLAN-024](PLAN-024-read-close-and-prompter.md) — close reading, and a prompter that listens | **#59** | 6 |
-| 11 | [PLAN-025](PLAN-025-listen-timeline.md) — a real timeline | #60 (a) | 6 |
-| 12 | [PLAN-026](PLAN-026-listen-transcript-and-answers.md) — transcript, ranges, useful wrong answers | **#60** | 5 |
+| 1 | [PLAN-015](PLAN-015-house-format.md) — one formatter, no raw model output — ✅ done | #61 (a) | 5 |
+| 2 | [PLAN-016](PLAN-016-four-states.md) — four states, one place per fact — ✅ done | **#61** | 8 |
+| 3 | [PLAN-017](PLAN-017-talk-catalogue-persona-goals.md) — catalogue, persona, live goals — ✅ done | **#55** | 6 |
+| 4 | [PLAN-018](PLAN-018-talk-voice-primary.md) — voice is the main road — ✅ done | **#56** | 6 |
+| 5 | [PLAN-019](PLAN-019-talk-confidence.md) — confidence is measured, not seeded — ✅ done | #57 (a) | 4 |
+| 6 | [PLAN-020](PLAN-020-talk-reflection-history.md) — reflection and history — ✅ done | **#57** | 5 |
+| 7 | [PLAN-021](PLAN-021-talk-subtitles.md) — subtitles you can hide — ✅ done | **#79** | 5 |
+| 8 | [PLAN-022](PLAN-022-read-passage-contract.md) — the passage generation contract — ✅ done | **#58** | 5 |
+| 9 | [PLAN-023](PLAN-023-read-note-contract.md) — the note contract — ✅ done | #59 (a) | 5 |
+| 10 | [PLAN-024](PLAN-024-read-close-and-prompter.md) — close reading, and a prompter that listens — ✅ done | **#59** | 6 |
+| 11 | [PLAN-025](PLAN-025-listen-timeline.md) — a real timeline — ✅ done | #60 (a) | 6 |
+| 12 | [PLAN-026](PLAN-026-listen-transcript-and-answers.md) — transcript, ranges, useful wrong answers — ✅ done | **#60** | 5 |
 
 Order matters, and not only for tidiness:
 
@@ -74,7 +74,8 @@ Order matters, and not only for tidiness:
 | 27 | Every surface implements all four states | PLAN-016 |
 
 A plan is not finished until its ledger row reads `assertedIn` and `npm run check`
-is green. After PLAN-026 the ledger prints **27 asserted, 0 pending, 0 out of scope**.
+is green. All twelve plans are done, and the ledger confirms it: **27 asserted, 0
+pending (M1+), 0 out of scope** — spec §5's ledger is closed.
 
 ## Out of scope for M5
 

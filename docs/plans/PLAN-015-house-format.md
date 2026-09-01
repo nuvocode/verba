@@ -3,7 +3,7 @@ id: PLAN-015
 title: One formatter, and nothing raw reaches the learner
 branch: plan/m5-surface-contracts
 base: master
-status: ready
+status: done
 executor: unassigned
 created: 2026-08-31
 issue: https://github.com/nuvocode/verba/issues/61

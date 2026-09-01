@@ -3,7 +3,7 @@ id: PLAN-018
 title: Talk — voice is the main road
 branch: plan/m5-surface-contracts
 base: master
-status: ready
+status: done
 executor: unassigned
 created: 2026-08-31
 issue: https://github.com/nuvocode/verba/issues/56

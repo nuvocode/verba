@@ -3,7 +3,7 @@ id: PLAN-021
 title: Talk — subtitles you can hide, and asking for them costs nothing
 branch: plan/m5-surface-contracts
 base: master
-status: ready
+status: done
 executor: unassigned
 created: 2026-08-31
 issue: https://github.com/nuvocode/verba/issues/79
