@@ -157,6 +157,23 @@ export function turnStats(s: Signal): { words: number; sentences: number; chars:
 }
 
 /**
+ * The timing a produced turn carries (PLAN-028). `null` for a signal that is not
+ * a measured turn — an older row read before turns were timed reads as "no
+ * timing", never as an instant answer.
+ */
+export function turnTiming(s: Signal): { latencyMs: number; speakMs: number; speakUnknown: boolean } | null {
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { latencyMs, speakMs, speakUnknown } = p as {
+    latencyMs?: unknown;
+    speakMs?: unknown;
+    speakUnknown?: unknown;
+  };
+  if (typeof latencyMs !== "number" || typeof speakMs !== "number") return null;
+  return { latencyMs, speakMs, speakUnknown: speakUnknown === true };
+}
+
+/**
  * The fourth — and last — structural payload reader: is this a *reveal* — a
  * comprehension signal with no answer behind it, written solely because the
  * learner asked to see the coach's text (PLAN-021)?

@@ -10,6 +10,7 @@ import type { Grade } from "./srs.ts";
 import { words, sentenceCount } from "./text.ts";
 import type { ProducedTurn, Reflection, VoiceTurn } from "./useTalk.ts";
 import { repairSignal, type RepairObservation } from "./repair.ts";
+import { countPauses, speechRatio } from "./breakdown.ts";
 
 /**
  * A finished conversation. A correction with no note names nothing, so it is not
@@ -68,6 +69,13 @@ function turnSignal(activityId: ActivityId, t: ProducedTurn, locale: string): Si
     words: ws.length,
     sentences: Math.max(1, sentenceCount(t.text, locale)),
     chars: ws.reduce((n, w) => n + w.length, 0),
+    // Timing (PLAN-028): how long this send took measured from the coach's line
+    // landing, and how much of that was the coach's own voice holding the floor.
+    // `speakUnknown` marks a turn whose speak duration could not be measured —
+    // it is excluded from the baseline and timing signals entirely.
+    latencyMs: t.latencyMs,
+    speakMs: t.speakMs,
+    speakUnknown: t.speakUnknown,
   };
   return t.fromSuggestion
     ? { activityId, kind: "suggestionUsed" as const, payload }
@@ -107,33 +115,19 @@ export function voiceSignals(
   }
 
   // Pronunciation → delivery: how much of the recording carried speech, and how
-  // often the learner paused. The threshold is the same one the silence detector
-  // uses, so "speech" here means the same thing the recorder heard.
+  // often the learner paused. The threshold is the silence detector's floor in
+  // speech.ts and the hesitation checker's floor in breakdown.ts — one shared
+  // constant, so "speech" means the same thing the recorder and the breakdown
+  // half both heard (PLAN-028, the no-third-copy rule).
   if (v.levels.length) {
-    // ponytail: 0.02 is the RMS ceiling the silence detector in speech.ts uses —
-    // a fixed "is there a voice right now" bar. It is duplicated here on purpose
-    // (speech.ts cannot import signals.ts), but if that threshold ever becomes
-    // tunable it must move to a shared constant first.
-    const THRESHOLD = 0.02;
-    const speechFrames = v.levels.filter((l) => l > THRESHOLD).length;
-    const speechRatio = speechFrames / v.levels.length;
-    // A silent break longer than 600 ms is a pause worth counting.
-    let pauses = 0;
-    let quiet = 0;
-    for (const l of v.levels) {
-      if (l > THRESHOLD) {
-        if (quiet > 0.6) pauses++;
-        quiet = 0;
-      } else {
-        quiet += 1 / 20; // ~20 frames/s
-      }
-    }
+    const ratio = speechRatio(v.levels);
+    const pauses = countPauses(v.levels);
     out.push({
       activityId,
       kind: "pronunciation" as const,
       payload: {
         label: "spoken delivery",
-        speechRatio: Math.round(speechRatio * 100) / 100,
+        speechRatio: Math.round(ratio * 100) / 100,
         pauses,
         unit: "fraction of speech, pauses",
         definition: "how much of your recording was speech, and how often you paused",

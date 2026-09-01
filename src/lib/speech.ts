@@ -46,7 +46,13 @@ export interface Tts {
   canSpeak: boolean;
   /** Whether this tier can hand back a seekable clip. `false` → play/pause only. */
   seekable: boolean;
-  speak(text: string, opts?: SpeakOptions): Promise<void>;
+  /**
+   * Speak `text`, resolving with the milliseconds it actually held the floor
+   * (PLAN-028). `0` when cancelled before starting, `0` on a tier that could
+   * not speak, and the measured duration otherwise — so the leaner's thinking
+   * time can be separated from the coach's speaking time.
+   */
+  speak(text: string, opts?: SpeakOptions): Promise<number>;
   /** Bytes → a clip owned by the caller. Absent (and `seekable: false`) on a tier with no bytes. */
   clip?(text: string, opts?: SpeakOptions): Promise<Clip>;
   cancel(): void;
@@ -129,23 +135,25 @@ export function webSpeech(): SpeechAdapter {
     partials: false,
 
     speak(text, opts = {}) {
-      return new Promise((resolve) => {
-        if (!synth || !text.trim()) return resolve();
+      return new Promise<number>((resolve) => {
+        if (!synth || !text.trim()) return resolve(0);
         synth.cancel();
         const u = new SpeechSynthesisUtterance(text);
         if (opts.locale) u.lang = opts.locale;
         const v = pickVoice(opts.locale, opts.voiceHint);
         if (v) u.voice = v;
         u.rate = opts.rate ?? 0.95;
+        const start = performance.now();
         const done = () => {
           voice.synthetic(false);
-          resolve();
+          resolve(Math.max(0, performance.now() - start));
         };
         u.onend = done;
         u.onerror = done; // never hang the UI on a TTS hiccup
         // This tier speaks outside the webview, so there is no audio to measure —
         // the coach's mouth runs on a synthetic curve instead, nudged onto each
-        // word by whatever boundary events the synthesiser bothers to fire.
+        // word by whatever boundary events the synthesiser bothers to fire. The
+        // wall clock around the utterance is still the floor it held (PLAN-028).
         u.onboundary = () => voice.boundary();
         voice.synthetic(true);
         synth.speak(u);
@@ -423,20 +431,31 @@ function clip(bytes: ArrayBuffer, mime: string): Clip {
 }
 
 /**
- * Play a clip to the end. Resolves on error too — a TTS hiccup must not hang the
- * turn. `release()` is the caller's job once the clip is done with; speak() owns
- * its clip, so it releases on every exit path (end, error, a play() that refused).
+ * Play a clip to the end, resolving with the milliseconds it actually held the
+ * floor (PLAN-028). `0` when the clip never started (cancelled or refused) — the
+ * coach held no floor, so nothing counts as learner thinking time. Resolves on
+ * error too — a TTS hiccup must not hang the turn. `release()` is the caller's
+ * job once the clip is done with; speak() owns its clip, so it releases on every
+ * exit path (end, error, a play() that refused).
  */
-function playClip(c: Clip): Promise<void> {
-  return new Promise<void>((resolve) => {
+function playClip(c: Clip): Promise<number> {
+  return new Promise<number>((resolve) => {
     const el = c.el;
+    const start = performance.now();
+    let settled = false;
     el.onended = el.onerror = () => {
       c.release();
-      resolve();
+      if (!settled) {
+        settled = true;
+        resolve(Math.max(0, performance.now() - start));
+      }
     };
     el.play().catch(() => {
       c.release();
-      resolve();
+      if (!settled) {
+        settled = true;
+        resolve(0);
+      }
     });
   });
 }
@@ -453,11 +472,12 @@ function byteTier(synthesize: (text: string, opts?: SpeakOptions) => Promise<Cli
     canSpeak: true,
     seekable: true,
     async speak(text, opts) {
-      if (!text.trim()) return;
+      if (!text.trim()) return 0;
       const c = await synthesize(text, opts);
       audio = c.el;
-      await playClip(c);
+      const ms = await playClip(c);
       audio = null;
+      return ms;
     },
     clip(text, opts) {
       if (!text.trim()) return Promise.reject(new Error("Nothing to synthesise."));
@@ -1031,7 +1051,9 @@ export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void =
       }
       // Safe with no synth: webSpeech().speak resolves immediately rather than
       // hanging the turn, which is the whole reason a failed tier can land here.
-      await web.speak(text, opts);
+      // The fallback must hand the measured floor onward (PLAN-028) — swallowing
+      // it would make every degrade turn look unmeasured and empty the baseline.
+      return await web.speak(text, opts);
     },
 
     async listen(opts) {

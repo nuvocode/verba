@@ -73,6 +73,17 @@ export interface ProducedTurn {
   words: number;
   /** Time from the coach's line landing to the send, in ms; null if unknown. */
   latencyMs: number | null;
+  /** How long the coach's audio held the floor before this send, in ms. 0 when silent. */
+  speakMs: number;
+  /** True when the coach spoke but the duration could not be measured. */
+  speakUnknown: boolean;
+  /**
+   * Model-reported breakdown signals (PLAN-028), shape-checked by `parseTurn`.
+   * The observable ones are verified again by `breakdown.ts` before they count.
+   */
+  missed: string[];
+  /** The one word the coach's last line carried the meaning of — checked against this reply. */
+  keyWord: string;
 }
 
 /** A spoken turn as the mic observed it: the transcript and the envelope. */
@@ -162,6 +173,13 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   // `send`, and a reported variant that was never written is dropped there, so
   // this ref only ever holds the learner's own words.
   const repairs = useRef<RepairObservation[]>([]);
+  // How long the coach's audio held the floor before the next send, in ms — and
+  // whether it spoke but the duration could not be measured (PLAN-028). Set by
+  // `say()` when it resolves; read by `send()` to separate the learner's thinking
+  // time from the coach's speaking time. A turn whose speak is unknown is excluded
+  // from the baseline and timing signals entirely.
+  const spokeMs = useRef(0);
+  const spokeUnknown = useRef(false);
   // How far the session's title has got: 0 unnamed, 1 named off the opening,
   // 2 re-named once the subject settled. Not a rolling rewrite — 2 is the end.
   const titleStage = useRef<0 | 1 | 2>(0);
@@ -197,10 +215,25 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
 
   const say = useCallback(
     (text: string) => {
-      if (settings.speak && speech.canSpeak)
+      if (settings.speak && speech.canSpeak) {
+        // Measure how long the coach actually held the floor (PLAN-028): the next
+        // send reads it to strip the coach's speaking time out of the learner's
+        // latency. A TTS failure leaves speakMs 0 and speakUnknown false — the
+        // coach didn't speak, so there is nothing to strip and nothing unknown.
         void speech
           .speak(text, { locale: pack?.speech.locale, voiceHint: persona?.voiceHint || pack?.speech.voiceHint })
-          .catch(() => {});
+          .then((ms) => {
+            spokeMs.current = ms;
+            spokeUnknown.current = false;
+          })
+          .catch(() => {
+            spokeMs.current = 0;
+            spokeUnknown.current = false;
+          });
+      } else {
+        spokeMs.current = 0;
+        spokeUnknown.current = false;
+      }
     },
     [settings.speak, speech, pack, persona],
   );
@@ -246,6 +279,8 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       voice.current = [];
       reveals.current = [];
       repairs.current = [];
+      spokeMs.current = 0;
+      spokeUnknown.current = false;
       setBusy(true);
       // What earlier conversations left behind. It rides in the system prompt, so
       // every call made off this history — the turns, the wrap-up, the vocabulary
@@ -329,6 +364,8 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         voice.current = [];
         reveals.current = [];
         repairs.current = [];
+        spokeMs.current = 0;
+        spokeUnknown.current = false;
         sessionId.current = sessionIdToResume;
         // The provider context is rebuilt from the stored transcript so the next
         // turn continues the conversation rather than starting a new one.
@@ -367,7 +404,22 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       // coach's reply was stamped when it finished rendering; the first turn has
       // no prior reply, so its latency is unknown.
       const latencyMs = coachReplyAt.current ? performance.now() - coachReplyAt.current : null;
-      produced.current.push({ text: msg, fromSuggestion, words: words(msg, pack?.speech.locale ?? "en").length, latencyMs });
+      // The coach's speaking time is the learner's thinking time only in the
+      // sense that the learner was waiting for it — the baseline strips it out
+      // (PLAN-028). A turn whose speak could not be measured is excluded there,
+      // never estimated, and never zeroed.
+      produced.current.push({
+        text: msg,
+        fromSuggestion,
+        words: words(msg, pack?.speech.locale ?? "en").length,
+        latencyMs,
+        speakMs: spokeMs.current,
+        speakUnknown: spokeUnknown.current,
+        // Filled when the turn's JSON lands (parseTurn below) — the model's
+        // breakdown report is patched onto this same turn a moment later.
+        missed: [],
+        keyWord: "",
+      });
       setProducedVersion((v) => v + 1);
       history.current.push({ role: "user", content: msg });
       if (sessionId.current) await addMessage(sessionId.current, "user", msg).catch(() => {});
@@ -385,6 +437,14 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         // The coach's reply has landed — stamp it so the next send can measure
         // its latency against it.
         coachReplyAt.current = performance.now();
+        // The model's breakdown report (PLAN-028) is patched onto this turn, now
+        // that the JSON has closed. The shape was already filtered by parseTurn;
+        // the observable claims are verified again in breakdown.ts.
+        const sent = produced.current[produced.current.length - 1];
+        if (sent) {
+          sent.missed = turn.missed;
+          sent.keyWord = turn.keyWord;
+        }
 
         const worst = turn.corrections.find((c) => c.severity === "severe") ?? turn.corrections[0];
         // Dropped in the same commit the real message lands in — anywhere earlier

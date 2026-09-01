@@ -194,12 +194,12 @@ const REPAIR_LEDGER: RepairRow[] = [
   {
     id: 3,
     claim: "A per-learner response baseline exists and signals normalise against it",
-    pending: "#63 — PLAN-028",
+    assertedIn: [{ file: "src/lib/breakdown.check.ts", marker: "breakdown ledger 3" }],
   },
   {
     id: 4,
     claim: "Model latency is separated from learner latency",
-    pending: "#63 — PLAN-028",
+    assertedIn: [{ file: "src/lib/breakdown.check.ts", marker: "breakdown ledger 4" }],
   },
   {
     id: 5,

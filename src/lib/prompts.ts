@@ -3,6 +3,7 @@ import { levelOf } from "./model.ts";
 import type { Persona, Scenario } from "./scenarios";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 import { worthLearning } from "./vocab.ts";
+import { BREAKDOWN_MEANING_SIGNALS } from "./breakdown.ts";
 
 /**
  * The most cards one conversation may offer.
@@ -43,7 +44,9 @@ export function buildSystem(
     `  "corrections": [ { "original": "the learner's exact wording that was wrong", "fixed": "the corrected version", "note": "a short explanation written in ${s.profile.nativeLanguage}", "severity": "minor or severe", "category": "grammar | vocabulary | wordOrder | register | pronunciation" } ],`,
     `  "suggestions": [ "a short example reply the learner could send next, in ${s.profile.targetLanguage}", "another option" ],`,
     `  "goalsMet": [0, 2],`,
-    `  "repair": { "category": "HOLD | REPEAT | SLOW | CLARIFY | CONFIRM | PARAPHRASE", "variant": "the learner's exact words" }`,
+    `  "repair": { "category": "HOLD | REPEAT | SLOW | CLARIFY | CONFIRM | PARAPHRASE", "variant": "the learner's exact words" },`,
+    `  "missed": ["keyWordMissing", "topicChange"],`,
+    `  "keyWord": "the one word in YOUR OWN last line that carried the meaning"`,
     `}`,
     ``,
     `Rules:`,
@@ -54,6 +57,8 @@ export function buildSystem(
     `- Give 2-3 "suggestions". Keep them natural and at the learner's level.`,
     `- "goalsMet" lists the index of every scenario goal the learner has JUST satisfied with their last message. An empty list is the normal answer. Never re-list a goal already met, and never credit a goal the learner only asked about.`,
     `- "repair" is filled ONLY when the learner's last message actually performed one of the six repair moves (HOLD, REPEAT, SLOW, CLARIFY, CONFIRM, PARAPHRASE). Set "variant" to the learner's own wording, copied verbatim, never rephrased. Omit the field otherwise — that is the normal answer. Never report a category with a variant the learner did not literally write.`,
+    `- "missed" lists which of these were observably true of the learner's LAST message: disconnected (did not answer what was asked), overGeneral ("yes", "maybe", "sure" and nothing else), apologyThenOn (said "sorry"/"pardon" and carried on regardless), keyWordMissing (the key word in YOUR last line appears nowhere in the reply), topicChange (the reply starts a different subject). An empty list is the normal answer. Never guess at what the learner was thinking.`,
+    `- "keyWord" is the one word in your OWN last line that carried the meaning — the word "keyWordMissing" is verified against.`,
     `- Never mention that you are returning JSON.`,
   ].join("\n");
 }
@@ -122,6 +127,19 @@ export interface TurnResult {
    * or the shape is wrong.
    */
   repair: { category: string; variant: string } | null;
+  /**
+   * Model-reported breakdown signals (PLAN-028), shape-checked only. Only the five
+   * meaning judgements (`disconnected`, `overGeneral`, `apologyThenOn`,
+   * `keyWordMissing`, `topicChange`) survive; `breakdown.ts` verifies the observable
+   * ones on its own side before any turn is believed.
+   */
+  missed: string[];
+  /**
+   * The one word in the coach's own last line that carries the meaning — the key
+   * `keyWordMissing` is checked against (PLAN-028). Empty when the model did not
+   * name one.
+   */
+  keyWord: string;
 }
 
 /** The JSON escapes worth decoding mid-stream; `\uXXXX` is handled separately. */
@@ -219,6 +237,14 @@ export function parseTurn(raw: string): TurnResult {
       obj.repair.variant.trim() !== ""
         ? { category: obj.repair.category, variant: obj.repair.variant }
         : null,
+    // A model-reported breakdown (PLAN-028), shape-checked only. Only the five
+    // meaning judgements known to breakdown.ts survive; an unknown string is
+    // dropped here so nothing invented travels further.
+    missed: Array.isArray(obj?.missed)
+      ? obj.missed.map((x: any) => String(x)).filter((x: string) => BREAKDOWN_MEANING_SIGNALS.includes(x as any))
+      : [],
+    // The key word the coach's last line carried — empty when the model named none.
+    keyWord: typeof obj?.keyWord === "string" ? obj.keyWord : "",
   };
 }
 
