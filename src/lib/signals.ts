@@ -76,6 +76,13 @@ function turnSignal(activityId: ActivityId, t: ProducedTurn, locale: string): Si
     latencyMs: t.latencyMs,
     speakMs: t.speakMs,
     speakUnknown: t.speakUnknown,
+    // The decision (PLAN-029): the verdict this turn earned and the signals it
+    // stood on. Ridden unread — `signalMiss` and `coachMetrics` never look here,
+    // so a bluff stays arithmetically invisible. Nothing reads `verdict` to
+    // compute a number the learner sees; PLAN-037 turns the distribution into a
+    // direction in words, and that is the only reader there will be.
+    breakdown: t.breakdown,
+    verdict: t.verdict,
   };
   return t.fromSuggestion
     ? { activityId, kind: "suggestionUsed" as const, payload }

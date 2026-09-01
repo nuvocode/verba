@@ -28,6 +28,13 @@ import { words } from "./text";
 import { confidence as computeConfidence } from "./confidence";
 import { verifyRepair, type RepairObservation } from "./repair";
 import {
+  baselineFrom,
+  judge as judgeTurn,
+  medianTurnWords,
+  turnSignalsFor,
+  type SessionBudget,
+} from "./breakdown";
+import {
   addMessage,
   addVocab,
   createSession,
@@ -40,6 +47,7 @@ import {
   saveMemories,
   saveMetrics,
   recentMemories,
+  recentSignals,
   vocabCounts,
 } from "./db";
 
@@ -84,6 +92,19 @@ export interface ProducedTurn {
   missed: string[];
   /** The one word the coach's last line carried the meaning of — checked against this reply. */
   keyWord: string;
+  /**
+   * The verified breakdown signals this turn carried (PLAN-028 → PLAN-029). The
+   * empty array is the normal answer. Ridden onto the turn payload for the record
+   * and never read to score anything — a breakdown is arithmetically invisible.
+   */
+  breakdown: string[];
+  /**
+   * The verdict this turn earned (PLAN-029): `clear` (the normal answer),
+   * `suspect` (one signal, for the record), or `bluff`. Ridden on the turn
+   * payload beside `breakdown`; nothing reads it to compute a number the learner
+   * sees.
+   */
+  verdict: "clear" | "suspect" | "bluff";
 }
 
 /** A spoken turn as the mic observed it: the transcript and the envelope. */
@@ -180,6 +201,17 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   // from the baseline and timing signals entirely.
   const spokeMs = useRef(0);
   const spokeUnknown = useRef(false);
+  // The per-session rewind budget (PLAN-029): rewinds spent and whether the
+  // learner asked not to be interrupted. Held for this session and rebuilt by
+  // `start`. `handicap` — the extra signals §3.3's denied rewind demands — lives
+  // here too and is never persisted; it expires with the session, because a
+  // learner having a sharp day is not a fact about the learner.
+  const budget = useRef<SessionBudget>({ used: 0, handicap: 0, off: false });
+  // The learner's measured response baseline and median turn length (PLAN-028),
+  // derived from the signals already saved to this language's DB. Built once at
+  // session start; the timing signals grade each turn against them.
+  const baseline = useRef<ReturnType<typeof baselineFrom>>({ median: 0, mad: 0, sample: 0, ready: false });
+  const medianLen = useRef<number | null>(null);
   // How far the session's title has got: 0 unnamed, 1 named off the opening,
   // 2 re-named once the subject settled. Not a rolling rewrite — 2 is the end.
   const titleStage = useRef<0 | 1 | 2>(0);
@@ -281,11 +313,22 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       repairs.current = [];
       spokeMs.current = 0;
       spokeUnknown.current = false;
+      // A new session is a new budget (PLAN-029): the rewind cap and the learner's
+      // "don't interrupt" ask belong to the session, not to the app. `handicap` is
+      // forgotten here too — a sharp day is not a fact about the learner (§3.3).
+      budget.current = { used: 0, handicap: 0, off: false };
       setBusy(true);
       // What earlier conversations left behind. It rides in the system prompt, so
       // every call made off this history — the turns, the wrap-up, the vocabulary
       // capture — is talking to a coach that has read it.
       const memories = await recentMemories(settings.profile.targetLanguage).catch(() => []);
+      // The learner's own response baseline (PLAN-028), rebuilt from the signals
+      // this language has already recorded — timing signals normalise against it
+      // and against nothing else. Unready is the honest first-session state.
+      const known = await recentSignals(settings.profile.targetLanguage).catch(() => [] as Awaited<ReturnType<typeof recentSignals>>);
+      const nowMs = Date.now();
+      baseline.current = baselineFrom(known, nowMs);
+      medianLen.current = medianTurnWords(known, nowMs);
       const system =
         buildSystem(settings, sc, sc.persona, pack, memories) +
         (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
@@ -366,10 +409,20 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         repairs.current = [];
         spokeMs.current = 0;
         spokeUnknown.current = false;
+        // A resumed conversation starts a fresh budget (PLAN-029) — the rewind
+        // cap and handicap were never persisted, so they cannot be recovered here
+        // and are begun anew with the conversation.
+        budget.current = { used: 0, handicap: 0, off: false };
         sessionId.current = sessionIdToResume;
         // The provider context is rebuilt from the stored transcript so the next
         // turn continues the conversation rather than starting a new one.
         const memories = await recentMemories(settings.profile.targetLanguage).catch(() => []);
+        // The response baseline is rebuilt too — the learner's history may have
+        // grown since the conversation was left, so the timing signals grade
+        // against what is true now.
+        const known = await recentSignals(settings.profile.targetLanguage).catch(() => [] as Awaited<ReturnType<typeof recentSignals>>);
+        baseline.current = baselineFrom(known, Date.now());
+        medianLen.current = medianTurnWords(known, Date.now());
         history.current = [
           { role: "system", content: buildSystem(settings, sc, sc.persona, pack, memories) },
           ...rows.map((m) => ({
@@ -416,9 +469,12 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         speakMs: spokeMs.current,
         speakUnknown: spokeUnknown.current,
         // Filled when the turn's JSON lands (parseTurn below) — the model's
-        // breakdown report is patched onto this same turn a moment later.
+        // breakdown report is patched onto this same turn a moment later, and
+        // PLAN-029's verdict with it once the signals are verified.
         missed: [],
         keyWord: "",
+        breakdown: [],
+        verdict: "clear",
       });
       setProducedVersion((v) => v + 1);
       history.current.push({ role: "user", content: msg });
@@ -437,14 +493,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         // The coach's reply has landed — stamp it so the next send can measure
         // its latency against it.
         coachReplyAt.current = performance.now();
-        // The model's breakdown report (PLAN-028) is patched onto this turn, now
-        // that the JSON has closed. The shape was already filtered by parseTurn;
-        // the observable claims are verified again in breakdown.ts.
         const sent = produced.current[produced.current.length - 1];
-        if (sent) {
-          sent.missed = turn.missed;
-          sent.keyWord = turn.keyWord;
-        }
 
         const worst = turn.corrections.find((c) => c.severity === "severe") ?? turn.corrections[0];
         // Dropped in the same commit the real message lands in — anywhere earlier
@@ -483,6 +532,30 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         // the learner never said leaves no signal behind at all.
         const repair = turn.repair ? verifyRepair({ category: turn.repair.category, variant: turn.repair.variant }, msg, pack?.speech.locale ?? "en") : null;
         if (repair) repairs.current.push(repair);
+
+        // The decision (PLAN-029): verify this turn's signals and turn the list
+        // into a verdict. Everything here is arithmetic for the record; the only
+        // effect is `verdict`, ridden onto the turn beside `breakdown`. `intervene`
+        // is held for PLAN-030 to act on and does nothing until then. A turn's
+        // signals never reach `judge` as silence — `send` only runs for a
+        // non-empty message, so condition 3 (the conversation continued) is met by
+        // construction and silence never becomes a bluff.
+        if (sent) {
+          sent.missed = turn.missed;
+          sent.keyWord = turn.keyWord;
+          const signals = turnSignalsFor(sent, baseline.current, {
+            reply: msg,
+            medianTurnWords: medianLen.current,
+          });
+          sent.breakdown = signals;
+          // `spoke: true` — condition 3 (the conversation continued) is met by
+          // construction here: `send` only runs for a non-empty message, so
+          // silence never reaches the decision. The check pins the guard.
+          const { verdict, intervene } = judgeTurn(signals, repair, budget.current, true);
+          sent.verdict = verdict;
+          if (intervene) budget.current.used += 1;
+          void intervene; // PLAN-030 acts on the interruption; this plan only decides.
+        }
 
         // The session is named off its first real exchange — that is also the turn
         // it starts showing up in the history list — and re-named exactly once,

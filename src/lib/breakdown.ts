@@ -1,6 +1,9 @@
-// The collection half of breakdown detection (PLAN-028): a baseline that belongs
-// to the learner, and the eight signals that grade against it. PLAN-029 owns the
-// decision — everything here produces signals and draws no conclusion from them.
+// The collection and decision halves of breakdown detection. PLAN-028 owns the
+// collection — a baseline that belongs to the learner and the eight signals that
+// grade against it. PLAN-029 owns the decision: the only place a list of signals
+// becomes a verdict, and the only place a rewind may be allowed. Everything here
+// produces signals and a verdict and draws nothing else from them — nothing in
+// this file renders, speaks, or interrupts.
 //
 // §10 is the spine. No threshold is hardcoded: every timing bar normalises against
 // the learner's own history. A turn whose latency cannot be separated from the
@@ -9,6 +12,7 @@
 import type { Signal, SignalKind } from "./model.ts";
 import { turnStats, turnTiming } from "./model.ts";
 import type { ProducedTurn } from "./useTalk.ts";
+import type { RepairObservation } from "./repair.ts";
 
 // --- the eight signals ---------------------------------------------------------
 
@@ -294,4 +298,88 @@ function verifiedHesitation(ctx: TurnContext): BreakdownSignal[] {
  */
 export function turnSignalsFor(turn: ProducedTurn, baseline: Baseline, ctx: TurnContext): BreakdownSignal[] {
   return [...verifiedTiming(turn, baseline, ctx), ...verifiedMeaning(turn, ctx), ...verifiedHesitation(ctx)];
+}
+
+// --- the decision (PLAN-029) ----------------------------------------------------
+
+/** What one turn means, arithmetically. `clear` is the normal answer. */
+export type Verdict = "clear" | "suspect" | "bluff";
+
+/**
+ * The per-session budget PLAN-030's rewind lives against. Held in `useTalk` for
+ * the life of a session and rebuilt when a new one starts. `handicap` is never
+ * persisted — it expires with the session, because a learner having a sharp day
+ * is not a fact about the learner (§3.3).
+ */
+export interface SessionBudget {
+  /** Rewinds already spent this session. */
+  used: number;
+  /** Extra signals required this session — raised by a denied rewind. */
+  handicap: number;
+  /** The learner asked not to be interrupted (§10, row 5). */
+  off: boolean;
+}
+
+/** Rewinds are capped at two per session (§3.3). A third bluff is still recorded. */
+export const REWIND_LIMIT = 2;
+
+/**
+ * The bluff decision (§3.2 and §3.3) — the only place a list of signals becomes a
+ * verdict, and the only place a rewind may be allowed.
+ *
+ * A turn is `bluff` when **all three** hold:
+ *   1. at least two breakdown signals were observed in it, and
+ *   2. the learner produced no repair move in it, and
+ *   3. the conversation continued — the learner said something rather than
+ *      falling silent.
+ *
+ * `spoke` is condition 3's input: `send` only ever turns a non-empty message into
+ * a `ProducedTurn`, so it passes `spoke = true`. The test that silences it is the
+ * guard the check pins — silence is not a bluff; it is the thing `HOLD` exists to
+ * make sayable, and PLAN-032's patience rules own it. When the learner did not
+ * speak, no decision is made at all; the turn reads `clear`.
+ *
+ * `intervene` is true only when the verdict is `bluff`, `budget.used` is under
+ * `REWIND_LIMIT`, and the learner has not asked to be left alone. A third bluff
+ * in one session, or one under `off`, is **recorded exactly like any other** —
+ * the measurement never stops, only the interruption does.
+ *
+ * A turn carrying a repair move is `clear` regardless of its signal count: a
+ * learner who did not understand and said so did the right thing. Two signals
+ * plus a `CLARIFY` is a success, and recording it as anything else would teach
+ * the opposite of the lesson — the layer's whole point.
+ */
+export function judge(
+  signals: BreakdownSignal[],
+  repair: RepairObservation | null,
+  budget: SessionBudget,
+  spoke = true,
+): { verdict: Verdict; intervene: boolean } {
+  // A learner who produced a repair move did the right thing, however many
+  // signals the turn carried. The mark is dropped; nothing this turn did moves
+  // any number the learner sees (§3.3, and the arithmetically-invisible rule).
+  if (repair) return { verdict: "clear", intervene: false };
+
+  // The conversation did not continue — the learner fell silent. That is not a
+  // bluff; `HOLD` exists to make silence sayable and PLAN-032 owns the patience
+  // rules. No decision is made at all, whatever the signal count.
+  if (!spoke) return { verdict: "clear", intervene: false };
+
+  // The decision leans toward doing nothing (§3.3): a false bluff call costs
+  // more than a missed one. A signal or two below the bar is a note for the
+  // record, not a verdict.
+  const threshold = 2 + budget.handicap;
+  if (signals.length >= threshold) {
+    const verdict: Verdict = "bluff";
+    // The record and the interruption are separate. A third bluff — or one while
+    // the learner has asked not to be interrupted — is recorded like the first
+    // and interrupted never. `off` changes no verdict, only `intervene`.
+    const intervene = budget.used < REWIND_LIMIT && !budget.off;
+    return { verdict, intervene };
+  }
+  // Below the bluff bar but non-empty: `suspect`, recorded, never interrupted.
+  // With `handicap: 1` a two-signal turn lands here — it needs three to be a
+  // bluff. Zero signals is `clear`.
+  if (signals.length >= 1) return { verdict: "suspect", intervene: false };
+  return { verdict: "clear", intervene: false };
 }

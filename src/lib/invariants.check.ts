@@ -204,12 +204,12 @@ const REPAIR_LEDGER: RepairRow[] = [
   {
     id: 5,
     claim: "Bluff needs ≥2 signals; one signal only records",
-    pending: "#63 — PLAN-029",
+    assertedIn: [{ file: "src/lib/breakdown.check.ts", marker: "breakdown ledger 5" }],
   },
   {
     id: 6,
     claim: "Rewinds per session are capped",
-    pending: "#63 — PLAN-029",
+    assertedIn: [{ file: "src/lib/breakdown.check.ts", marker: "breakdown ledger 6" }],
   },
   {
     id: 7,

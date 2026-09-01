@@ -5,6 +5,9 @@
 // file produces signals and draws no conclusion.
 // Run: node --experimental-strip-types src/lib/breakdown.check.ts
 import assert from "node:assert";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   BASELINE_MIN,
   baselineFrom,
@@ -15,14 +18,36 @@ import {
   keyWordActuallyMissing,
   BREAKDOWN_SIGNALS,
   BREAKDOWN_MEANING_SIGNALS,
+  judge,
+  REWIND_LIMIT,
   type BreakdownSignal,
+  type SessionBudget,
   type TurnContext,
 } from "./breakdown.ts";
 import type { Signal, SignalKind } from "./model.ts";
 import { coachMetrics } from "./coachmetrics.ts";
+import { confidence } from "./confidence.ts";
 import type { ProducedTurn } from "./useTalk.ts";
 
-const NOW = 1_000_000_000_000;
+const NOW = 1_000_000_000_000; // a fixed instant well past the epoch
+const ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const SRC = join(ROOT, "src");
+
+/** Every .tsx file under `src`, with its repo-relative path (e.g. "src/views/Talk.tsx"). */
+function walkTsx(): string[] {
+  const out: string[] = [];
+  const scan = (absDir: string, relDir: string) => {
+    for (const entry of readdirSync(absDir)) {
+      const abs = join(absDir, entry);
+      const rel = join(relDir, entry);
+      if (statSync(abs).isDirectory()) scan(abs, rel);
+      else if (entry.endsWith(".tsx")) out.push(rel);
+    }
+  };
+  scan(SRC, "src");
+  return out;
+}
+
 let n = 0;
 const sig = (kind: SignalKind, payload: unknown, at = NOW): Signal => ({
   id: `s${n++}`,
@@ -53,6 +78,8 @@ const turn = (t: Partial<ProducedTurn>): ProducedTurn => ({
   speakUnknown: false,
   missed: [],
   keyWord: "",
+  breakdown: [],
+  verdict: "clear",
   ...t,
 });
 
@@ -302,6 +329,138 @@ const ctx = (over: Partial<TurnContext> = {}): TurnContext => ({
   assert.equal(a1.sample, a0.sample, "…nor accuracy's sample");
   assert.equal(c1.value, c0.value, "breakdown payloads must not move comprehension");
   assert.equal(c1.sample, c0.sample, "…nor comprehension's sample");
+}
+
+// --- the decision (PLAN-029) ---------------------------------------------------
+// breakdown ledger 5 — a bluff needs ≥2 signals, one signal only records.
+// breakdown ledger 6 — rewinds per session are capped.
+const fresh = (over: Partial<SessionBudget> = {}): SessionBudget => ({ used: 0, handicap: 0, off: false, ...over });
+const TWO: BreakdownSignal[] = ["slowResponse", "keyWordMissing"];
+const ONE: BreakdownSignal[] = ["slowResponse"];
+
+// --- case A: ≥2 signals + no repair + spoke = bluff; 1 signal = suspect; 0 = clear
+{
+  const spoke = judge(TWO, null, fresh());
+  assert.equal(spoke.verdict, "bluff", "two signals, no repair, spoke: a bluff");
+  assert.equal(spoke.intervene, true, "…and the first in a session intervenes");
+
+  const one = judge(ONE, null, fresh());
+  assert.equal(one.verdict, "suspect", "one signal, no repair: suspect, recorded");
+  assert.equal(one.intervene, false, "…and never interrupted");
+
+  const zero = judge([], null, fresh());
+  assert.equal(zero.verdict, "clear", "zero signals: clear");
+  assert.equal(zero.intervene, false, "…and no interruption");
+}
+
+// --- case B: two signals plus a repair move = clear, and intervene false -------
+// The whole point of the layer: a learner who did not understand and said so did
+// the right thing. Two signals + a CLARIFY is a success, not a bluff.
+{
+  const repair = { category: "CLARIFY" as const, by: "learner" as const, variant: "¿qué significa eso?" };
+  const r = judge(TWO, repair, fresh());
+  assert.equal(r.verdict, "clear", "two signals with a repair move: clear, whatever the signal count");
+  assert.equal(r.intervene, false, "…and never interrupted");
+}
+
+// --- case C: two signals with an empty (silent) learner turn is not a bluff ----
+// Silence is not a bluff — `HOLD` exists to make it sayable, and PLAN-032's
+// patience rules own the wait. `spoke: false` is that guard.
+{
+  const silent = judge(TWO, null, fresh(), false);
+  assert.equal(silent.verdict, "clear", "two signals with a silent learner: not a bluff");
+  assert.equal(silent.intervene, false, "…and no interruption");
+}
+
+// --- case D: the third bluff of a session records but does not interrupt -------
+// verdict and intervene are separate: a third bluff is recorded exactly like the
+// first two, only the interruption stops (ledger 6).
+{
+  const third = judge(TWO, null, fresh({ used: REWIND_LIMIT }));
+  assert.equal(third.verdict, "bluff", "a third bluff is still a bluff — the record never stops");
+  assert.equal(third.intervene, false, "…but the interruption is held at the cap");
+  // The second (used === 1) still interrupts.
+  const second = judge(TWO, null, fresh({ used: REWIND_LIMIT - 1 }));
+  assert.equal(second.intervene, true, "the second rewind still interrupts");
+}
+
+// --- case E: budget.off suppresses intervene and changes no verdict ------------
+// §10, row 5 — "do not push me today". Observation continues; only the
+// interruption stops. A two-signal bluff under off is still a bluff.
+{
+  const offed = judge(TWO, null, fresh({ off: true, used: 0 }));
+  assert.equal(offed.verdict, "bluff", "`off` changes no verdict — the inventory and signals keep filling");
+  assert.equal(offed.intervene, false, "…but never interrupts");
+}
+
+// --- case F: handicap: 1 makes a two-signal turn suspect, not bluff ------------
+// §3.3's denied rewind raises the bar for the rest of the session: a sharp day
+// (or a learner who said "I understood") is not a fact about the learner — it
+// needs three signals now, not two.
+{
+  const h = judge(TWO, null, fresh({ handicap: 1 }));
+  assert.equal(h.verdict, "suspect", "with handicap 1, two signals are suspect, not a bluff");
+  assert.equal(h.intervene, false, "…and never interrupted");
+  const three: BreakdownSignal[] = ["slowResponse", "keyWordMissing", "topicChange"];
+  const h3 = judge(three, null, fresh({ handicap: 1 }));
+  assert.equal(h3.verdict, "bluff", "with handicap 1, three signals cross the bar");
+}
+
+// --- case G: source scan — confidence does not read breakdown ------------------
+// Case 7: confidence.ts must not import breakdown.ts, and a bluff verdict on
+// every turn in a fixed signal set must change no value returned by coachMetrics
+// or confidence. A bluff stays arithmetically invisible.
+{
+  const confidenceSrc = readFileSync(join(ROOT, "src/lib/confidence.ts"), "utf8");
+  assert(!/\.\.\/breakdown|from "\.\/breakdown/.test(confidenceSrc), "confidence.ts must not import breakdown.ts");
+
+  // The same fixed set, plain and with a breakdown + bluff verdict riding on
+  // every turn signal — neither score may move.
+  const baseSet: Signal[] = [
+    turnSig(4000, 0, false, NOW, 5),
+    turnSig(3000, 0, false, NOW - 1000, 4),
+    turnSig(2000, 0, false, NOW - 2000, 6),
+  ];
+  const withVerdict: Signal[] = baseSet.map((s) =>
+    s.kind === "unpromptedTurn"
+      ? { ...s, payload: { ...s.payload, breakdown: ["slowResponse", "keyWordMissing"], verdict: "bluff" } }
+      : s,
+  );
+
+  const aBase = coachMetrics(baseSet, NOW).find((m) => m.id === "accuracy")!;
+  const aBluff = coachMetrics(withVerdict, NOW).find((m) => m.id === "accuracy")!;
+  assert.equal(aBluff.value, aBase.value, "a bluff verdict must not move accuracy");
+  assert.equal(aBluff.sample, aBase.sample, "…nor accuracy's sample");
+  assert.equal(aBluff.value, 100, "these are all unaided turns with no corrections — accuracy is 100");
+
+  // Confidence reads the produced turns directly; feed it the same three turns
+  // with and without a verdict field on each.
+  const turns = [
+    { words: 5, fromSuggestion: false, latencyMs: 4000 },
+    { words: 4, fromSuggestion: false, latencyMs: 3000 },
+    { words: 6, fromSuggestion: false, latencyMs: 2000 },
+  ];
+  const confidenceBase = confidence(turns, "B1")!;
+  const confidenceBluff = confidence(
+    turns.map((t) => ({ ...t, breakdown: ["slowResponse", "keyWordMissing"], verdict: "bluff" })),
+    "B1",
+  )!;
+  assert.equal(confidenceBluff.value, confidenceBase.value, "a bluff verdict must not move confidence");
+  assert.equal(confidenceBluff.turns, confidenceBase.turns, "…nor its sample");
+}
+
+// --- case H: source scan — no .tsx file reads verdict --------------------------
+// Case 8: nothing a learner sees is computed from `verdict`. PLAN-037 will turn
+// the distribution into a direction in words, and that is the only reader that
+// will ever exist — the check is written to name exactly one file then.
+{
+  const tsx = walkTsx()
+    .filter((f) => !f.includes("node_modules"))
+    .filter((f) => !f.includes(".spec.") && !f.includes(".check."));
+  for (const file of tsx) {
+    const src = readFileSync(join(ROOT, file), "utf8");
+    assert(!/\.verdict\b|\bverdict\b/.test(src), `no surface may read a verdict — found in ${file}`);
+  }
 }
 
 console.log("breakdown.check OK");
