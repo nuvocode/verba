@@ -725,12 +725,13 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         verdict: "clear",
       });
       // The floor is read and drained: this turn owns everything accumulated so
-      // far, the counter resets for the next send, and any clip still in flight
-      // belongs to a floor that already moved on — it must not add to the next
-      // turn's sum.
+      // far and the counter resets for the next send. The generation is *not*
+      // bumped here — nothing cancels the audio on a send, so a clip still
+      // playing keeps holding the floor into the next turn's latency window and
+      // belongs to that window's sum. Dropping it would under-strip the next
+      // turn's latency, which is the direction that invents a `slowResponse`.
       spokeMs.current = 0;
       spokeUnknown.current = false;
-      speakGeneration.current += 1;
       setProducedVersion((v) => v + 1);
       history.current.push({ role: "user", content: msg });
       if (sessionId.current) await addMessage(sessionId.current, "user", msg).catch(() => {});
@@ -905,6 +906,12 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     if (micPhase === "recording") {
       // Stops the recorder, which resolves the listen() promise still awaited below.
       setMicPhase("transcribing");
+      // `cancel` stops the coach's audio too. Drop whatever was queued behind it:
+      // the learner cut the coach off to speak, and the rest of a rewind is not
+      // something to play at them afterwards. The clip that was playing settles
+      // with the floor it did hold, so that much is still stripped from the
+      // latency — only the unplayed remainder goes away.
+      speakQueue.current = [];
       return speech.cancel();
     }
     if (micPhase) return; // a clip is already in flight

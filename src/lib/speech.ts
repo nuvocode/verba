@@ -123,6 +123,10 @@ function pickVoice(locale?: string, hint?: string): SpeechSynthesisVoice | undef
 /** The OS voices + whatever recogniser the webview has (in practice: none). */
 export function webSpeech(): SpeechAdapter {
   let recognition: any = null;
+  // Settles the in-flight utterance's promise. This tier speaks outside the
+  // webview and a cancelled utterance fires nothing back, so `cancel` has to
+  // resolve it here.
+  let settle: (() => void) | null = null;
   return {
     canSpeak: !!synth,
     // The OS voice speaks outside the webview and hands back no bytes, so there
@@ -138,6 +142,8 @@ export function webSpeech(): SpeechAdapter {
       return new Promise<number>((resolve) => {
         if (!synth || !text.trim()) return resolve(0);
         synth.cancel();
+        settle?.(); // the utterance just cancelled fires no `end` — settle it here
+        settle = null;
         const u = new SpeechSynthesisUtterance(text);
         if (opts.locale) u.lang = opts.locale;
         const v = pickVoice(opts.locale, opts.voiceHint);
@@ -145,11 +151,15 @@ export function webSpeech(): SpeechAdapter {
         u.rate = opts.rate ?? 0.95;
         const start = performance.now();
         const done = () => {
+          settle = null;
           voice.synthetic(false);
           resolve(Math.max(0, performance.now() - start));
         };
         u.onend = done;
         u.onerror = done; // never hang the UI on a TTS hiccup
+        // `cancel` reaches the promise through this: a cancelled utterance fires
+        // no `end` on most engines, and an unsettled promise hangs its caller.
+        settle = done;
         // This tier speaks outside the webview, so there is no audio to measure —
         // the coach's mouth runs on a synthetic curve instead, nudged onto each
         // word by whatever boundary events the synthesiser bothers to fire. The
@@ -178,8 +188,11 @@ export function webSpeech(): SpeechAdapter {
     cancel() {
       synth?.cancel();
       // A cancelled utterance fires no `end` on every engine — close the mouth here
-      // too, or an interrupted reply leaves the coach mid-syllable forever.
+      // too, or an interrupted reply leaves the coach mid-syllable forever, and
+      // settle the promise by hand or its caller waits on it forever.
       voice.synthetic(false);
+      settle?.();
+      settle = null;
       recognition?.stop?.();
     },
   };
@@ -437,26 +450,29 @@ function clip(bytes: ArrayBuffer, mime: string): Clip {
  * error too — a TTS hiccup must not hang the turn. `release()` is the caller's
  * job once the clip is done with; speak() owns its clip, so it releases on every
  * exit path (end, error, a play() that refused).
+ *
+ * `onStop` hands the caller a way to settle the clip early. Pausing an element
+ * fires neither `ended` nor `error`, so a cancelled clip would otherwise never
+ * settle and every caller awaiting it would wait forever — useTalk's speech
+ * queue among them.
  */
-function playClip(c: Clip): Promise<number> {
+function playClip(c: Clip, onStop?: (stop: () => void) => void): Promise<number> {
   return new Promise<number>((resolve) => {
     const el = c.el;
     const start = performance.now();
     let settled = false;
-    el.onended = el.onerror = () => {
+    const settle = (ms: number) => {
       c.release();
-      if (!settled) {
-        settled = true;
-        resolve(Math.max(0, performance.now() - start));
-      }
+      if (settled) return;
+      settled = true;
+      resolve(ms);
     };
-    el.play().catch(() => {
-      c.release();
-      if (!settled) {
-        settled = true;
-        resolve(0);
-      }
-    });
+    const held = () => settle(Math.max(0, performance.now() - start));
+    el.onended = el.onerror = held;
+    // The floor a cancelled clip held is the floor it held — the learner waited
+    // through it whether or not it reached its end.
+    onStop?.(held);
+    el.play().catch(() => settle(0));
   });
 }
 
@@ -468,6 +484,9 @@ function playClip(c: Clip): Promise<number> {
  */
 export function byteTier(synthesize: (text: string, opts?: SpeakOptions) => Promise<Clip>): Tts {
   let audio: HTMLAudioElement | null = null;
+  // Settles the in-flight clip's promise. `cancel` pauses the element, which
+  // fires no event at all — without this the awaited `speak` never returns.
+  let stop: (() => void) | null = null;
   return {
     canSpeak: true,
     seekable: true,
@@ -481,8 +500,9 @@ export function byteTier(synthesize: (text: string, opts?: SpeakOptions) => Prom
       // three byte tiers alike.
       c.el.playbackRate = opts?.rate ?? 1;
       audio = c.el;
-      const ms = await playClip(c);
+      const ms = await playClip(c, (s) => (stop = s));
       audio = null;
+      stop = null;
       return ms;
     },
     clip(text, opts) {
@@ -492,6 +512,10 @@ export function byteTier(synthesize: (text: string, opts?: SpeakOptions) => Prom
     cancel() {
       audio?.pause();
       audio = null;
+      // A paused element fires neither `ended` nor `error`, so the clip has to be
+      // settled by hand or whoever awaits it waits forever.
+      stop?.();
+      stop = null;
     },
   };
 }
