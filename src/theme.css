@@ -514,6 +514,20 @@ input { font: inherit; }
 .speaking i:nth-child(4) { animation-delay: .3s; }
 .speaking i:nth-child(5) { animation-delay: .45s; }
 .speaking i:nth-child(6) { animation-delay: .6s; }
+/* The timeline transport (PLAN-025): play/pause, back-10s, the position bar and
+   the speed knob. A control that cannot work is not shown — the seekable flag
+   decides which of these render, so nothing here is ever disabled. */
+.listen-transport { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.listen-row { display: flex; align-items: center; gap: 10px; }
+.listen-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line); appearance: none; cursor: pointer; min-width: 0; }
+.listen-bar::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); }
+.listen-bar::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); }
+.listen-time { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--ink2); min-width: 40px; text-align: right; }
+.listen-rate { display: flex; align-items: center; gap: 2px; }
+.listen-rate button { border: 1px solid transparent; background: transparent; color: var(--ink2); font-size: 12px; padding: 3px 7px; border-radius: 6px; cursor: pointer; }
+.listen-rate button.active { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft, transparent); }
+.listen-note { font-size: 13px; color: var(--ink2); }
+.listen-note button { margin-left: 6px; }
 .listen-hint { color: var(--ink2); font-size: 14px; }
 .listen-count { margin-bottom: 12px; }
 .listen-qs { display: flex; flex-direction: column; gap: 22px; margin-bottom: 28px; }

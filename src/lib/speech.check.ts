@@ -6,14 +6,17 @@
 import assert from "node:assert";
 import {
   bundledStt,
+  bundledTts,
   deepgram,
   deepgramHelp,
+  elevenLabs,
   getSpeech,
   listenBlocker,
   micRoute,
   micTrouble,
   migrateSpeech,
   openaiStt,
+  openaiTts,
   pruneBundled,
   prunedNote,
   record,
@@ -454,6 +457,73 @@ assert.equal(webSpeech().partials, false, "the OS recogniser has no partials");
     assert.equal(r4.text, "hola", "the final transcription is the one that counts");
     assert(r4.levels.length > 0, "the tier's listen() returns the measured envelope");
   }
+}
+
+// ---- PLAN-025: every tier's seekable flag matches whether it exposes clip ----
+// A seekable tier hands back a clip and speaks it to the end; the OS-voice tier
+// has no bytes, so it must be false and carry no clip.
+assert.equal(bundledTts("piper-es", 0).seekable, true, "bundled is a byte tier — seekable");
+assert.equal(openaiTts("http://localhost:8000/v1", "kokoro", "af_heart").seekable, true, "a local server is a byte tier — seekable");
+assert.equal(elevenLabs("key").seekable, true, "a cloud tier is a byte tier — seekable");
+assert.equal(webSpeech().seekable, false, "the OS voice speaks outside the webview — not seekable");
+for (const t of [bundledTts("piper-es", 0), openaiTts("http://localhost:8000/v1", "m", "v"), elevenLabs("key"), webSpeech()]) {
+  assert.equal(typeof t.clip !== "undefined", t.seekable, "seekable and clip() appear together");
+}
+// The composite adapter surfaces the serving tier's seekable flag.
+assert.equal(getSpeech({ bundledTtsModel: "piper-es", offline: true }).seekable, true, "a bundled voice → the composite is seekable");
+assert.equal(getSpeech({}).seekable, false, "the OS voice → the composite is not seekable");
+
+// ---- PLAN-025: a clip's release revokes its URL, safely twice ----
+// Headless node has no HTMLAudioElement and no browser URL factory, so stub the
+// bits `clip()` touches and feed `bundledTts` bytes through a fake Tauri invoke
+// (as the STT test does) — no network, and the real URL constructor stays intact
+// for anything else. The check is about the *contract*: release is idempotent.
+{
+  const RealURL: typeof URL = (globalThis as any).URL;
+  const revoked: string[] = [];
+  (globalThis as any).URL = function (input: string, base?: string | URL) {
+    return new RealURL(input, base);
+  } as typeof URL;
+  (globalThis as any).URL.prototype = RealURL.prototype;
+  Object.assign((globalThis as any).URL, {
+    createObjectURL: () => "blob:plan025",
+    revokeObjectURL: (u: string) => void revoked.push(u),
+  });
+  (globalThis as any).Audio = class {
+    src: string;
+    constructor(src: string) {
+      this.src = src;
+    }
+    addEventListener() {}
+    play() {
+      return Promise.resolve();
+    }
+  };
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke: async () => new ArrayBuffer(8), // bundledTts → WAV bytes
+    },
+  };
+  const tier = bundledTts("piper-es", 0);
+  const c = await tier.clip!("hola");
+  assert.equal(c.el.src, "blob:plan025", "clip hands back an element on the object URL");
+  c.release();
+  c.release();
+  assert.equal(revoked.length, 1, "release revokes the URL once, and a second call is a safe no-op");
+}
+
+// ---- PLAN-025: speak() still resolves on a tier where clip() rejects ----
+// Blank text rejects from clip(); speak() guards the same way and resolves rather
+// than throwing — the "nothing to say" case must never wedge a button.
+{
+  const tier = openaiTts("http://localhost:8000/v1", "m", "v");
+  await tier.speak("   "); // must not throw
+  let clipped = false;
+  await tier.clip!("  ").then(
+    () => assert.fail("clip() of blank text must reject"),
+    () => (clipped = true),
+  );
+  assert.equal(clipped, true, "clip() rejects on blank text");
 }
 
 console.log("speech.check: ok");

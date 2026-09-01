@@ -149,6 +149,11 @@ function hasNegation(sentence: string, negations: Set<string>): boolean {
 }
 
 function isContradiction(sentence: string, cur: string[], earlier: string[][], negations: Set<string>): boolean {
+  // ponytail: this ceiling only catches a copula/modal negation — "the door is
+  // not open" — that reuses the same content words. A negated *inflected* verb
+  // ("she didn't leave" vs "she left") has a different stem that no stemmer here
+  // folds, so it slips through; that is accepted. Stemming would over-fire on
+  // agglutinative packs and gains little — conservative beats clever.
   if (!hasNegation(sentence, negations)) return false;
   // The sentence negates a predicate an earlier sentence asserted: its content
   // words, with the negation words removed, are a subset of an earlier sentence's.

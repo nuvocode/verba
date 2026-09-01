@@ -170,6 +170,11 @@ async function init(): Promise<Database> {
   // deck cards. `status` is 'candidate' until "Keep these N" commits them to
   // 'kept'. Existing rows default to 'kept' so no deck changes under anyone.
   await db.execute("ALTER TABLE vocab ADD COLUMN status TEXT NOT NULL DEFAULT 'kept'").catch(() => {});
+  // PLAN-025: a listening session remembers which chapter was in progress, so
+  // re-entering Listen resumes there rather than at chapter 1. Position within a
+  // chapter is deliberately not stored — a chapter is short, and restarting it is
+  // better than resuming mid-sentence. Older rows default to 0 (chapter 1).
+  await db.execute("ALTER TABLE listening_sessions ADD COLUMN chapter_idx INTEGER NOT NULL DEFAULT 0").catch(() => {});
   await migrateVocabToPerLanguage(db);
   return db;
 }
@@ -528,10 +533,53 @@ export async function saveListening(
   answers: unknown,
   accuracy: number,
 ): Promise<void> {
+  // A finished session supersedes any in-progress row for the same piece — the
+  // learner got to the end, so there is nothing left to resume.
+  await write("DELETE FROM listening_sessions WHERE lang = $1 AND title = $2 AND accuracy = -1", [lang, title]);
   await write(
     "INSERT INTO listening_sessions (lang, title, piece, answers, accuracy, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
     [lang, title, JSON.stringify(piece), JSON.stringify(answers), accuracy, Date.now()],
   );
+}
+
+/**
+ * Write the chapter a listening session is in, so re-entering Listen resumes
+ * there rather than at chapter 1 (PLAN-025). Position within a chapter is
+ * deliberately not stored — a chapter is short, and restarting it is better than
+ * resuming mid-sentence.
+ *
+ * An unfinished session is marked with `accuracy = -1` (a finished row always
+ * carries a real 0..1), so `latestListeningProgress` can tell "in progress" from
+ * "done". One in-progress row per piece: writing again replaces the old one.
+ */
+export async function saveListeningProgress(
+  lang: string,
+  title: string,
+  piece: unknown,
+  chapterIdx: number,
+): Promise<void> {
+  await write("DELETE FROM listening_sessions WHERE lang = $1 AND title = $2 AND accuracy = -1", [lang, title]);
+  await write(
+    "INSERT INTO listening_sessions (lang, title, piece, answers, accuracy, chapter_idx, created_at) VALUES ($1, $2, $3, '[]', -1, $4, $5)",
+    [lang, title, JSON.stringify(piece), chapterIdx, Date.now()],
+  );
+}
+
+/** The chapter a listening session was in when it was left — null when none is in progress. */
+export async function latestListeningProgress(lang: string): Promise<{ title: string; piece: unknown; chapterIdx: number } | null> {
+  const db = await getDb();
+  const rows = await db.select<{ title: string; piece: string; chapter_idx: number }[]>(
+    "SELECT title, piece, chapter_idx FROM listening_sessions WHERE lang = $1 AND accuracy = -1 ORDER BY created_at DESC LIMIT 1",
+    [lang],
+  );
+  if (!rows[0]) return null;
+  let piece: unknown = null;
+  try {
+    piece = JSON.parse(rows[0].piece);
+  } catch {
+    return null; // a corrupt in-progress row is not worth resuming — start fresh
+  }
+  return { title: rows[0].title, piece, chapterIdx: rows[0].chapter_idx };
 }
 
 // ---- Phase 3: level metrics v2 ----

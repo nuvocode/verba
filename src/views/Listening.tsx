@@ -7,6 +7,14 @@ import QuestionCard from "./QuestionCard";
 import Hints from "./Hints";
 import { Generating, Nothing, Failed } from "./States";
 
+/** Seconds → "1:23"; the bar's ticks need a stable, short readout. */
+function fmtTime(seconds: number): string {
+  if (!isFinite(seconds) || seconds < 0) return "0:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 /**
  * The listening screen: a chaptered story you hear, not read, with a comprehension
  * check after each chapter. The transcript stays locked until you've answered — before
@@ -98,29 +106,82 @@ export default function Listening({
         {allChecked && !gated && <div className="listen-title">{chapter.title}</div>}
       </div>
 
-      {/* Playback — the whole point is hearing it, so it is the loud thing on the screen. */}
+      {/* Playback — the whole point is hearing it, so it is the loud thing on the screen.
+          On a seekable voice the transport is a real timeline (play/pause, back-10s, a
+          position bar and speed); on the OS-voice tier it is play/pause and a note saying
+          why there is no more — a control that cannot work is not shown. */}
       <div className="listen-play">
         {!listening.canSpeak ? (
           <div className="err" style={{ maxWidth: 480 }}>
             No voice is available to play this. Turn one on in Settings → Speech and listening — until then, the transcript is your only
             way in.
           </div>
-        ) : listening.playing ? (
+        ) : listening.preparing ? (
           <div className="speaking">
-            <em>Playing chapter {chapterIdx + 1}…</em>
+            <em>Preparing chapter {chapterIdx + 1}…</em>
             <i />
             <i />
             <i />
             <i />
             <i />
-            <button className="btn ghost sm" style={{ marginLeft: 14 }} onClick={listening.stop}>
-              Stop
-            </button>
+            <span className="model" style={{ color: "var(--ink3)", marginLeft: 10 }}>
+              {listening.prepText}
+            </span>
+          </div>
+        ) : listening.seekable ? (
+          <div className="listen-transport">
+            <div className="listen-row">
+              <button className="btn" onClick={listening.toggle}>
+                {listening.playing ? "Pause" : "▶ Play"}
+              </button>
+              <button className="btn ghost sm" onClick={listening.back10} disabled={!listening.playing}>
+                ⟲ 10s
+              </button>
+              <div className="listen-rate" role="group" aria-label="Playback speed">
+                {[0.75, 1, 1.25].map((r) => (
+                  <button
+                    key={r}
+                    className={listening.rate === r ? "active" : ""}
+                    onClick={() => listening.setRate(r)}
+                  >
+                    {r === 1 ? "1×" : `${r}×`}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="listen-row">
+              <input
+                className="listen-bar"
+                type="range"
+                min={0}
+                max={listening.duration || 1}
+                step={0.1}
+                value={Math.min(listening.position, listening.duration || 1)}
+                onChange={(e) => listening.seekTo(Number(e.target.value))}
+              />
+              <span className="listen-time">
+                {fmtTime(listening.position)} / {fmtTime(listening.duration)}
+              </span>
+            </div>
           </div>
         ) : (
-          <button className="btn" onClick={() => void listening.play()}>
-            ▶ {progress.heard ? "Replay chapter" : "Play chapter"}
-          </button>
+          <div className="listen-transport">
+            <div className="listen-row">
+              <button className="btn" onClick={listening.toggle}>
+                {listening.playing ? "Pause" : "▶ Play"}
+              </button>
+              {listening.playing && (
+                <button className="btn ghost sm" onClick={listening.stop}>
+                  Stop
+                </button>
+              )}
+            </div>
+            {/* No fake bar: this voice can't be scrubbed, so there is nothing to draw — the
+                control that cannot work is simply absent (§3.3). */}
+            <p className="listen-note">
+              This voice can't be scrubbed. Switch to a downloaded voice in Settings → Speech for the full controls.
+            </p>
+          </div>
         )}
       </div>
 

@@ -188,7 +188,9 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         case "listen":
           go("listening");
           if (!listening.piece && !listening.busy)
-            void listening.generate({ interests: day.plan?.theme, goal: activity?.goal });
+            void listening.resume().then((resumed) => {
+              if (!resumed) void listening.generate({ interests: day.plan?.theme, goal: activity?.goal });
+            });
           break;
         case "memory":
           go("memory");
@@ -288,7 +290,9 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         run: () => {
           go("listening");
           if (!listening.piece && !listening.busy)
-            void listening.generate({ interests: day.plan?.theme });
+            void listening.resume().then((resumed) => {
+              if (!resumed) void listening.generate({ interests: day.plan?.theme });
+            });
         },
       },
       {
