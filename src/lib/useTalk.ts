@@ -42,13 +42,17 @@ import {
 import {
   SLOW_RATE,
   DENIED_HANDICAP,
+  nextStep,
   bannedShape,
   OWN_FALLBACK,
   GIFT_LINE,
   giftStep,
   obeyRepair,
+  rewindAct,
+  repeatText,
   freshRewind,
   type RewindState,
+  type RewindMove,
 } from "./rewind";
 import {
   addMessage,
@@ -295,27 +299,61 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
 
   const userTurns = msgs.filter((m) => m.role === "user" && !m.isAsk).length;
 
+  // The coach's speech is strictly sequential — `speak` resolves when the clip
+  // ends, so the next clip does not start until this one has finished (PLAN-030
+  // §5.2). Without the queue, two `say` calls fired back-to-back (the rewind's
+  // own → repeat, or a REPEAT obey followed by the reply) would start two clips
+  // over each other and race on `spokeMs`. Every step lines up here and plays in
+  // order, and `spokeMs` always reflects the last clip to actually hold the floor.
+  const speakQueue = useRef<{ text: string; rate?: number }[]>([]);
+  const speaking = useRef(false);
+
   const say = useCallback(
     (text: string, rate?: number) => {
-      if (settings.speak && speech.canSpeak) {
-        // Measure how long the coach actually held the floor (PLAN-028): the next
-        // send reads it to strip the coach's speaking time out of the learner's
-        // latency. A TTS failure leaves speakMs 0 and speakUnknown false — the
-        // coach didn't speak, so there is nothing to strip and nothing unknown.
-        void speech
-          .speak(text, { locale: pack?.speech.locale, voiceHint: persona?.voiceHint || pack?.speech.voiceHint, rate })
-          .then((ms) => {
-            spokeMs.current = ms;
-            spokeUnknown.current = false;
-          })
-          .catch(() => {
-            spokeMs.current = 0;
-            spokeUnknown.current = false;
-          });
-      } else {
-        spokeMs.current = 0;
-        spokeUnknown.current = false;
+      const playNext = () => {
+        if (settings.speak && speech.canSpeak) {
+          const next = speakQueue.current.shift();
+          if (!next) {
+            speaking.current = false;
+            return;
+          }
+          // Measure how long the coach actually held the floor (PLAN-028): the next
+          // send reads it to strip the coach's speaking time out of the learner's
+          // latency. A TTS failure leaves speakMs 0 and speakUnknown false — the
+          // coach didn't speak, so there is nothing to strip and nothing unknown.
+          void speech
+            .speak(next.text, {
+              locale: pack?.speech.locale,
+              voiceHint: persona?.voiceHint || pack?.speech.voiceHint,
+              rate: next.rate,
+            })
+            .then((ms) => {
+              spokeMs.current = ms;
+              spokeUnknown.current = false;
+              playNext();
+            })
+            .catch(() => {
+              spokeMs.current = 0;
+              spokeUnknown.current = false;
+              playNext();
+            });
+        } else {
+          spokeMs.current = 0;
+          spokeUnknown.current = false;
+          speaking.current = false;
+        }
+      };
+      speakQueue.current.push({ text, rate });
+      if (!speaking.current) {
+        speaking.current = true;
+        playNext();
       }
+      // Two consecutive clips cannot race: whatever `say` was called first starts
+      // playing first, and `spokeMs` is written only as the queue empties. A call
+      // that arrives while a clip is still holding the floor waits its turn, and
+      // the learner's latency reads the *last* clip's envelope, not a mid-queue
+      // write. (speakMs is a per-turn number: `send` reads it after its own reply
+      // and the rewind both finish, so the queue keeps it the last clip's.)
     },
     [settings.speak, speech, pack, persona],
   );
@@ -407,6 +445,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         setStreaming(""); // same commit as the message that replaces it
         setMsgs([{ role: "ai", text: turn.reply, corrections: [], inline: false }]);
         setSuggestions(turn.suggestions);
+        // The coach's opening line is `prevCoachLine` from the first word — a
+        // learner REPEAT on the very first sentence repeats it, not "" (PLAN-030 §5).
+        prevCoachLine.current = turn.reply;
         say(turn.reply);
       } catch (e: unknown) {
         const { say: said, log } = humanError(e);
@@ -472,6 +513,16 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         sessionId.current = sessionIdToResume;
         // The provider context is rebuilt from the stored transcript so the next
         // turn continues the conversation rather than starting a new one.
+        // The rewind's repeat step and a learner REPEAT both re-speak the coach's
+        // most recent line; after a resume that is the last assistant message in
+        // the transcript — a REPEAT on the first turn after resuming must repeat
+        // it, not "" (PLAN-030 §5).
+        for (let i = rows.length - 1; i >= 0; i--) {
+          if (rows[i].role === "assistant") {
+            prevCoachLine.current = rows[i].content;
+            break;
+          }
+        }
         const memories = await recentMemories(settings.profile.targetLanguage).catch(() => []);
         // The response baseline is rebuilt too — the learner's history may have
         // grown since the conversation was left, so the timing signals grade
@@ -507,6 +558,8 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
    *
    * `advance` is true when the learner missed again after a rewind already
    * started — the flow moves repeat → unpack → gift rather than starting over.
+   * Every transition is computed by `nextStep`, the single owner of the order;
+   * nothing here hand-writes `repeat → unpack` or `unpack → gift`.
    */
   const driveRewind = useCallback(
     async (turnIndex: number, line: string, advance: boolean) => {
@@ -531,7 +584,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         say(own);
 
         // Step 2 — repeat: the same sentence, byte for byte, at SLOW_RATE. No model.
-        say(line, SLOW_RATE);
+        say(repeatText(line), SLOW_RATE);
 
         // The rewind exchange joins the history so the coach's next reply knows
         // the pace was owned — but it answers what the learner eventually said,
@@ -539,19 +592,26 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         // previous line, already in history.
         history.current.push({ role: "assistant", content: own });
 
+        // The rewind is now at repeat: `nextStep("own", _) → repeat` is the one
+        // transition a fresh rewind takes, and the four steps that follow are a
+        // single interrupted rewind, not four new ones.
         rewind.current.step = "repeat";
         setRewindExchange({ own, repeat: line, unpack: null, gift: null, turnIndex });
         return;
       }
 
-      // The learner missed again. Advance the flow.
-      const step = rewind.current.step;
-      if (step === "repeat" && ex) {
+      // The learner missed again. The next step is `nextStep`'s call — a clean
+      // turn (`missedAgain: false`) would resume, but advance is true, so a
+      // repeat follows an unpack that resolved it, never a gift that skipped it.
+      const from = rewind.current.step ?? "repeat";
+      const to = nextStep(from, true);
+
+      if (to === "unpack") {
         // Step 3 — unpack: break the line up, isolate the key word, gloss it.
         let unpack: UnpackResult = { parts: [], keyWord: "", gloss: "" };
         try {
           const raw = await getProvider(settings).chat(
-            [...history.current, { role: "user", content: rewindUnpackPrompt(settings, ex.repeat, "", pack) }],
+            [...history.current, { role: "user", content: rewindUnpackPrompt(settings, ex?.repeat ?? "", "", pack) }],
             { json: true },
           );
           unpack = parseUnpack(raw);
@@ -559,9 +619,12 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
           /* an empty unpack is still a pause, not a crash */
         }
         rewind.current.step = "unpack";
-        setRewindExchange({ ...ex, unpack });
+        if (ex) setRewindExchange({ ...ex, unpack });
         if (unpack.gloss) history.current.push({ role: "assistant", content: `${unpack.keyWord} — ${unpack.gloss}` });
-      } else if (step === "unpack" && ex) {
+        return;
+      }
+
+      if (to === "gift") {
         // Step 4 — gift: model the repair pattern nextTarget points at, by using
         // it. Capped at two per category, one category per session.
         const target = nextTarget(inventoryFrom(await recentSignals(settings.profile.targetLanguage).catch(() => []), Date.now()));
@@ -571,19 +634,19 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
             repairs.current.push(observation);
             rewind.current.step = "gift";
             const gift = GIFT_LINE[packId] ?? GIFT_LINE.en;
-            setRewindExchange({ ...ex, gift });
+            if (ex) setRewindExchange({ ...ex, gift });
             history.current.push({ role: "assistant", content: gift });
             return;
           }
         }
-        // Capped, or nothing left to teach: skip straight to resume.
-        rewind.current.step = null;
-        setRewindExchange(null);
-      } else {
-        // Already at gift or beyond: resume.
-        rewind.current.step = null;
-        setRewindExchange(null);
+        // Capped, or nothing left to teach: fall through to resume.
       }
+
+      // to === "resume" (a gift with the cap hit, or a step already at gift) —
+      // the rewind is over. The exchange comes down and the next normal turn
+      // continues the conversation.
+      rewind.current.step = null;
+      setRewindExchange(null);
     },
     [settings, pack, say, rewindExchange],
   );
@@ -706,11 +769,15 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
 
         // The decision (PLAN-029): verify this turn's signals and turn the list
         // into a verdict. Everything here is arithmetic for the record; the only
-        // effect is `verdict`, ridden onto the turn beside `breakdown`. `intervene`
-        // is held for PLAN-030 to act on and does nothing until then. A turn's
-        // signals never reach `judge` as silence — `send` only runs for a
-        // non-empty message, so condition 3 (the conversation continued) is met by
-        // construction and silence never becomes a bluff.
+        // effect is `verdict`, ridden onto the turn beside `breakdown`. What the
+        // verdict does to the rewind budget is `rewindAct`'s call (PLAN-030 §5.1):
+        // a `bluff` starts or advances one rewind — and only a `bluff` spends the
+        // budget, and only when it starts a rewind rather than advancing one. Any
+        // other verdict is the conversation resuming, which also closes an
+        // in-flight rewind. A turn's signals never reach `judge` as silence —
+        // `send` only runs for a non-empty message, so condition 3 (the
+        // conversation continued) is met by construction and silence never becomes
+        // a bluff.
         if (sent) {
           sent.missed = turn.missed;
           sent.keyWord = turn.keyWord;
@@ -722,19 +789,35 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
           // `spoke: true` — condition 3 (the conversation continued) is met by
           // construction here: `send` only runs for a non-empty message, so
           // silence never reaches the decision. The check pins the guard.
-          const { verdict, intervene } = judgeTurn(signals, repair, budget.current, true);
+          const { verdict } = judgeTurn(signals, repair, budget.current, true);
           sent.verdict = verdict;
-          if (intervene) {
+          const move: RewindMove = rewindAct(
+            verdict,
+            budget.current.off,
+            budget.current.used,
+            rewind.current.step,
+            produced.current.length - 1,
+            turn.reply,
+          );
+          if (move.kind === "start") {
+            // PLAN-030: the interruption is a *new* rewind — the coach stops, owns
+            // the pace, and repeats the same sentence slower. Only this spends the
+            // budget's `used`: the four steps are one rewind, so advancing one
+            // (below) costs nothing more. Fired after the reply is spoken, so the
+            // rewind follows the turn it interrupts.
             budget.current.used += 1;
-            // PLAN-030: the interruption is the rewind. The coach stops, owns the
-            // pace, and repeats the same sentence slower. Fired after the reply
-            // is spoken below, so the rewind follows the turn it interrupts. A
-            // rewind already in progress advances (repeat → unpack → gift).
-            pendingRewind.current = {
-              turnIndex: produced.current.length - 1,
-              line: turn.reply,
-              advance: rewind.current.step !== null,
-            };
+            pendingRewind.current = { turnIndex: move.turnIndex, line: move.line, advance: false };
+          } else if (move.kind === "advance") {
+            // The learner missed again while a rewind is already in flight: it
+            // moves repeat → unpack → gift, and spends nothing — `used` was
+            // already spent when the rewind started.
+            pendingRewind.current = { turnIndex: produced.current.length - 1, line: turn.reply, advance: true };
+          } else {
+            // A clean turn — the conversation resumed. Any in-flight rewind is
+            // done: the exchange comes down and the next normal turn carries the
+            // conversation forward (§5.1 rewind: end).
+            rewind.current.step = null;
+            setRewindExchange(null);
           }
         }
 
@@ -761,7 +844,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         prevCoachLine.current = turn.reply;
 
         // The rewind, if the decision asked for one: drive the four steps after
-        // the turn's reply has been spoken.
+        // the turn's reply has been spoken — but only the *new* rewind was queued
+        // here; an advanced rewind's own → repeat already ran when it started, so
+        // the next step's repeat → unpack → gift is the only thing left to drive.
         if (pendingRewind.current) {
           const queued = pendingRewind.current;
           pendingRewind.current = null;

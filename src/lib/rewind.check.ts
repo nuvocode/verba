@@ -2,7 +2,9 @@
 // repeated byte for byte at SLOW_RATE, the gift cap, the coach-only observation,
 // the banned-shape scan in every shipped locale, the neutral-ramp source scan,
 // the denied-rewind handicap, and the learner SLOW/REPEAT being obeyed. Plus the
-// loop that consumes the budget — five bluffs, five recorded, two interrupted.
+// loop that consumes the budget — five bluffs, five recorded, two interrupted —
+// and the decision that drives the real flow: one rewind per budget spend, four
+// steps per rewind, and a clean turn closing an in-flight rewind.
 // Run: node --experimental-strip-types src/lib/rewind.check.ts
 import assert from "node:assert";
 import { readFileSync } from "node:fs";
@@ -23,6 +25,7 @@ import {
   giftStep,
   giftObservation,
   obeyRepair,
+  rewindAct,
   type RewindState,
 } from "./rewind.ts";
 import { byteTier, type Clip } from "./speech.ts";
@@ -219,6 +222,79 @@ const ROOT = fileURLToPath(new URL("../../", import.meta.url));
   assert.equal(recorded, 5, "all five bluffs are recorded — the record never stops");
   assert.equal(interrupted, 2, "only the first two interrupt — the budget caps the rewind");
   assert.equal(budget.used, 2, "the budget consumed exactly two rewinds");
+}
+
+// --- case 11: one rewind session runs own → repeat → unpack → gift, one spend --
+// PLAN-030 §5.1 — the four steps are ONE rewind and share a single budget spend.
+// The decision, not a hand-rolled step list, drives the flow: a first bluff
+// starts the rewind (spends one), then the miss again advances it repeat →
+// unpack → gift, and the gift lands with `used` still exactly one.
+{
+  const budget: SessionBudget = { used: 0, handicap: 0, off: false };
+  const state = freshRewind();
+
+  // Turn 1 — a bluff. No rewind in flight, budget under the cap: it starts the
+  // rewind, and the spend is recorded exactly as useTalk does.
+  const first = rewindAct("bluff", budget.off, budget.used, state.step, 0, "line-one");
+  assert.equal(first.kind, "start", "a first bluff starts the rewind");
+  if (first.kind === "start") {
+    assert.equal(first.turnIndex, 0, "the rewind points at the turn that missed");
+    assert.equal(first.line, "line-one", "…and repeats that turn's reply");
+  }
+  budget.used += 1; // the same line useTalk runs on start
+  state.step = "repeat"; // own → repeat is the transition a fresh rewind takes
+
+  // Turn 2 — the learner misses again while the rewind is in flight. The verdict
+  // may be a bluff (still under the cap), but a rewind already in flight means it
+  // ADVANCES and spends nothing more.
+  const second = rewindAct("bluff", budget.off, budget.used, state.step, 1, "line-two");
+  assert.equal(second.kind, "advance", "a miss on a rewind already in flight advances it, it does not start over");
+  state.step = nextStep("repeat", true); // repeat → unpack
+
+  // Turn 3 — the learner misses a third time.
+  const third = rewindAct("bluff", budget.off, budget.used, state.step, 2, "line-three");
+  assert.equal(third.kind, "advance", "…and advances again, unpack → gift");
+  state.step = nextStep("unpack", true); // unpack → gift
+
+  // The gift — the rewind is one budget spend. `used` was spent only once.
+  assert.equal(state.step, "gift", "the rewind reached the gift, never having skipped a step");
+  assert.equal(budget.used, 1, "the four steps cost exactly one rewind — advancing spends nothing");
+
+  // A clean turn now closes the rewind: the conversation resumed.
+  state.step = null;
+  const resumed = rewindAct("clear", budget.off, budget.used, state.step, 3, "line-four");
+  assert.equal(resumed.kind, "resume", "a clean turn while no rewind is in flight just resumes");
+}
+
+// --- case 12: a clean turn closes an in-flight rewind that was mid-step --------
+// PLAN-030 §5.1 rewind: end — an in-progress rewind is not left on screen when a
+// non-bluff turn arrives; the exchange comes down and the conversation carries on.
+{
+  const budget: SessionBudget = { used: 1, handicap: 0, off: false };
+  const state = freshRewind();
+  state.step = "unpack"; // a rewind mid-flow
+
+  // The learner answers the unpack correctly — a clear turn, no rewind asked.
+  const move = rewindAct("clear", budget.off, budget.used, state.step, 4, "line-five");
+  assert.equal(move.kind, "resume", "a clear turn resumes the conversation");
+  state.step = null; // useTalk's mirror: a resume closes the exchange regardless of step
+  assert.equal(state.step, null, "the in-flight rewind closes on a clean turn");
+  assert.equal(budget.used, 1, "…and no further rewind is spent");
+}
+
+// --- case 13: rewindAct respects the learner's don't-interrupt ask ------------
+// PLAN-030 §5.1 — `off` silences the interruption (a rewind is an interruption)
+// even while a rewind is mid-flight, and even under the cap.
+{
+  const budget: SessionBudget = { used: 0, handicap: 0, off: true };
+  const state = freshRewind();
+  const move = rewindAct("bluff", budget.off, budget.used, state.step, 0, "line");
+  assert.equal(move.kind, "resume", "a bluff while off never starts a rewind");
+
+  state.step = "repeat";
+  const mid = rewindAct("bluff", budget.off, budget.used, state.step, 1, "line");
+  assert.equal(mid.kind, "resume", "…not even to advance one already in flight");
+  assert.equal(state.step, "repeat", "the in-flight rewind is untouched by the decision");
 }
 
 console.log("rewind.check OK");

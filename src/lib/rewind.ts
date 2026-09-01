@@ -9,6 +9,7 @@
 // never blame the learner live here, beside the scan that guards them.
 
 import type { RepairCategory, RepairObservation } from "./repair.ts";
+import { REWIND_LIMIT, type Verdict } from "./breakdown.ts";
 
 /** The rate the repeat step speaks at — a step the ear reads as care, not a fault. */
 export const SLOW_RATE = 0.75;
@@ -20,21 +21,18 @@ export type RewindStep = "own" | "repeat" | "unpack" | "gift" | "resume";
 export const REWIND_ORDER: readonly RewindStep[] = ["own", "repeat", "unpack", "gift", "resume"];
 
 /**
- * The next step after `step`, given whether the learner missed again.
- * `unpack` is unreachable without a second miss; `gift` without a third.
+ * The next step after `step`, given whether the learner missed again — driven by
+ * `REWIND_ORDER`, never handwritten twice. `unpack` is unreachable without a
+ * second miss; `gift` without a third. `resume` is the end: `gift` — the last
+ * advancing step — advances straight to it, and a step already there stays.
+ * The first step `own` always moves to `repeat`, because the same sentence comes
+ * first whether the pace was owned once or twice.
  */
 export function nextStep(step: RewindStep, missedAgain: boolean): RewindStep {
-  switch (step) {
-    case "own":
-      return "repeat";
-    case "repeat":
-      return missedAgain ? "unpack" : "resume";
-    case "unpack":
-      return missedAgain ? "gift" : "resume";
-    case "gift":
-    case "resume":
-      return "resume";
-  }
+  const i = REWIND_ORDER.indexOf(step);
+  if (i === -1 || i >= REWIND_ORDER.length - 1) return "resume"; // gift / resume are the end
+  if (!missedAgain && (step === "repeat" || step === "unpack")) return "resume"; // a clean turn resumes
+  return REWIND_ORDER[i + 1];
 }
 
 // --- the banned shapes ---------------------------------------------------------
@@ -240,4 +238,40 @@ export function obeyRepair(repair: RepairObservation | null, prevLine: string): 
   if (repair.category === "SLOW") return { kind: "slow" };
   if (repair.category === "REPEAT") return { kind: "repeat", line: prevLine };
   return { kind: "none" };
+}
+
+// --- the budget decision (§5.1) -------------------------------------------------
+
+/**
+ * What one turn's verdict does to the rewind budget and queue (PLAN-030, §5.1):
+ * a `bluff` starts or advances a rewind; any other verdict — `clear`, or a
+ * `suspect` that was never interrupted — is the conversation resuming. `used` is
+ * the budget already spent; it is **not** incremented here.
+ */
+export type RewindMove =
+  | { kind: "start"; turnIndex: number; line: string } // own → repeat is the first rewind
+  | { kind: "advance" } // a rewind is already in flight; the miss moves it forward
+  | { kind: "resume" } // the conversation resumes; any in-flight rewind closes
+
+/**
+ * Pure decision, mirroring `useTalk`'s `if (intervene)` block. The four steps are
+ * one rewind: only a `bluff` while the budget is under the cap and the learner
+ * has not asked to be left alone spends a rewind — and the four steps then follow
+ * as one. A `bluff` when a rewind is already in flight advances it instead, and
+ * spends nothing more. A `clear` or `suspect` turn is the conversation resuming;
+ * `used` is returned the caller may record separately, though a clean turn never
+ * spends.
+ */
+export function rewindAct(
+  verdict: Verdict,
+  on: boolean,
+  budgetUsed: number,
+  step: RewindStep | null,
+  turnIndex: number,
+  line: string,
+): RewindMove {
+  if (verdict === "bluff" && (budgetUsed < REWIND_LIMIT || step !== null) && !on) {
+    return step === null ? { kind: "start", turnIndex, line } : { kind: "advance" };
+  }
+  return { kind: "resume" };
 }
