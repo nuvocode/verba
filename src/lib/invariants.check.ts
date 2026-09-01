@@ -132,12 +132,12 @@ const LEDGER: Row[] = [
   {
     id: 20,
     claim: "Kalite kapılarından geçmemiş içerik gösterilmez.",
-    pending: "M1+ (İçerik üretimi)",
+    assertedIn: [{ file: "src/lib/passage.check.ts", marker: "invariant 20" }],
   },
   {
     id: 21,
     claim: 'Bir pasaj "yeniden kullanım" iddiasıyla üretildiyse hedef kelimelerin ≥ %50\'sini içerir.',
-    pending: "M1+ (İçerik üretimi)",
+    assertedIn: [{ file: "src/lib/passage.check.ts", marker: "invariant 21" }],
   },
   {
     id: 22,

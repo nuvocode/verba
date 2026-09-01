@@ -35,6 +35,20 @@ export interface LanguagePack {
   grammar: string[]; // grammar guidance the tutor prompt must respect
   promptHint: string; // extra instruction appended to the system prompt
   speech: SpeechConfig;
+  /**
+   * Words the coherence gate treats as non-content. A pack without a list falls
+   * back to "every word is content" — the length floor is only meaningful against
+   * a real list, and a short-word language (Japanese, Chinese) would otherwise
+   * have every sentence rejected as empty.
+   */
+  stopwords?: string[];
+  /**
+   * Words the contradiction gate treats as negations — a word that, at a word
+   * boundary, negates the predicate that follows it. A pack without them skips
+   * the contradiction test entirely, so a language whose negation words we have
+   * not written down is never rejected for them.
+   */
+  negations?: string[];
 }
 
 /**
@@ -81,5 +95,11 @@ export function validatePack(raw: unknown): ValidationResult {
   if (o?.direction !== "ltr" && o?.direction !== "rtl") errors.push(`"direction" must be "ltr" or "rtl"`);
   if (typeof o?.speech?.locale !== "string" || !o.speech.locale.trim())
     errors.push(`"speech.locale" must be a non-empty BCP-47 string (e.g. "es-ES")`);
+  // Optional stopwords: when present, an array of strings.
+  if (o?.stopwords !== undefined && (!Array.isArray(o.stopwords) || o.stopwords.some((x: any) => typeof x !== "string")))
+    errors.push(`"stopwords" must be an array of strings`);
+  // Optional negations: when present, an array of strings.
+  if (o?.negations !== undefined && (!Array.isArray(o.negations) || o.negations.some((x: any) => typeof x !== "string")))
+    errors.push(`"negations" must be an array of strings`);
   return errors.length ? { ok: false, errors } : { ok: true, errors: [], pack: o as LanguagePack };
 }

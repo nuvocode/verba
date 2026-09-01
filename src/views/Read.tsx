@@ -11,7 +11,7 @@ import Prompter from "./read/Prompter";
 import ReadingCheck from "./read/ReadingCheck";
 import { readSignals } from "../lib/signals";
 import { dependencyMet, dependencyNote } from "../lib/learn";
-import { Generating, Nothing, Failed } from "./States";
+import { Generating, Nothing, Failed, Unusable } from "./States";
 
 /**
  * The reading screen: one passage, two ways to work it.
@@ -123,11 +123,28 @@ export default function Read({
             <Generating
               what={`Writing you a ${levelOf(settings.profile)} story…`}
               eta="About 20 seconds on this model — it keeps words from your conversations warm."
+              step={read.step ?? undefined}
+            />
+          )}
+
+          {/* surface read: unusable — a passage that failed the gates is never
+              shown (PLAN-022). The learner sees that it was turned away, a
+              regenerate, and — where one exists — the most recent saved passage
+              at the same level. */}
+          {!read.busy && read.outcome && !read.outcome.ok && (
+            <Unusable
+              what={read.outcome.why}
+              fallback={
+                read.outcome.fallback
+                  ? { label: "Read a saved passage instead", onClick: () => void read.openFallback() }
+                  : undefined
+              }
+              regenerate={{ label: "Try again", onClick: () => void generate({}) }}
             />
           )}
 
           {/* surface read: empty */}
-          {!read.busy && !read.error && (
+          {!read.busy && !read.error && !read.outcome && (
             <Nothing
               why="The coach writes a story at your level that reuses the words from your conversations."
               action={{ label: `Today's passage — ${day.plan?.theme ?? "everyday life"}`, onClick: () => void generate({}) }}

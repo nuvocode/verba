@@ -504,6 +504,20 @@ export async function getReading(id: number): Promise<unknown | null> {
   return rows[0] ? JSON.parse(rows[0].text) : null;
 }
 
+/**
+ * The most recent saved passage at a given level — the fallback a rejected
+ * generation offers (PLAN-022). Returns a parsed ReadingText, or null when the
+ * learner has no saved passage at that level. Query only: the schema is untouched.
+ */
+export async function latestReadingAtLevel(lang: string, cefr: string): Promise<unknown | null> {
+  const db = await getDb();
+  const rows = await db.select<{ text: string }[]>(
+    "SELECT text FROM reading_sessions WHERE lang = $1 AND cefr = $2 ORDER BY created_at DESC LIMIT 1",
+    [lang, cefr],
+  );
+  return rows[0] ? JSON.parse(rows[0].text) : null;
+}
+
 // ---- listening sessions ----
 
 /** Store a finished listening piece with the learner's answers and comprehension accuracy. */

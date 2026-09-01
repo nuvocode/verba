@@ -62,6 +62,10 @@ export default function Passage({
         <div className="topline">
           <div className="eyebrow">
             Generated for you · {levelOf(settings.profile)} · ~{Math.max(1, Math.round(text.sentences.length / 3))} min
+            {/* The reuse claim is conditional (PLAN-022, invariant 21): it prints
+                the gate's hit count, or nothing at all. The copy reads the gate's
+                output, never the request. */}
+            {read.reusedWords.length > 0 && ` · reuses ${read.reusedWords.length} of your words`}
           </div>
           <ViewToggle view={view} onView={onView} />
         </div>

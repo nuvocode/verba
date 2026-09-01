@@ -145,6 +145,95 @@ export function continueReadingPrompt(s: Settings, text: ReadingText, pack?: Lan
   ].join("\n\n");
 }
 
+// ---- PLAN-022: the five-step pipeline's prompts ------------------------------
+
+/** A claim or event the passage will be built from — the outline's beats. */
+export interface OutlineBeat {
+  claim: string;
+}
+
+export interface Outline {
+  title: string;
+  beats: OutlineBeat[];
+}
+
+/**
+ * Pass 1: the arc. 4–6 beats, each one claim or event, as `{ beats: [{ claim }] }`.
+ * The shape is Listen's outline minus the chapters — Listen's carries chapter
+ * titles, this one carries claims. Kept local (not imported from listening.ts) so
+ * this module stays pure and the two outlines stay independent.
+ */
+export function outlinePrompt(s: Settings, opts: StoryOptions = {}, pack?: LanguagePack): string {
+  const n = opts.sentences ?? 8;
+  const memories = opts.memories ?? [];
+  const topic = opts.topic?.trim();
+  return [
+    base(s, pack),
+    memories.length ? memoryLine(memories, !!topic) : "",
+    topic
+      ? `The learner asked for a passage about: ${topic}. That is the subject.`
+      : opts.interests
+        ? `Tailor the topic to the learner's interests: ${opts.interests}.`
+        : `Pick an engaging everyday topic.`,
+    opts.goal ? `Where natural, give practice with: ${opts.goal}.` : "",
+    opts.reuse?.length
+      ? `Work as many of these words as fit naturally into the passage — they are words the learner has just used themselves: ${opts.reuse.join(", ")}.`
+      : "",
+    `Plan a coherent story of about ${n} sentences with a real arc — a situation, a complication, a resolution — and recurring people, so the passage holds together.`,
+    `Answer with ONLY a JSON object: { "title": "a short title in ${s.profile.targetLanguage}", "beats": [ { "claim": "one claim or event in ${s.profile.nativeLanguage}" } ] }. Give between 4 and 6 beats.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+export function parseOutline(raw: string): Outline {
+  const o = extractJson(raw) ?? {};
+  const beats: OutlineBeat[] = Array.isArray(o.beats)
+    ? o.beats
+        .map((b: any) => ({ claim: String(b?.claim ?? "").trim() }))
+        .filter((b: OutlineBeat) => b.claim)
+    : [];
+  return { title: typeof o.title === "string" ? o.title : "", beats };
+}
+
+/**
+ * Pass 2: write the passage *from the beats*, at the level's sentence length and
+ * word distribution. Same `ReadingText` shape as today, so nothing downstream
+ * changes.
+ */
+export function draftPrompt(s: Settings, outline: Outline, opts: StoryOptions = {}, pack?: LanguagePack): string {
+  const n = opts.sentences ?? 8;
+  const arc = outline.beats.map((b, i) => `${i + 1}. ${b.claim}`).join("\n");
+  return [
+    base(s, pack),
+    `You are writing a passage titled "${outline.title}".`,
+    `The whole arc, so the passage keeps the thread and the same people:\n${arc}`,
+    opts.reuse?.length
+      ? `Work as many of these words as fit naturally into the passage — they are words the learner has just used themselves: ${opts.reuse.join(", ")}.`
+      : "",
+    lengthLine(n),
+    jsonShape.replace(/TARGET/g, s.profile.targetLanguage).replace(/NATIVE/g, s.profile.nativeLanguage),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * Pass 3: rewrite one failing sentence. A single sentence, not the passage — the
+ * rest already passed. `why` is the gate's reason, so the model knows what to fix.
+ */
+export function rewritePrompt(s: Settings, sentence: string, previous: string, why: string, pack?: LanguagePack): string {
+  return [
+    base(s, pack),
+    `One sentence of a passage you wrote did not pass a quality check.`,
+    `The sentence: "${sentence}"`,
+    `The sentence before it: "${previous}"`,
+    `Why it was rejected: ${why}`,
+    `Rewrite ONLY that one sentence so it passes — keep it at the same level, keep its meaning, and make it connect to the sentence before it.`,
+    `Answer with ONLY a JSON object: { "target": "the rewritten sentence in ${s.profile.targetLanguage}", "native": "its translation in ${s.profile.nativeLanguage}" }.`,
+  ].join("\n\n");
+}
+
 /** On-demand explanation of a single word the learner tapped while reading. */
 export function explainWordPrompt(s: Settings, word: string, sentence: string): string {
   return [
@@ -193,6 +282,14 @@ export function parseReading(raw: string): ReadingText {
         }))
     : [];
   return { title: typeof obj.title === "string" ? obj.title : "", sentences };
+}
+
+/** A single rewritten sentence (PLAN-022 pass 3). Returns null when nothing usable came back. */
+export function parseRewrite(raw: string): Sentence | null {
+  const o = extractJson(raw) ?? {};
+  const target = String(o.target ?? "").trim();
+  if (!target) return null;
+  return { target, native: String(o.native ?? "") };
 }
 
 export function parseWordExplanation(raw: string): WordExplanation {

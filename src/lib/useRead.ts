@@ -3,11 +3,15 @@ import type { Settings } from "./settings";
 import { levelOf } from "./model";
 import { getProvider } from "./providers";
 import {
-  storyPrompt,
   continueReadingPrompt,
   explainWordPrompt,
   comprehensionPrompt,
+  outlinePrompt,
+  draftPrompt,
+  rewritePrompt,
+  parseOutline,
   parseReading,
+  parseRewrite,
   parseWordExplanation,
   parseComprehension,
   bareWord,
@@ -16,11 +20,12 @@ import {
   type PassageLength,
   type ReadingText,
 } from "./reading";
+import { coherence, reuse, level, type PassageOutcome, type CoherenceMarkers } from "./passage";
 import { scoreAnswer, type Question } from "./questions";
 import { computeMetrics } from "./metrics";
 import { getPack } from "./packs";
 import { humanError } from "./fmt";
-import { addVocab, recentMemories, saveReading, saveMetrics, vocabCounts, listReadings, getReading, type ReadingRow } from "./db";
+import { addVocab, recentMemories, saveReading, saveMetrics, vocabCounts, listReadings, getReading, latestReadingAtLevel, type ReadingRow } from "./db";
 
 export interface WordPopover {
   /** What was tapped, as it appears in the text. */
@@ -64,6 +69,15 @@ export function useRead(settings: Settings) {
   const [saved, setSaved] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The generation step the learner sees while busy (PLAN-022): "Planning the
+  // passage… / Writing it… / Checking it reads properly…". Null when idle.
+  const [step, setStep] = useState<string | null>(null);
+  // A passage that failed the gates (PLAN-022). Rendered as Unusable — the text
+  // is never shown. Null when there is no rejection to show.
+  const [outcome, setOutcome] = useState<PassageOutcome | null>(null);
+  // The reuse gate's hit list (PLAN-022, invariant 21). The header prints its
+  // count or says nothing — the copy reads the gate's output, never the request.
+  const [reusedWords, setReusedWords] = useState<string[]>([]);
   // Past passages, newest first — the empty state's library. Loaded on demand.
   const [library, setLibrary] = useState<ReadingRow[]>([]);
   // The comprehension check the reader takes after finishing a passage. Null until
@@ -86,6 +100,12 @@ export function useRead(settings: Settings) {
    * `length` and `topic` are what the reader asked for in the sheet. Callers that
    * pass neither — Today's plan, the palette — get the remembered length and the
    * day's theme, which is what keeps the daily flow a single keystroke.
+   *
+   * PLAN-022: this is a five-step pipeline, not one call. Outline → draft →
+   * per-sentence coherence → reuse → level. Each step reports through `step` so
+   * the learner sees progress rather than a twenty-second spinner. A passage that
+   * fails the gates is never rendered — it becomes `outcome` (Unusable), with a
+   * fallback when one exists.
    */
   const generate = useCallback(
     async (opts: { interests?: string; goal?: string; length?: PassageLength; topic?: string; reuse?: string[] } = {}) => {
@@ -94,41 +114,153 @@ export function useRead(settings: Settings) {
       setAsk({ length, topic });
       setBusy(true);
       setError("");
+      setStep(null);
+      setOutcome(null);
+      setReusedWords([]);
       setFocusIdx(-1);
       setPopover(null);
       setSaved([]);
       setCheck(null);
+      const provider = getProvider(settings);
+      const locale = pack?.speech.locale ?? "en";
+      // The pack's stopword list, or the empty set — the coherence gate's fallback
+      // (every word is content) applies when a pack carries none. A short-word
+      // language (Japanese, Chinese) must not have every sentence rejected as empty.
+      const stopwords = new Set<string>(pack?.stopwords ?? []);
+      // The pack's discourse markers and pronouns, or none — the connection test
+      // is skipped when a pack has not written them down.
+      const markers = pack?.markers
+        ? { discourse: new Set(pack.markers.discourse), pronouns: new Set(pack.markers.pronouns) }
+        : undefined;
+      // The pack's negation words, or none — the contradiction test is skipped
+      // when a pack has not written them down.
+      const negations = pack?.negations ? new Set(pack.negations) : undefined;
+      const target = levelOf(settings.profile);
+      const reuseWant = opts.reuse ?? [];
+      const storyOpts = { interests: opts.interests, goal: opts.goal, topic, sentences: LENGTHS[length], reuse: reuseWant };
       try {
         // The passage is set in the learner's own world where it can be — the same
         // facts the coach talks to them about, doing a second job here.
         const memories = await recentMemories(settings.profile.targetLanguage).catch(() => []);
-        const raw = await getProvider(settings).chat(
-          [
-            {
-              role: "user",
-              content: storyPrompt(
-                settings,
-                { interests: opts.interests, goal: opts.goal, topic, sentences: LENGTHS[length], memories, reuse: opts.reuse },
-                pack,
-              ),
-            },
-          ],
-          { json: true },
+
+        // ---- step 1: outline (4–6 beats, one retry) ----
+        setStep("Planning the passage…");
+        let outline = parseOutline(
+          await provider.chat([{ role: "user", content: outlinePrompt(settings, { ...storyOpts, memories }, pack) }], { json: true }),
         );
-        const t = parseReading(raw);
+        if (outline.beats.length < 4 || outline.beats.length > 6) {
+          outline = parseOutline(
+            await provider.chat([{ role: "user", content: outlinePrompt(settings, { ...storyOpts, memories }, pack) }], { json: true }),
+          );
+        }
+        if (outline.beats.length < 4 || outline.beats.length > 6) {
+          throw new Error("The model could not plan a coherent passage. Try again.");
+        }
+
+        // ---- step 2: draft (from the beats) ----
+        setStep("Writing it…");
+        let t = parseReading(
+          await provider.chat([{ role: "user", content: draftPrompt(settings, outline, { ...storyOpts, memories }, pack) }], { json: true }),
+        );
         if (!t.sentences.length) throw new Error("The model returned no readable sentences. Try again.");
+
+        // ---- step 3: coherence, sentence by sentence ----
+        setStep("Checking it reads properly…");
+        let coherenceResult = coherence(t, locale, stopwords, markers, negations);
+        if (!coherenceResult.ok) {
+          // A failing sentence goes back alone; two failures on the same sentence
+          // and the passage is rejected.
+          const rewritten = await rewriteFailing(t, coherenceResult, provider, settings, locale, stopwords, markers, negations);
+          if (rewritten) {
+            t = rewritten;
+            coherenceResult = coherence(t, locale, stopwords, markers, negations);
+          }
+        }
+        if (!coherenceResult.ok) {
+          return reject("The passage didn't hang together.", target);
+        }
+
+        // ---- step 4: reuse (≥ half of the requested words, one retry) ----
+        let reuseResult = reuseWant.length ? reuse(t, reuseWant) : null;
+        if (reuseResult && !reuseResult.ok) {
+          // Back to the draft once, with the missing words named.
+          t = parseReading(
+            await provider.chat(
+              [{ role: "user", content: draftPrompt(settings, outline, { ...storyOpts, memories, reuse: reuseResult.missing }, pack) }],
+              { json: true },
+            ),
+          );
+          if (t.sentences.length) {
+            reuseResult = reuse(t, reuseWant);
+            // A redraft can break coherence — re-check it before accepting.
+            const recheck = coherence(t, locale, stopwords, markers, negations);
+            if (!recheck.ok) return reject("The passage didn't hang together.", target);
+          }
+        }
+        if (reuseResult && !reuseResult.ok) {
+          return reject("The passage didn't reuse the words you asked for.", target);
+        }
+
+        // ---- step 5: level (±1 band) ----
+        const levelResult = level(t, target, locale);
+        if (!levelResult.ok) {
+          return reject(`The passage came out at ${levelResult.band}, not ${target}.`, target);
+        }
+
+        // ---- accepted ----
+        setReusedWords(reuseResult?.hit ?? []);
         setText(t);
-        await saveReading(settings.profile.targetLanguage, t.title, t, { length, topic, cefr: levelOf(settings.profile) }).catch(() => {});
+        await saveReading(settings.profile.targetLanguage, t.title, t, { length, topic, cefr: target }).catch(() => {});
       } catch (e: unknown) {
         const { say: said, log } = humanError(e);
         console.warn("[read] generate failed:", log);
         setError(said);
       } finally {
         setBusy(false);
+        setStep(null);
+      }
+
+      /** A rejected passage becomes Unusable — never rendered. */
+      async function reject(why: string, cefr: string): Promise<void> {
+        const fallback = (await latestReadingAtLevel(settings.profile.targetLanguage, cefr).catch(() => null)) as ReadingText | null;
+        setOutcome({ ok: false, why, fallback: fallback?.sentences?.length ? fallback : null });
       }
     },
     [settings, pack, ask.length],
   );
+
+  /**
+   * Rewrite the failing sentences of a draft, one at a time. Returns a new
+   * ReadingText with the failing sentences replaced, or null when a sentence
+   * fails twice (the passage is rejected).
+   */
+  async function rewriteFailing(
+    t: ReadingText,
+    result: { failed: number[]; why: string[] },
+    provider: ReturnType<typeof getProvider>,
+    settings: Settings,
+    locale: string,
+    stopwords: Set<string>,
+    markers?: CoherenceMarkers,
+    negations?: Set<string>,
+  ): Promise<ReadingText | null> {
+    const sentences = [...t.sentences];
+    for (let k = 0; k < result.failed.length; k++) {
+      const i = result.failed[k];
+      const prev = i > 0 ? sentences[i - 1].target : "";
+      const raw = await provider.chat(
+        [{ role: "user", content: rewritePrompt(settings, sentences[i].target, prev, result.why[k] ?? "", pack) }],
+        { json: true },
+      );
+      const rewritten = parseRewrite(raw);
+      if (!rewritten) return null; // nothing usable came back — reject
+      sentences[i] = rewritten;
+      // Two failures on the same sentence and the passage is rejected.
+      const single = coherence({ title: t.title, sentences: [rewritten] }, locale, stopwords, markers, negations);
+      if (!single.ok) return null;
+    }
+    return { title: t.title, sentences };
+  }
 
   /** Flow reading — append more sentences to the passage in progress. */
   const extend = useCallback(async () => {
@@ -230,6 +362,19 @@ export function useRead(settings: Settings) {
     setCheck(null);
     setText(t);
   }, []);
+
+  /** Open the fallback a rejected generation offered (PLAN-022) — the most recent saved passage at the same level. */
+  const openFallback = useCallback(async () => {
+    const o = outcome;
+    if (!o || o.ok || !o.fallback) return;
+    setOutcome(null);
+    setFocusIdx(-1);
+    setPopover(null);
+    setSaved([]);
+    setError("");
+    setCheck(null);
+    setText(o.fallback);
+  }, [outcome]);
 
   /**
    * Turn the finished passage into a comprehension check. Returns whether a check was
@@ -341,6 +486,12 @@ export function useRead(settings: Settings) {
     saved,
     busy,
     error,
+    /** The generation step the learner sees while busy (PLAN-022). */
+    step,
+    /** A passage that failed the gates — rendered as Unusable, never shown. */
+    outcome,
+    /** The reuse gate's hit list — the header prints its count or says nothing. */
+    reusedWords,
     /** The last thing they asked for — the sheet opens on it. */
     ask,
     generate,
@@ -352,6 +503,7 @@ export function useRead(settings: Settings) {
     library,
     loadLibrary,
     open,
+    openFallback,
     close,
     /** The post-passage comprehension check — runs on the shared question layer. */
     check,
