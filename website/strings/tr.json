@@ -1,7 +1,6 @@
 {
   "lang": "tr",
   "dir": "ltr",
-  "version": "v0.3.0",
 
   "meta": {
     "title": "Verba — makinenizde çalışan bir yapay zekayla konuşarak dil öğrenin",
@@ -24,7 +23,7 @@
   },
 
   "hero": {
-    "eyebrow": "v0.3.0 &nbsp;·&nbsp; macOS · Windows · Linux &nbsp;·&nbsp; MIT",
+    "eyebrow": "{{version}} &nbsp;·&nbsp; macOS · Windows · Linux &nbsp;·&nbsp; MIT",
     "heading": "Asla sıkılmayan, asla yargılamayan ve <em>&mdash; isterseniz &mdash;</em> internete hiç dokunmayan bir yapay zekayla konuşarak dil öğrenin.",
     "lede": "Anında düzeltmeli tam konuşmalar, yapay zeka tarafından oluşturulmuş seviyeli okuma, otomatik kelime yakalama ve her iki tarafta ses. Her şey diskinizdeki bir SQLite dosyasında yaşar. Kaydolacak bir sunucu yok, çünkü sunucu yok.",
     "ctaDownload": "macOS için indir",
@@ -88,7 +87,7 @@
   },
 
   "download": {
-    "eyebrow": "İndir &nbsp;·&nbsp; v0.3.0",
+    "eyebrow": "İndir &nbsp;·&nbsp; {{version}}",
     "heading": "Makineniz için olan sürümü alın.",
     "macArmLabel": "macOS",
     "macArmSub": "Apple Silicon — M1'den M4'e",

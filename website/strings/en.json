@@ -1,7 +1,6 @@
 {
   "lang": "en",
   "dir": "ltr",
-  "version": "v0.3.0",
 
   "meta": {
     "title": "Verba — learn a language by talking to an AI that runs on your machine",
@@ -24,7 +23,7 @@
   },
 
   "hero": {
-    "eyebrow": "v0.3.0 &nbsp;·&nbsp; macOS · Windows · Linux &nbsp;·&nbsp; MIT",
+    "eyebrow": "{{version}} &nbsp;·&nbsp; macOS · Windows · Linux &nbsp;·&nbsp; MIT",
     "heading": "Learn a language by talking to an AI that never gets bored, never judges, and <em>&mdash; if you want &mdash;</em> never touches the internet.",
     "lede": "Full conversations with inline corrections, AI-generated graded reading, automatic vocabulary capture, and a voice on both ends. Everything lives in a SQLite file on your disk. There is no server to sign up to, because there is no server.",
     "ctaDownload": "Download for macOS",
@@ -88,7 +87,7 @@
   },
 
   "download": {
-    "eyebrow": "Download &nbsp;·&nbsp; v0.3.0",
+    "eyebrow": "Download &nbsp;·&nbsp; {{version}}",
     "heading": "Take the build for your machine.",
     "macArmLabel": "macOS",
     "macArmSub": "Apple Silicon — M1 to M4",

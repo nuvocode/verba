@@ -16,8 +16,10 @@ const TEMPLATE_PATH = path.join(ROOT, "template.html");
 // The app's own version, for any locale whose strings file has not been given one.
 // Hardcoding it here means a forgotten locale points at a release two versions old
 // and nobody notices; package.json is bumped for every release by definition.
-// ponytail: still one hand-edit per locale, because the version is inside translated
-// prose ("Download · v0.3.0"). Move those eyebrows to {{version}} if it gets tedious.
+// No locale carries a `version` of its own any more: the eyebrows that used to spell
+// the version into translated prose now say {{version}}, so a release is one bump
+// here and nothing to hand-edit per language. A strings file may still override it,
+// and one that does is opting out of that.
 const APP_VERSION = "v" + require("../package.json").version;
 
 // ---------------------------------------------------------------------------
@@ -120,8 +122,11 @@ function main() {
       if (key === "hreflang") return hreflangHtml;
       if (key === "langLinks") return langLinksHtml;
 
-      // resolve nested key from the language's strings
-      return resolve(strings, key);
+      // resolve nested key from the language's strings. `replaceTokens` walks the
+      // template once and does not rescan what it substitutes, so a {{version}}
+      // written inside a translated string (the two eyebrows) is filled in here.
+      const val = resolve(strings, key);
+      return typeof val === "string" ? val.replace(/\{\{version\}\}/g, version) : val;
     });
 
     // 4. write output
