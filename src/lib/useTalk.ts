@@ -231,11 +231,17 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   const repairs = useRef<RepairObservation[]>([]);
   // How long the coach's audio held the floor before the next send, in ms — and
   // whether it spoke but the duration could not be measured (PLAN-028). Set by
-  // `say()` when it resolves; read by `send()` to separate the learner's thinking
-  // time from the coach's speaking time. A turn whose speak is unknown is excluded
-  // from the baseline and timing signals entirely.
+  // `say()` as the *accumulated* sum of every clip that held the floor (a rewind
+  // is three clips and the floor is all three); read and drained by `send()` to
+  // separate the learner's thinking time from the coach's speaking time. A turn
+  // whose speak is unknown is excluded from the baseline and timing signals
+  // entirely.
   const spokeMs = useRef(0);
   const spokeUnknown = useRef(false);
+  // Bumped whenever a floor is abandoned mid-play (the learner spoke before the
+  // coach finished, or speech went off). A clip that resolves after its floor
+  // was abandoned must not add its duration to a floor that already moved on.
+  const speakGeneration = useRef(0);
   // The per-session rewind budget (PLAN-029): rewinds spent and whether the
   // learner asked not to be interrupted. Held for this session and rebuilt by
   // `start`. `handicap` — the extra signals §3.3's denied rewind demands — lives
@@ -303,45 +309,50 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   // ends, so the next clip does not start until this one has finished (PLAN-030
   // §5.2). Without the queue, two `say` calls fired back-to-back (the rewind's
   // own → repeat, or a REPEAT obey followed by the reply) would start two clips
-  // over each other and race on `spokeMs`. Every step lines up here and plays in
-  // order, and `spokeMs` always reflects the last clip to actually hold the floor.
+  // over each other. Every step lines up here and plays in order, and each
+  // clip's duration *accumulates* into `spokeMs` — the floor before a send is
+  // the sum of every clip that held it (PLAN-028's "how long the coach held the
+  // floor"). `send` drains and resets the accumulator when it reads.
   const speakQueue = useRef<{ text: string; rate?: number }[]>([]);
   const speaking = useRef(false);
 
   const say = useCallback(
     (text: string, rate?: number) => {
+      // Speech off: never queue. A line that piles up while silent would all fire
+      // the moment speech comes back, so it is dropped here instead. The floor is
+      // abandoned: anything still queued is dropped, the flag clears, and the
+      // next on-speech `say` starts a fresh run.
+      if (!settings.speak || !speech.canSpeak) {
+        speakQueue.current = [];
+        speaking.current = false;
+        speakGeneration.current += 1;
+        return;
+      }
       const playNext = () => {
-        if (settings.speak && speech.canSpeak) {
-          const next = speakQueue.current.shift();
-          if (!next) {
-            speaking.current = false;
-            return;
-          }
-          // Measure how long the coach actually held the floor (PLAN-028): the next
-          // send reads it to strip the coach's speaking time out of the learner's
-          // latency. A TTS failure leaves speakMs 0 and speakUnknown false — the
-          // coach didn't speak, so there is nothing to strip and nothing unknown.
-          void speech
-            .speak(next.text, {
-              locale: pack?.speech.locale,
-              voiceHint: persona?.voiceHint || pack?.speech.voiceHint,
-              rate: next.rate,
-            })
-            .then((ms) => {
-              spokeMs.current = ms;
-              spokeUnknown.current = false;
-              playNext();
-            })
-            .catch(() => {
-              spokeMs.current = 0;
-              spokeUnknown.current = false;
-              playNext();
-            });
-        } else {
-          spokeMs.current = 0;
-          spokeUnknown.current = false;
+        const next = speakQueue.current.shift();
+        if (!next) {
           speaking.current = false;
+          return;
         }
+        const gen = speakGeneration.current;
+        // Measure how long this clip held the floor and *add* it to the running
+        // sum the send reads (PLAN-028). A TTS failure holds nothing, so it adds
+        // nothing and just moves the queue along. A clip that resolves after its
+        // floor was abandoned (generation moved on) adds nothing — its floor was
+        // already gone.
+        void speech
+          .speak(next.text, {
+            locale: pack?.speech.locale,
+            voiceHint: persona?.voiceHint || pack?.speech.voiceHint,
+            rate: next.rate,
+          })
+          .then((ms) => {
+            if (gen === speakGeneration.current) spokeMs.current += ms;
+            playNext();
+          })
+          .catch(() => {
+            playNext();
+          });
       };
       speakQueue.current.push({ text, rate });
       if (!speaking.current) {
@@ -349,11 +360,9 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         playNext();
       }
       // Two consecutive clips cannot race: whatever `say` was called first starts
-      // playing first, and `spokeMs` is written only as the queue empties. A call
-      // that arrives while a clip is still holding the floor waits its turn, and
-      // the learner's latency reads the *last* clip's envelope, not a mid-queue
-      // write. (speakMs is a per-turn number: `send` reads it after its own reply
-      // and the rewind both finish, so the queue keeps it the last clip's.)
+      // playing first, and `spokeMs` is only ever *added to* as clips end, so a
+      // later clip can never overwrite an earlier one. A call that arrives while
+      // a clip still holds the floor waits its turn and adds to the same sum.
     },
     [settings.speak, speech, pack, persona],
   );
@@ -401,6 +410,11 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       repairs.current = [];
       spokeMs.current = 0;
       spokeUnknown.current = false;
+      // A fresh session is a fresh floor: nothing queued from the old one may
+      // play into the new, and a clip still in flight is abandoned.
+      speakQueue.current = [];
+      speaking.current = false;
+      speakGeneration.current += 1;
       // A new session is a new budget (PLAN-029): the rewind cap and the learner's
       // "don't interrupt" ask belong to the session, not to the app. `handicap` is
       // forgotten here too — a sharp day is not a fact about the learner (§3.3).
@@ -503,6 +517,11 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         repairs.current = [];
         spokeMs.current = 0;
         spokeUnknown.current = false;
+        // A resume begins a fresh floor: nothing queued from the old one plays
+        // into the resumed conversation.
+        speakQueue.current = [];
+        speaking.current = false;
+        speakGeneration.current += 1;
         // A resumed conversation starts a fresh budget (PLAN-029) — the rewind
         // cap and handicap were never persisted, so they cannot be recovered here
         // and are begun anew with the conversation.
@@ -684,14 +703,19 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       // The coach's speaking time is the learner's thinking time only in the
       // sense that the learner was waiting for it — the baseline strips it out
       // (PLAN-028). A turn whose speak could not be measured is excluded there,
-      // never estimated, and never zeroed.
+      // never estimated, and never zeroed. When the coach is *still speaking*
+      // (the queue has not drained), `spokeMs` holds only part of this turn's
+      // floor — a partially-read floor is unmeasured, and §10's rule is that an
+      // unmeasured speak is absent, not a smaller number. Such a turn is marked
+      // `speakUnknown` and never reaches the timing signals.
+      const floorInProgress = speaking.current;
       produced.current.push({
         text: msg,
         fromSuggestion,
         words: words(msg, pack?.speech.locale ?? "en").length,
         latencyMs,
         speakMs: spokeMs.current,
-        speakUnknown: spokeUnknown.current,
+        speakUnknown: spokeUnknown.current || floorInProgress,
         // Filled when the turn's JSON lands (parseTurn below) — the model's
         // breakdown report is patched onto this same turn a moment later, and
         // PLAN-029's verdict with it once the signals are verified.
@@ -700,6 +724,13 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         breakdown: [],
         verdict: "clear",
       });
+      // The floor is read and drained: this turn owns everything accumulated so
+      // far, the counter resets for the next send, and any clip still in flight
+      // belongs to a floor that already moved on — it must not add to the next
+      // turn's sum.
+      spokeMs.current = 0;
+      spokeUnknown.current = false;
+      speakGeneration.current += 1;
       setProducedVersion((v) => v + 1);
       history.current.push({ role: "user", content: msg });
       if (sessionId.current) await addMessage(sessionId.current, "user", msg).catch(() => {});

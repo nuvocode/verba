@@ -264,13 +264,13 @@ export type RewindMove =
  */
 export function rewindAct(
   verdict: Verdict,
-  on: boolean,
+  off: boolean,
   budgetUsed: number,
   step: RewindStep | null,
   turnIndex: number,
   line: string,
 ): RewindMove {
-  if (verdict === "bluff" && (budgetUsed < REWIND_LIMIT || step !== null) && !on) {
+  if (verdict === "bluff" && (budgetUsed < REWIND_LIMIT || step !== null) && !off) {
     return step === null ? { kind: "start", turnIndex, line } : { kind: "advance" };
   }
   return { kind: "resume" };

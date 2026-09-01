@@ -463,4 +463,39 @@ const ONE: BreakdownSignal[] = ["slowResponse"];
   }
 }
 
+// --- case I: the floor a turn speaks for is the SUM of its clips, not the last
+// PLAN-028's contract — "how long the coach held the floor" — is the whole
+// floor. A rewind speaks three clips (own, repeat, unpack), and the learner's
+// thinking time sits behind all three; the turn's speakMs must be their total.
+// Probe: a 20-turn baseline with median 3400 ms, a real thinking time of 3000 ms
+// sat behind a 11333 ms coach floor. Accumulated (11333) the measured latency is
+// 3000, well under the bar — no slowResponse. A buggy read that kept only one
+// clip (5333) would measure 9000 and light the false signal.
+{
+  // A baseline of 20 measured turns all at 3400 ms: ready, median 3400, mad 0,
+  // so the bar is 3400 + 3×0.
+  const base = baselineFrom(Array.from({ length: 20 }, () => turnSig(3400)), NOW);
+  assert.equal(base.ready, true, "20 measured turns makes the baseline ready");
+  assert.equal(base.median, 3400, "the median is the probe's 3400 ms");
+
+  // The turn's real latency is its thinking time (3000) + the full coach floor
+  // (11333) — the learner answered once the coach actually stopped.
+  const threeClips = 11333; // a rewind's three clips, summed
+  const realLatency = 3000 + threeClips; // 14333 ms wall clock
+  const turnSpeaksAll = turn({ latencyMs: realLatency, speakMs: threeClips });
+
+  // The correct accumulated floor strips all 11333 ms of coach speech, leaving
+  // exactly the 3000 ms the learner really took — under the 3400 bar.
+  const signals = turnSignalsFor(turnSpeaksAll, base, ctx({ reply: "x" }));
+  assert(!signals.includes("slowResponse"), "a full-floor sum of 11333 must not measure a slow response");
+  assert(!signals.includes("shortening"), "…and no other timing signal either");
+
+  // Demonstrate the bug this guards: a turn that accumulated only part of the
+  // floor (a single late clip, 5333) would *falsely* measure 14333 − 5333 = 9000
+  // — far over the bar. The check pins why the sum must be the whole floor.
+  const onlyLastClip = turn({ latencyMs: realLatency, speakMs: 5333 });
+  const buggy = turnSignalsFor(onlyLastClip, base, ctx({ reply: "x" }));
+  assert(buggy.includes("slowResponse"), "a partial-floor read is exactly the false signal the sum prevents");
+}
+
 console.log("breakdown.check OK");
