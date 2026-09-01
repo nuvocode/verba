@@ -214,17 +214,17 @@ const REPAIR_LEDGER: RepairRow[] = [
   {
     id: 7,
     claim: "The first repetition is always the same sentence, slowed",
-    pending: "#64 — PLAN-030",
+    assertedIn: [{ file: "src/lib/rewind.check.ts", marker: "rewind ledger 7" }],
   },
   {
     id: 8,
     claim: "Rewind language blames the coach; no text points at the learner",
-    pending: "#64 — PLAN-030",
+    assertedIn: [{ file: "src/lib/rewind.check.ts", marker: "rewind ledger 8" }],
   },
   {
     id: 9,
     claim: "A learner-initiated repair request is actually obeyed",
-    pending: "#64 — PLAN-030",
+    assertedIn: [{ file: "src/lib/rewind.check.ts", marker: "rewind ledger 9" }],
   },
   {
     id: 10,

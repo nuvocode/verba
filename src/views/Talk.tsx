@@ -623,6 +623,39 @@ export default function Talk({
                 </div>
               ))}
 
+              {/* The rewind (PLAN-030): a distinguishable pause, not a warning.
+                  One grouped block with a quiet left rule and more vertical space
+                  than a normal turn. No colour outside the neutral ramp, no
+                  number, no text that blames the learner. */}
+              {talk.rewindExchange && (
+                <div className="rewind">
+                  <div className="rewind-own">{talk.rewindExchange.own}</div>
+                  <div className="rewind-repeat" dir={talk.dir}>
+                    {talk.rewindExchange.repeat}
+                  </div>
+                  {talk.rewindExchange.unpack && (
+                    <div className="rewind-unpack">
+                      {talk.rewindExchange.unpack.parts.length > 0 && (
+                        <div className="rewind-parts">
+                          {talk.rewindExchange.unpack.parts.map((p, i) => (
+                            <span key={i}>{p}</span>
+                          ))}
+                        </div>
+                      )}
+                      {talk.rewindExchange.unpack.keyWord && talk.rewindExchange.unpack.gloss && (
+                        <div className="rewind-gloss">
+                          <b>{talk.rewindExchange.unpack.keyWord}</b> — {talk.rewindExchange.unpack.gloss}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {talk.rewindExchange.gift && <div className="rewind-gift">{talk.rewindExchange.gift}</div>}
+                  <button className="rewind-deny" onClick={talk.denyRewind}>
+                    No, I understood
+                  </button>
+                </div>
+              )}
+
               {/* The reply as it lands. It carries no corrections yet — those
                   arrive with the rest of the turn, and this bubble is replaced
                   by the real message the moment they do. */}

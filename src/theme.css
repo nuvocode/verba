@@ -193,6 +193,21 @@ input { font: inherit; }
 .subtitles-toggle { height: 46px; flex: none; padding: 0 14px; border: 1px solid var(--line); color: var(--ink2); background: var(--surface); border-radius: 9px; font-size: 12.5px; cursor: pointer; }
 .subtitles-toggle:hover { border-color: var(--accent); color: var(--accent-ink); }
 .typing { font-size: 13px; color: var(--ink3); animation: vpulse 1.2s ease infinite; margin-bottom: 20px; }
+/* The rewind (PLAN-030): a distinguishable pause, not a warning. One grouped
+   block with a quiet left rule and more vertical space than a normal turn. Only
+   the neutral ramp (ink/ink2/ink3/line/bg2) — no accent, no warn, no sev, no
+   number. */
+.rewind { margin: 40px 0; padding: 4px 0 4px 20px; border-left: 2px solid var(--line); }
+.rewind-own { font-family: var(--serif); font-size: 17px; font-style: italic; color: var(--ink2); margin-bottom: 12px; }
+.rewind-repeat { font-family: var(--serif); font-size: 20px; line-height: 1.5; color: var(--ink); max-width: 560px; white-space: pre-wrap; }
+.rewind-unpack { margin-top: 14px; }
+.rewind-parts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.rewind-parts span { font-family: var(--serif); font-size: 15px; color: var(--ink2); background: var(--bg2); border-radius: 6px; padding: 4px 10px; }
+.rewind-gloss { font-size: 14px; color: var(--ink2); }
+.rewind-gloss b { color: var(--ink); font-weight: 600; }
+.rewind-gift { font-family: var(--serif); font-size: 16px; font-style: italic; color: var(--ink2); margin-top: 14px; }
+.rewind-deny { margin-top: 16px; border: 1px solid var(--line); background: transparent; color: var(--ink2); border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
+.rewind-deny:hover { border-color: var(--ink3); color: var(--ink); }
 .composer { flex: none; padding: 16px 48px 26px; }
 .composer .bar { max-width: 640px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
 .composer input { flex: 1; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 9px; padding: 13px 16px; font-size: 15px; outline: none; }

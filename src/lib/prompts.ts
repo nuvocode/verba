@@ -258,6 +258,71 @@ export function parseTurn(raw: string): TurnResult {
   };
 }
 
+// ---- the rewind (PLAN-030) ----------------------------------------------------
+
+/**
+ * The "own" step's prompt: one short line from the coach, taking the blame for
+ * pace. It must not attribute the failure to the learner in any language — the
+ * produced line is gated on our side by `bannedShape` (rewind.ts), and a line
+ * that matches is replaced by the pack's fixed fallback rather than shown.
+ */
+export function rewindOwnPrompt(s: Settings, pack?: LanguagePack): string {
+  return [
+    `You spoke too fast. Own it, in one short line, in ${s.profile.targetLanguage}, in the coach's voice.`,
+    `Take the blame for the pace yourself — say you went too fast, or that you will say it again more slowly.`,
+    `Never say or imply that the learner did not understand, missed anything, or got anything wrong.`,
+    `Do not ask a question and do not add anything else.`,
+    packGuidance(pack),
+    `Answer with ONLY a JSON object: { "line": "your one short line in ${s.profile.targetLanguage}" }.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** The "own" line, or "" when the model gave nothing usable. */
+export function parseOwnLine(raw: string): string {
+  const obj = extractJson(raw);
+  const line = typeof obj?.line === "string" ? obj.line.trim() : "";
+  return line;
+}
+
+/**
+ * The "unpack" step's prompt: break the coach's previous line into parts, isolate
+ * the one word carrying the meaning, and give that word in the learner's native
+ * language. Reached only after a second miss — the same sentence was already
+ * repeated slower, so now the meaning is handed over.
+ */
+export function rewindUnpackPrompt(s: Settings, line: string, keyWord: string, pack?: LanguagePack): string {
+  return [
+    `The learner still did not follow. Break your last line into parts and give the one word that carried the meaning.`,
+    `Your last line was: "${line}"`,
+    keyWord ? `The word that carried the meaning is "${keyWord}".` : `Name the one word in that line that carried the meaning.`,
+    `Do not say the learner did not understand. Do not correct them.`,
+    packGuidance(pack),
+    `Answer with ONLY a JSON object: { "parts": ["a short chunk of the line", "another"], "keyWord": "the one word", "gloss": "that word's meaning in ${s.profile.nativeLanguage}" }.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** The unpack result: the line broken up, the key word, and its native gloss. */
+export interface UnpackResult {
+  parts: string[];
+  keyWord: string;
+  gloss: string;
+}
+
+/** Parse the unpack step's JSON. Empty parts and an empty gloss are dropped. */
+export function parseUnpack(raw: string): UnpackResult {
+  const obj = extractJson(raw);
+  const parts = Array.isArray(obj?.parts) ? obj.parts.map((x: any) => String(x)).filter(Boolean) : [];
+  return {
+    parts,
+    keyWord: typeof obj?.keyWord === "string" ? obj.keyWord : "",
+    gloss: typeof obj?.gloss === "string" ? obj.gloss : "",
+  };
+}
+
 /** Prompt to pull useful vocabulary out of a finished/ongoing conversation. */
 export function vocabPrompt(s: Settings, pack?: LanguagePack): string {
   return [

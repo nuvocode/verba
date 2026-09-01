@@ -466,7 +466,7 @@ function playClip(c: Clip): Promise<number> {
  * pauses the in-flight clip. `clip` hands the clip to the caller, who owns its
  * `release()`.
  */
-function byteTier(synthesize: (text: string, opts?: SpeakOptions) => Promise<Clip>): Tts {
+export function byteTier(synthesize: (text: string, opts?: SpeakOptions) => Promise<Clip>): Tts {
   let audio: HTMLAudioElement | null = null;
   return {
     canSpeak: true,
@@ -474,6 +474,12 @@ function byteTier(synthesize: (text: string, opts?: SpeakOptions) => Promise<Cli
     async speak(text, opts) {
       if (!text.trim()) return 0;
       const c = await synthesize(text, opts);
+      // A byte tier plays an HTMLAudioElement, which has `playbackRate` — the one
+      // knob every byte tier shares, and the one the rewind's SLOW_RATE rides on
+      // (PLAN-030). No vendor API involved: elevenLabs and openaiTts drop `rate`
+      // in their request, so the slow-down happens here, on the element, for all
+      // three byte tiers alike.
+      c.el.playbackRate = opts?.rate ?? 1;
       audio = c.el;
       const ms = await playClip(c);
       audio = null;
