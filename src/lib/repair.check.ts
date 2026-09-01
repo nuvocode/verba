@@ -117,6 +117,15 @@ const NOW = 1_000_000_000_000;
   );
   const rep2 = twoDays.find((e) => e.category === "REPEAT")!;
   assert.equal(rep2.state, "fluent", "three uses across two days is fluent");
+
+  // Boundary: a single learner use is recognises — §2.2's "uses" asks for a few.
+  const single = inventoryFrom([sig(NOW - 1 * DAY, "REPEAT", "learner", "repeat please")], NOW);
+  assert.equal(single.find((e) => e.category === "REPEAT")!.state, "recognises", "one learner use is recognises, not uses");
+  const two = inventoryFrom(
+    [sig(NOW - 1 * DAY, "REPEAT", "learner", "repeat please"), sig(NOW - 2 * DAY, "REPEAT", "learner", "say it again")],
+    NOW,
+  );
+  assert.equal(two.find((e) => e.category === "REPEAT")!.state, "uses", "two learner uses is uses");
 }
 
 // --- case 6: last7 excludes an 8-day-old use that total still counts -----------
@@ -152,6 +161,27 @@ const NOW = 1_000_000_000_000;
     NOW,
   );
   assert.equal(nextTarget(all), null, "nothing left to teach when every category is at uses or better");
+
+  // nextTarget must follow the teaching order, not the inventory argument's array
+  // order: pass an inventory whose array is reversed (PARAPHRASE first, HOLD last)
+  // and it must still answer HOLD — the array order is looked up, never trusted.
+  const baseInv = inventoryFrom(
+    [sig(NOW - 2 * DAY, "PARAPHRASE", "learner", "p once"), sig(NOW - 1 * DAY, "HOLD", "coach", "")],
+    NOW,
+  );
+  assert.deepEqual(
+    baseInv.map((e) => e.category),
+    [...REPAIR_CATEGORIES],
+    "inventoryFrom walks teaching order",
+  );
+  // A single learner use (PARAPHRASE) is recognises under §2.2, so with HOLD also
+  // recognised, the teaching order — not the array order — picks HOLD.
+  const reversed = [...baseInv].reverse();
+  assert.equal(
+    nextTarget(reversed),
+    "HOLD",
+    "nextTarget iterates the teaching order and looks entries up, not the inventory argument's order",
+  );
 }
 
 // --- case 8: the derivation has one door, and one door only ---------------------

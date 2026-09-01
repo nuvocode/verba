@@ -133,9 +133,9 @@ export function inventoryFrom(signals: Signal[], now: number): RepairEntry[];
 State is derived, and only from `by: "learner"` counts except where noted:
 
 - `unknown` — no signal of any kind.
-- `recognises` — coach observations only. **A learner saying they know a pattern
-  changes nothing**: there is no input that writes this, which is how §2.2's rule is
-  enforced rather than asserted.
+- `recognises` — coach observations only, or a lone learner use. **A learner
+  saying they know a pattern changes nothing**: there is no input that writes this,
+  which is how §2.2's rule is enforced rather than asserted.
 - `uses` — at least 2 learner uses.
 - `fluent` — at least 3 learner uses in the last 7 days, spread over at least 2
   distinct days. One session where the learner discovered a phrase and repeated it
@@ -156,10 +156,12 @@ State is derived, and only from `by: "learner"` counts except where noted:
    zero — no category ever disappears from the list.
 4. Coach observations alone produce `recognises`, never `uses`.
 5. Four learner uses on one day produce `uses`; three across two days produce
-   `fluent`.
+   `fluent`; one learner use produces `recognises`, two produce `uses` — §2.2's
+   "a few" is a real threshold.
 6. `last7` excludes an 8-day-old use that `total` still counts.
 7. `nextTarget` follows the documented order and returns `null` when everything is
-   at `uses`.
+   at `uses`; an inventory passed in a different array order still names the same
+   first target.
 8. Source scan: no file outside `repair.ts` writes a `repairMove` payload, and no
    file constructs a `RepairEntry` literal — the derivation has one door.
 9. `signalMiss` returns `false` for a `repairMove` signal, and `coachMetrics`

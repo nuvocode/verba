@@ -139,15 +139,19 @@ const variantKey = (v: string): string => repairNorm(v, "en");
  * - `fluent` — at least 3 learner uses in the last 7 days, spread over at least 2
  *   distinct days. One session where the learner found a phrase and repeated it
  *   four times is `uses`, not `fluent`.
- * - `uses` — at least 2 learner uses (and not yet fluent).
- * - `recognises` — coach observations only. A learner saying they know a pattern
- *   changes nothing: there is no input that writes this.
+ * - `uses` — at least 2 learner uses (and not yet fluent). A single use is not
+ *   yet "uses": one encounter may be a lucky reach, and §2.2 asks for "a few"
+ *   before a category is counted as used.
+ * - `recognises` — coach observations only, or a lone learner use. A learner
+ *   saying they know a pattern still changes nothing: there is no input that
+ *   writes this on its own.
  * - `unknown` — nothing of any kind.
  */
 function stateOf(learner: { total: number; last7: number; recentDays: number }, coach: number): RepairState {
   if (learner.total === 0) return coach > 0 ? "recognises" : "unknown";
   if (learner.last7 >= 3 && learner.recentDays >= 2) return "fluent";
-  return "uses";
+  if (learner.total >= 2) return "uses";
+  return "recognises";
 }
 
 /**
@@ -210,12 +214,18 @@ export function inventoryFrom(signals: Signal[], now: number): RepairEntry[] {
 }
 
 /**
- * The next category to teach: the first in teaching order whose state is `unknown`
- * or `recognises`. `null` when all six are at `uses` or better.
+ * The next category to teach: the first category in teaching order whose state is
+ * `unknown` or `recognises`. `null` when all six are at `uses` or better.
+ *
+ * Walks the teaching order (`REPAIR_CATEGORIES`) and looks each one up in the
+ * inventory, rather than trusting the array's own order — an inventory handed in
+ * any arrangement still answers the same way.
  */
 export function nextTarget(inventory: RepairEntry[]): RepairCategory | null {
-  for (const entry of inventory) {
-    if (entry.state === "unknown" || entry.state === "recognises") return entry.category;
+  const byCategory = new Map(inventory.map((e) => [e.category, e]));
+  for (const category of REPAIR_CATEGORIES) {
+    const entry = byCategory.get(category);
+    if (entry && (entry.state === "unknown" || entry.state === "recognises")) return category;
   }
   return null;
 }
