@@ -117,6 +117,14 @@ export interface Settings {
    * same record every other section reads.
    */
   memoryPaused: boolean;
+  /**
+   * Show the coach's lines as they are spoken (PLAN-021). On by default — reading
+   * along is the right starting point for most people, and hiding is the
+   * deliberate step up. Hiding only covers the coach's text; the learner's own
+   * messages, the composer, corrections, suggestions, persona and goals are never
+   * hidden. Asking for the text back is recorded and costs nothing.
+   */
+  subtitles: boolean;
 }
 
 /** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
@@ -207,6 +215,7 @@ export const defaultSettings: Settings = {
   readView: "passage",
   prompterWpm: DEFAULT_WPM,
   memoryPaused: false,
+  subtitles: true,
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>

@@ -7,14 +7,26 @@
 // only thing that ever looks inside. The gate at the bottom holds the second half.
 // Run: node --experimental-strip-types src/lib/signals.check.ts
 import assert from "node:assert";
-import { signalLabel, signalMiss, type Signal } from "./model.ts";
-import { talkSignals, readSignals, listenSignals, memorySignals, voiceSignals, TURN, SUGGESTED } from "./signals.ts";
+import { signalLabel, signalMiss, isAssistedReveal, type Signal } from "./model.ts";
+import { talkSignals, readSignals, listenSignals, memorySignals, voiceSignals, revealSignal, TURN, SUGGESTED } from "./signals.ts";
+import { coachMetrics } from "./coachmetrics.ts";
 
 const sig = (payload: unknown): Signal => ({
   id: "s1",
   activityId: "a1",
   kind: "correction",
   observedAt: 0,
+  payload,
+});
+
+// A fixed instant for the coachmetrics scan — well past the epoch, so the
+// timestamped signals below land inside its seven-day window.
+const NOW = 1_000_000_000_000;
+const sigAt = (kind: Signal["kind"], payload: unknown, at = NOW): Signal => ({
+  id: `s${at}`,
+  activityId: "a1",
+  kind,
+  observedAt: at,
   payload,
 });
 
@@ -189,6 +201,24 @@ assert.deepEqual(readSignals("read-1", [], []), [], "a passage with no check and
 assert.deepEqual(listenSignals("listen-1", []), []);
 assert.deepEqual(memorySignals("memory-1", []), []);
 
+// --- revealSignal (PLAN-021): recorded, never scored --------------------------
+// Asking to see the coach's text is a comprehension signal marked assisted. It
+// carries a definition, and it is never a miss — a reveal is not a wrong answer.
+const reveal = revealSignal("talk-1", "line");
+assert.equal(reveal.kind, "comprehension", "a reveal is a comprehension signal");
+assert.equal(reveal.activityId, "talk-1", "a reveal hangs off the activity that produced it");
+const revealPayload = reveal.payload as { assisted: boolean; source: string; definition: string; what: string };
+assert.equal(revealPayload.assisted, true, "a reveal is marked assisted");
+assert.equal(revealPayload.source, "talk-subtitles", "a reveal names its source");
+assert.equal(revealPayload.what, "line", "a reveal says what was revealed");
+assert(typeof revealPayload.definition === "string" && revealPayload.definition.length > 0, "a reveal carries a definition");
+assert.equal(signalMiss({ ...reveal, id: "x", observedAt: 0 }), false, "a reveal is never a miss");
+assert.equal(isAssistedReveal({ ...reveal, id: "x", observedAt: 0 }), true, "the door reads a reveal back");
+assert.equal(isAssistedReveal(sig({ label: "c", correct: false })), false, "a plain wrong answer is not a reveal");
+assert.equal(isAssistedReveal(sig({ label: "c", correct: true })), false, "a plain right answer is not a reveal");
+assert.equal(isAssistedReveal(sig({ label: "c", assisted: true })), false, "assisted without the source is not a reveal");
+assert.equal(isAssistedReveal(sig({ label: "c", source: "talk-subtitles" })), false, "the source without assisted is not a reveal");
+
 // --- gate: payload is read in exactly one place -------------------------------
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, extname, relative } from "node:path";
@@ -259,6 +289,41 @@ assert(files.length > 0, "the gate walked no files — a silent green is a lie")
 const offenders = files.filter((f) => !isExcluded(f) && violates(readFileSync(join(ROOT, f), "utf8")));
 if (offenders.length > 0) {
   assert.fail("a signal payload may only be read through signalLabel (model.ts):\n" + offenders.join("\n"));
+}
+
+// --- source scan: confidence.ts does not import reveals -----------------------
+// PLAN-021: a reveal must never reach confidence — it is recorded, never scored.
+// Assert by construction: confidence.ts must not reference revealSignal or the
+// assisted flag at all.
+{
+  const confidenceSrc = readFileSync(join(ROOT, "src/lib/confidence.ts"), "utf8");
+  assert(!/revealSignal/.test(confidenceSrc), "confidence.ts must not import revealSignal");
+  assert(!/assisted/.test(confidenceSrc), "confidence.ts must not read the assisted flag");
+  assert(!/talk-subtitles/.test(confidenceSrc), "confidence.ts must not reference the reveal source");
+}
+
+// --- source scan: coachmetrics excludes assisted reveals ----------------------
+// PLAN-021: a reveal is recorded, never scored. Coach's six metrics must be
+// identical whether or not reveals are present — feed the same signal set with
+// and without reveals and assert the six metrics do not move.
+{
+  const base = [
+    sigAt("comprehension", { label: "c", correct: true }),
+    sigAt("comprehension", { label: "c", correct: false }),
+    sigAt("unpromptedTurn", { label: "turn", words: 5, sentences: 1, chars: 25 }),
+  ];
+  const withReveals = [
+    ...base,
+    sigAt("comprehension", { label: "talk subtitles", assisted: true, source: "talk-subtitles", what: "line", definition: "you asked to see the coach's text" }),
+    sigAt("comprehension", { label: "talk subtitles", assisted: true, source: "talk-subtitles", what: "all", definition: "you asked to see the coach's text" }),
+  ];
+  const without = coachMetrics(base, NOW);
+  const withR = coachMetrics(withReveals, NOW);
+  for (const m of without) {
+    const other = withR.find((x) => x.id === m.id)!;
+    assert.equal(other.value, m.value, `metric ${m.id} must not move when reveals are present`);
+    assert.equal(other.sample, m.sample, `metric ${m.id} sample must not move when reveals are present`);
+  }
 }
 
 console.log("signals.check OK");

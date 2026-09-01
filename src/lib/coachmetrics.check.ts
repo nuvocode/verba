@@ -280,4 +280,21 @@ const turn = (words: number, sentences: number, at = NOW) =>
   assert.equal(active, consistency, "invariant 9: a signal just outside the day window is not counted by consistency");
 }
 
+// PLAN-021: a reveal is recorded, never scored — a day whose only signal is a
+// reveal is not an active day. daySeries and coachMetrics must agree, or the
+// seven boxes and the reported consistency would part ways.
+{
+  const reveal = sig("comprehension", { label: "reading comprehension", correct: true, assisted: true, source: "talk-subtitles", what: "line" }, NOW);
+  const series = daySeries([reveal], NOW);
+  assert.equal(series[6].active, false, "a day with only a reveal is not an active day");
+  assert.equal(series[6].count, 0, "…and it draws no point");
+  const consistency = coachMetrics([reveal], NOW).find((m) => m.id === "consistency")!.value;
+  assert.equal(consistency, null, "a reveal-only window measures no consistency");
+  // A reveal beside a real signal still leaves the day active — the reveal just
+  // does not add to it.
+  const mixed = daySeries([reveal, turn(5, 1, NOW)], NOW);
+  assert.equal(mixed[6].active, true, "a real signal keeps the day active beside a reveal");
+  assert.equal(mixed[6].count, 1, "the reveal does not add to the day's count");
+}
+
 console.log("coachmetrics.check OK");

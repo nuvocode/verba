@@ -49,12 +49,15 @@ export default function Talk({
   talk,
   day,
   onAdvance,
+  onChange,
 }: {
   settings: Settings;
   talk: TalkState;
   day: Day;
   /** Close out a talking activity and go wherever the day goes next — the plan decides. */
   onAdvance: (kind: ActivityKind) => void;
+  /** The one door settings are written through — the subtitles toggle uses it. */
+  onChange: (patch: Partial<Settings>) => void;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,6 +65,10 @@ export default function Talk({
   const [open, setOpen] = useState<SessionRow | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [transcript, setTranscript] = useState<{ role: string; content: string }[]>([]);
+  // Which coach lines the learner has revealed while subtitles are off (PLAN-021).
+  // A revealed line shows its text; the rest show the "Coach spoke · Show this
+  // line" bar. Reset when a new conversation starts.
+  const [revealed, setRevealed] = useState<Set<number>>(new Set());
   // The inline edit panel over the picker grid — the same pattern Settings uses,
   // no route, no modal library. `editing` is the scenario being edited; null is
   // the closed panel. `confirming` is the id of the scenario awaiting a delete.
@@ -83,6 +90,27 @@ export default function Talk({
     // `streaming` is in here so a reply that outgrows the viewport as it arrives
     // keeps its last line in view, rather than scrolling once it has finished.
   }, [talk.msgs.length, talk.busy, talk.streaming]);
+
+  // A new conversation opens with the curtain closed (PLAN-021): the reveal set
+  // is per-session, so starting or resuming a scenario resets it. The picker
+  // (started false) and the live conversation (started true) both land here.
+  useEffect(() => {
+    setRevealed(new Set());
+  }, [talk.started]);
+
+  // The streaming bubble's reveal is keyed to -1. When the stream empties — the
+  // turn lands and the bubble is replaced by the real message — that reveal must
+  // not linger, or the next streamed reply would start already shown. Each
+  // streamed bubble carries its own curtain.
+  useEffect(() => {
+    if (talk.streaming) return;
+    setRevealed((s) => {
+      if (!s.has(-1)) return s;
+      const next = new Set(s);
+      next.delete(-1);
+      return next;
+    });
+  }, [talk.streaming]);
 
   // The draft lands in the box focused, cursor at the end — the learner edits it
   // in place rather than hunting for the caret. Fires when the final text drops
@@ -557,9 +585,25 @@ export default function Talk({
                   <div className="who">{m.role === "ai" ? (m.isAsk ? "COACH · ASIDE" : "COACH") : "YOU"}</div>
                   {/* A ⌘K aside is answered in the learner's own language, so it
                       keeps the app's direction; everything else is target text. */}
-                  <div className="text" dir={m.isAsk ? undefined : talk.dir}>
-                    {m.text}
-                  </div>
+                  {m.role === "ai" && !m.isAsk && !settings.subtitles && !revealed.has(i) ? (
+                    /* Subtitles off (PLAN-021): the coach's line is a curtain, not
+                        a mode. The learner's own messages, the composer, corrections,
+                        suggestions, persona and goals are never hidden — only the
+                        coach's text is. Revealing is free: recorded, never scored. */
+                    <button
+                      className="reveal-bar"
+                      onClick={() => {
+                        setRevealed((s) => new Set(s).add(i));
+                        talk.reveal("line");
+                      }}
+                    >
+                      Coach spoke · Show this line
+                    </button>
+                  ) : (
+                    <div className="text" dir={m.isAsk ? undefined : talk.dir}>
+                      {m.text}
+                    </div>
+                  )}
 
                   {m.inline &&
                     m.corrections.map((c, j) => (
@@ -585,9 +629,25 @@ export default function Talk({
               {talk.streaming && (
                 <div className="msg ai">
                   <div className="who">COACH</div>
-                  <div className="text" dir={talk.dir}>
-                    {talk.streaming}
-                  </div>
+                  {settings.subtitles || revealed.has(-1) ? (
+                    <div className="text" dir={talk.dir}>
+                      {talk.streaming}
+                    </div>
+                  ) : (
+                    /* The streaming bubble is the coach's text too — hidden the
+                        same way, with the same free reveal. Its curtain is keyed
+                        to -1, and it is dropped the moment the stream empties, so
+                        the next streamed reply starts closed again. */
+                    <button
+                      className="reveal-bar"
+                      onClick={() => {
+                        setRevealed((s) => new Set(s).add(-1));
+                        talk.reveal("line");
+                      }}
+                    >
+                      Coach spoke · Show this line
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -602,6 +662,28 @@ export default function Talk({
               )}
             </div>
           </div>
+
+          {/* Subtitles off (PLAN-021): the global reveal. One press shows every
+              coach line at once — the same free action as "Show this line", never
+              a penalty. It only appears while there is something hidden to show. */}
+          {!settings.subtitles && (
+            <button
+              className="reveal-all"
+              onClick={() => {
+                setRevealed((s) => {
+                  const next = new Set(s);
+                  talk.msgs.forEach((m, i) => {
+                    if (m.role === "ai" && !m.isAsk) next.add(i);
+                  });
+                  next.add(-1); // the streaming bubble
+                  return next;
+                });
+                talk.reveal("all");
+              }}
+            >
+              Show all
+            </button>
+          )}
 
           <div className="composer">
             <div className="bar">
@@ -647,6 +729,17 @@ export default function Talk({
                 title="Speak instead of typing"
               >
                 ◉
+              </button>
+              {/* Subtitles (PLAN-021): the live control, permanently visible beside
+                  the mic. A labelled toggle, not a bare icon — the same fact as the
+                  Settings → Learning row, one home each. Toggling writes the setting
+                  immediately. */}
+              <button
+                className="subtitles-toggle"
+                onClick={() => onChange({ subtitles: !settings.subtitles })}
+                title="Show or hide the coach's text"
+              >
+                Subtitles {settings.subtitles ? "on" : "off"}
               </button>
               {/* Both disabled reasons are covered, not silent (#42): the label
                   says the in-flight one, this line says the empty-box one. */}

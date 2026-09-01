@@ -155,6 +155,21 @@ export function turnStats(s: Signal): { words: number; sentences: number; chars:
   return { words, sentences, chars };
 }
 
+/**
+ * The fourth — and last — structural payload reader: was this observation marked
+ * assisted? A reveal (PLAN-021) is a comprehension signal the learner asked for —
+ * it is recorded, never scored. Coach must be able to tell it from a question
+ * answered, so it filters it out of its metrics rather than counting it against
+ * the learner. Kept here beside the other doors so signals.check.ts can hold the
+ * "payload is read in exactly one place" line.
+ */
+export function isAssistedReveal(s: Signal): boolean {
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return false;
+  const { assisted, source } = p as { assisted?: unknown; source?: unknown };
+  return assisted === true && source === "talk-subtitles";
+}
+
 // --- §1.4 VocabItem ------------------------------------------------------------
 
 export type VocabItem = {

@@ -60,6 +60,10 @@ export const KEYS: Shortcut[] = [
   // and the topbar says so again.
   { keys: ["1", "2", "3"], label: "1–3", does: "use a suggestion", on: ["talk"], when: "suggestions" },
   { keys: ["Enter"], label: "↵", does: "send", on: ["talk"] },
+  // Subtitles: a single letter, so it stands down while the composer has focus —
+  // `live()` already guarantees that. It is the same control as the labelled
+  // toggle in the composer bar, announced here so announced === working.
+  { keys: ["s"], label: "S", does: "show or hide subtitles", on: ["talk"] },
 
   // ---- Esc — one verb, every surface (invariant 24) ----
   // Esc means "one level up" everywhere: backing out of a focused sentence, a

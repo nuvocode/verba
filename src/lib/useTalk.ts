@@ -58,6 +58,8 @@ export interface Reflection extends SessionSummary {
   produced: ProducedTurn[];
   /** What each spoken turn observed, beside what it said — feeds `voiceSignals`. */
   voice: VoiceTurn[];
+  /** Times the learner asked to see the coach's text (PLAN-021) — recorded, never scored. */
+  reveals: { what: "line" | "all" }[];
 }
 
 /** One thing the learner actually sent, and whether they found it themselves. */
@@ -148,6 +150,10 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   // What each spoken turn observed, beside what it said. Accumulated in `mic()`
   // and handed to the reflection, where `voiceSignals` turns it into signals.
   const voice = useRef<VoiceTurn[]>([]);
+  // Times the learner asked to see the coach's text (PLAN-021). Recorded, never
+  // scored — the reflection carries them so `talkSignals` can write a reveal
+  // signal per ask, and nothing counts them against the learner.
+  const reveals = useRef<{ what: "line" | "all" }[]>([]);
   // How far the session's title has got: 0 unnamed, 1 named off the opening,
   // 2 re-named once the subject settled. Not a rolling rewrite — 2 is the end.
   const titleStage = useRef<0 | 1 | 2>(0);
@@ -230,6 +236,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       produced.current = [];
       setProducedVersion((v) => v + 1);
       voice.current = [];
+      reveals.current = [];
       setBusy(true);
       // What earlier conversations left behind. It rides in the system prompt, so
       // every call made off this history — the turns, the wrap-up, the vocabulary
@@ -311,6 +318,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         produced.current = [];
         setProducedVersion((v) => v + 1);
         voice.current = [];
+        reveals.current = [];
         sessionId.current = sessionIdToResume;
         // The provider context is rebuilt from the stored transcript so the next
         // turn continues the conversation rather than starting a new one.
@@ -560,6 +568,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       words,
       produced: produced.current,
       voice: voice.current,
+      reveals: reveals.current,
     });
   }, [scenario, busy, msgs, settings, pack]);
 
@@ -625,6 +634,15 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       setBusy(false);
     }
   }, [scenario, settings, pack]);
+
+  /**
+   * The learner asked to see the coach's text (PLAN-021). Recorded, never scored:
+   * the reveal rides into the reflection so `talkSignals` writes one assisted
+   * comprehension signal per ask, and nothing counts it against the learner.
+   */
+  const reveal = useCallback((what: "line" | "all") => {
+    reveals.current.push({ what });
+  }, []);
 
   /** ⌘K → "ask the coach": a side question, answered in the learner's own language. */
   const ask = useCallback(
@@ -693,6 +711,8 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     send,
     mic,
     end,
+    /** The learner asked to see the coach's text — recorded, never scored. */
+    reveal,
     ask,
     /** Remove one of the wrap-up's captured words from the deck again. */
     dropWord,

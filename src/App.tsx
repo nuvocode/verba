@@ -406,9 +406,21 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       // announce them, not the hint line.
       if (!keyLive(space, e.key)) return;
 
+      // A chord is not a bare key. ⌘K is handled above; anything else held with a
+      // modifier (⌘, ⌃, ⌥) must not trip a single-letter shortcut — the learner
+      // is reaching for a browser or OS chord, not the app's table.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
       if (space === "talk" && !talk.reflecting && /^[1-3]$/.test(e.key)) {
         const s = talk.suggestions[Number(e.key) - 1];
         if (s) return void talk.send(s, true);
+      }
+      // Subtitles (PLAN-021): `s` toggles the coach's text. The composer has
+      // focus while the learner is typing, so `live()` already stands it down
+      // there — this only fires when the box is not the target.
+      if (space === "talk" && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        return update({ subtitles: !settings.subtitles });
       }
       if (space === "read" && read.text) {
         // P is the door between the two views, and it is open from both sides.
@@ -607,7 +619,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
 
       <div className="body">
         {space === "today" && <Today settings={settings} day={day} onBegin={begin} onOpen={go} />}
-        {space === "talk" && <Talk settings={settings} talk={talk} day={day} onAdvance={advance} />}
+        {space === "talk" && <Talk settings={settings} talk={talk} day={day} onAdvance={advance} onChange={update} />}
         {space === "read" && (
           <Read
             settings={settings}

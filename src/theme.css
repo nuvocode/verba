@@ -183,6 +183,15 @@ input { font: inherit; }
 .msg .corr .body b { font-weight: 600; color: var(--ink); }
 .msg .noted { font-size: 11px; color: var(--ink3); margin-top: 7px; display: flex; align-items: center; gap: 6px; }
 .msg .noted i { width: 5px; height: 5px; border-radius: 50%; background: var(--warn); display: inline-block; }
+/* Subtitles off (PLAN-021): the coach's line is a curtain, not a mode. The
+   reveal bar says the message exists and offers the free reveal — full width,
+   so it reads as a placeholder for the hidden line, not a separate message. */
+.reveal-bar { display: block; width: 100%; max-width: 560px; text-align: left; border: 1px dashed var(--line); background: var(--bg2); color: var(--ink3); border-radius: 8px; padding: 12px 14px; font-size: 13px; cursor: pointer; }
+.reveal-bar:hover { border-color: var(--accent); color: var(--accent-ink); }
+.reveal-all { display: block; max-width: 640px; margin: 0 auto 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink2); border-radius: 8px; padding: 9px 14px; font-size: 12.5px; cursor: pointer; }
+.reveal-all:hover { border-color: var(--accent); color: var(--accent-ink); }
+.subtitles-toggle { height: 46px; flex: none; padding: 0 14px; border: 1px solid var(--line); color: var(--ink2); background: var(--surface); border-radius: 9px; font-size: 12.5px; cursor: pointer; }
+.subtitles-toggle:hover { border-color: var(--accent); color: var(--accent-ink); }
 .typing { font-size: 13px; color: var(--ink3); animation: vpulse 1.2s ease infinite; margin-bottom: 20px; }
 .composer { flex: none; padding: 16px 48px 26px; }
 .composer .bar { max-width: 640px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }

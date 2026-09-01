@@ -36,6 +36,9 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
     ...r.produced.map((t) => turnSignal(activityId, t, locale)),
     // What the mic observed, per spoken turn — pace and delivery.
     ...(r.voice ?? []).flatMap((v) => voiceSignals(activityId, v)),
+    // Times the learner asked to see the coach's text (PLAN-021). Recorded, never
+    // scored — each ask is one assisted comprehension signal.
+    ...(r.reveals ?? []).map((rv) => revealSignal(activityId, rv.what)),
   ];
 }
 
@@ -190,4 +193,27 @@ export function memorySignals(activityId: ActivityId, reviews: { term: string; g
     kind: "lexicalItem" as const,
     payload: { label: r.term, grade: r.grade },
   }));
+}
+
+/**
+ * A comprehension signal marked assisted. Recorded, never scored.
+ *
+ * The learner asked to see the coach's text (PLAN-021) — that is a comprehension
+ * moment, and it is deliberately *not* a penalty: `assisted: true` and the
+ * `source` let Coach and confidence tell a reveal from a wrong answer, and
+ * nothing counts it against the learner. `confidence.ts` must not import this,
+ * and `coachmetrics.ts` must filter assisted reveals out of its accuracy term.
+ */
+export function revealSignal(activityId: ActivityId, what: "line" | "all"): SignalDraft {
+  return {
+    activityId,
+    kind: "comprehension" as const,
+    payload: {
+      label: "talk subtitles",
+      assisted: true,
+      source: "talk-subtitles",
+      what,
+      definition: "you asked to see the coach's text",
+    },
+  };
 }
