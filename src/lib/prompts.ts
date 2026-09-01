@@ -239,10 +239,20 @@ export function parseTurn(raw: string): TurnResult {
         : null,
     // A model-reported breakdown (PLAN-028), shape-checked only. Only the five
     // meaning judgements known to breakdown.ts survive; an unknown string is
-    // dropped here so nothing invented travels further.
-    missed: Array.isArray(obj?.missed)
-      ? obj.missed.map((x: any) => String(x)).filter((x: string) => BREAKDOWN_MEANING_SIGNALS.includes(x as any))
-      : [],
+    // dropped here so nothing invented travels further. Deduplicated, order
+    // preserved: one observation is one signal, and a label reported twice must
+    // not satisfy PLAN-029's two-signal condition on a single observation.
+    missed: (() => {
+      if (!Array.isArray(obj?.missed)) return [];
+      const kept: string[] = [];
+      for (const x of obj.missed) {
+        const s = String(x);
+        if (!BREAKDOWN_MEANING_SIGNALS.includes(s as any)) continue;
+        if (kept.includes(s)) continue; // one observation is one signal
+        kept.push(s);
+      }
+      return kept;
+    })(),
     // The key word the coach's last line carried — empty when the model named none.
     keyWord: typeof obj?.keyWord === "string" ? obj.keyWord : "",
   };

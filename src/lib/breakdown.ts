@@ -49,8 +49,9 @@ export const BREAKDOWN_MEANING_SIGNALS: readonly BreakdownSignal[] = [
   "topicChange",
 ];
 
-export const isBreakdownSignal = (s: string): s is BreakdownSignal =>
-  (BREAKDOWN_SIGNALS as readonly string[]).includes(s);
+/** True when `s` is one of the five meaning judgements. */
+export const isMeaningSignal = (s: string): s is BreakdownSignal =>
+  (BREAKDOWN_MEANING_SIGNALS as readonly string[]).includes(s);
 
 // --- the RMS floor and the pause count ------------------------------------------
 
@@ -199,10 +200,15 @@ const fold = (s: string): string => s.toLocaleLowerCase().replace(/\p{P}/gu, "")
  * A word that is plainly present — after case, punctuation and whitespace folding —
  * drops the `keyWordMissing` report: the model may point, we check (PLAN-027's
  * principle, applied to breakdowns).
+ *
+ * An empty key word is *not* a missing key word: a claim that cannot be verified
+ * cannot be counted as verified — §3.3's "şüphede müdahale yok" (no intervention
+ * on doubt). So an empty key word returns `false` — the report is dropped, not
+ * believed.
  */
 export function keyWordActuallyMissing(keyWord: string, reply: string): boolean {
   const k = fold(keyWord);
-  if (!k) return true; // no key word named → nothing to verify → trust nothing
+  if (!k) return false; // no key word named → nothing to verify → not a signal
   return !fold(reply).includes(k);
 }
 // --- one turn, its signals ------------------------------------------------------
@@ -226,8 +232,17 @@ export interface TurnContext {
 /** The meaning signals we believe: the model reported them and, where observable, we verified them. */
 function verifiedMeaning(turn: ProducedTurn, ctx: TurnContext): BreakdownSignal[] {
   const out: BreakdownSignal[] = [];
+  const seen = new Set<string>();
   for (const label of turn.missed ?? []) {
-    if (!isBreakdownSignal(label)) continue;
+    // The five meaning signals are the only ones this door admits — it does not
+    // trust parseTurn's narrowing, it has its own. A measured signal (slowResponse,
+    // shortening, hesitation) reported by the model is not a meaning judgement and
+    // is never produced here.
+    if (!isMeaningSignal(label)) continue;
+    // One observation is one signal: a label reported twice collapses to one, so
+    // PLAN-029's two-signal condition cannot be met by a single observation.
+    if (seen.has(label)) continue;
+    seen.add(label);
     if (label === "keyWordMissing") {
       // Verify the claim: a word plainly in the reply drops the report.
       if (keyWordActuallyMissing(turn.keyWord, ctx.reply)) out.push("keyWordMissing");

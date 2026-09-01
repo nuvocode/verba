@@ -236,6 +236,46 @@ const ctx = (over: Partial<TurnContext> = {}): TurnContext => ({
   );
 }
 
+// --- case 11: one report is one signal — a duplicated label is deduplicated -----
+// A model that reports ["disconnected","disconnected"] has made one observation,
+// not two. PLAN-029's two-signal condition must not be satisfiable by a single
+// observation, so the duplicate collapses to one signal.
+{
+  const out = turnSignalsFor(
+    turn({ latencyMs: 1000, speakMs: 0, missed: ["disconnected", "disconnected"] }),
+    baselineFrom([], NOW),
+    ctx({ reply: "No sé." }),
+  );
+  assert.equal(out.filter((s) => s === "disconnected").length, 1, "a duplicated report is one signal, not two");
+}
+
+// --- case 12: an unverifiable keyWordMissing is dropped, not believed -----------
+// An empty key word cannot be verified, so the claim is not counted as verified —
+// §3.3's "şüphede müdahale yok". The report is dropped, never believed.
+{
+  const out = turnSignalsFor(
+    turn({ latencyMs: 1000, speakMs: 0, missed: ["keyWordMissing"], keyWord: "" }),
+    baselineFrom([], NOW),
+    ctx({ reply: "No sé." }),
+  );
+  assert(!out.includes("keyWordMissing"), "an empty key word cannot verify the claim — it is dropped");
+}
+
+// --- case 13: a measured signal reported by the model is never produced ---------
+// `verifiedMeaning` admits only the five meaning signals. A model that reports
+// "slowResponse" (a measured signal) in `missed` must not have it produced by
+// turnSignalsFor — even when the baseline is ready and the timing would fire.
+{
+  const ready = baselineFrom(Array.from({ length: 12 }, (_, i) => turnSig(4000 - i * 100)), NOW);
+  assert.equal(ready.ready, true, "the baseline is ready for this case");
+  const out = turnSignalsFor(
+    turn({ latencyMs: 1000, speakMs: 0, missed: ["slowResponse"] }),
+    ready,
+    ctx({ reply: "No sé." }),
+  );
+  assert(!out.includes("slowResponse"), "a measured signal reported by the model is not produced by the meaning door");
+}
+
 // --- case 10: breakdowns never move coach metrics --------------------------------
 // A breakdown is not a mistake. Adding breakdown payloads to every turn signal in
 // a fixed set must leave accuracy and comprehension exactly where they were.
