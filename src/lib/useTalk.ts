@@ -26,6 +26,7 @@ import { getSpeech, listenBlocker } from "./speech";
 import { humanError } from "./fmt";
 import { words } from "./text";
 import { confidence as computeConfidence } from "./confidence";
+import { verifyRepair, type RepairObservation } from "./repair";
 import {
   addMessage,
   addVocab,
@@ -60,6 +61,8 @@ export interface Reflection extends SessionSummary {
   voice: VoiceTurn[];
   /** Times the learner asked to see the coach's text (PLAN-021) — recorded, never scored. */
   reveals: { what: "line" | "all" }[];
+  /** Repair moves the learner used or the coach modelled (PLAN-027) — feeds `repairSignals`. */
+  repairs: RepairObservation[];
 }
 
 /** One thing the learner actually sent, and whether they found it themselves. */
@@ -154,6 +157,11 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   // scored — the reflection carries them so `talkSignals` can write a reveal
   // signal per ask, and nothing counts them against the learner.
   const reveals = useRef<{ what: "line" | "all" }[]>([]);
+  // Repair moves the learner used (and, later, the coach modelled — PLAN-030).
+  // Only a variant the learner actually wrote lands here: `verifyRepair` runs in
+  // `send`, and a reported variant that was never written is dropped there, so
+  // this ref only ever holds the learner's own words.
+  const repairs = useRef<RepairObservation[]>([]);
   // How far the session's title has got: 0 unnamed, 1 named off the opening,
   // 2 re-named once the subject settled. Not a rolling rewrite — 2 is the end.
   const titleStage = useRef<0 | 1 | 2>(0);
@@ -237,6 +245,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       setProducedVersion((v) => v + 1);
       voice.current = [];
       reveals.current = [];
+      repairs.current = [];
       setBusy(true);
       // What earlier conversations left behind. It rides in the system prompt, so
       // every call made off this history — the turns, the wrap-up, the vocabulary
@@ -319,6 +328,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         setProducedVersion((v) => v + 1);
         voice.current = [];
         reveals.current = [];
+        repairs.current = [];
         sessionId.current = sessionIdToResume;
         // The provider context is rebuilt from the stored transcript so the next
         // turn continues the conversation rather than starting a new one.
@@ -406,6 +416,14 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
           });
         }
 
+        // A repair move is believed only when it is the learner's own words
+        // (PLAN-027). `verifyRepair` compares the reported variant against what
+        // was actually sent and returns null when it was never written — a model
+        // may classify what the learner did, it may not author it. So a variant
+        // the learner never said leaves no signal behind at all.
+        const repair = turn.repair ? verifyRepair({ category: turn.repair.category, variant: turn.repair.variant }, msg, pack?.speech.locale ?? "en") : null;
+        if (repair) repairs.current.push(repair);
+
         // The session is named off its first real exchange — that is also the turn
         // it starts showing up in the history list — and re-named exactly once,
         // when enough has been said for the subject to be the subject.
@@ -428,7 +446,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         setBusy(false);
       }
     },
-    [busy, scenario, msgs, settings, say, nameSession],
+    [busy, scenario, msgs, settings, say, nameSession, pack],
   );
 
   /**
@@ -569,6 +587,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       produced: produced.current,
       voice: voice.current,
       reveals: reveals.current,
+      repairs: repairs.current,
     });
   }, [scenario, busy, msgs, settings, pack]);
 

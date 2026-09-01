@@ -25,6 +25,10 @@ const CATEGORY: Record<SignalKind, Weakness["category"]> = {
   pace: "fluency",
   unpromptedTurn: "fluency",
   suggestionUsed: "fluency",
+  // PLAN-027: a repair move is never a miss (signalMiss returns false for it), so
+  // it can never become a weakness — this entry is unreachable, but SignalKind is
+  // exhaustive and must stay so. "fluency" is the least-wrong slot.
+  repairMove: "fluency",
 };
 
 /** Same input, same id: the id has to survive being recomputed, since nothing stores it. */

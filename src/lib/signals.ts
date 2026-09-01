@@ -9,6 +9,7 @@ import type { SignalDraft, ActivityId } from "./model.ts";
 import type { Grade } from "./srs.ts";
 import { words, sentenceCount } from "./text.ts";
 import type { ProducedTurn, Reflection, VoiceTurn } from "./useTalk.ts";
+import { repairSignal, type RepairObservation } from "./repair.ts";
 
 /**
  * A finished conversation. A correction with no note names nothing, so it is not
@@ -39,7 +40,19 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
     // Times the learner asked to see the coach's text (PLAN-021). Recorded, never
     // scored — each ask is one assisted comprehension signal.
     ...(r.reveals ?? []).map((rv) => revealSignal(activityId, rv.what)),
+    // Every repair move the learner used or the coach modelled (PLAN-027). One
+    // signal per observation, written through repair.ts — nothing else constructs
+    // the payload, and the inventory is derived from these alone.
+    ...repairSignals(activityId, r.repairs ?? []),
   ];
+}
+
+/**
+ * A repair observation as a signal. One per observation, written through
+ * `repair.ts`'s door so the payload shape has a single builder.
+ */
+export function repairSignals(activityId: ActivityId, observations: RepairObservation[]): SignalDraft[] {
+  return observations.map((obs) => repairSignal(activityId, obs));
 }
 
 // The two labels a produced turn can carry. Fixed, not per-turn: a turn's own text

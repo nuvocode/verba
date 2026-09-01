@@ -89,7 +89,8 @@ export type SignalKind =
   | "lexicalItem" // a word met or saved
   | "comprehension" // result of a comprehension question
   | "pronunciation" // a pronunciation observation
-  | "pace"; // reading/speaking speed
+  | "pace" // reading/speaking speed
+  | "repairMove"; // a repair move the learner used (or the coach modelled) (PLAN-027)
 
 export type Signal = {
   id: SignalId;
@@ -173,6 +174,28 @@ export function isAssistedReveal(s: Signal): boolean {
   if (p === null || typeof p !== "object") return false;
   const { assisted, source } = p as { assisted?: unknown; source?: unknown };
   return assisted === true && source === "talk-subtitles";
+}
+
+/**
+ * The fifth — and last — structural payload reader: what did a `repairMove`
+ * observe (PLAN-027)?
+ *
+ * A repair observation names its category, who made it, and the learner's own
+ * wording (empty for a coach observation). `null` unless the payload is a
+ * well-formed repair observation — a stored row that is not one reads as "not a
+ * repair move", never as a malformed one. `repair.ts` derives the inventory
+ * through this door and through nothing else.
+ */
+export function repairMoveInfo(
+  s: Signal,
+): { category: string; by: "learner" | "coach"; variant: string } | null {
+  if (s.kind !== "repairMove") return null;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { label, by, variant } = p as { label?: unknown; by?: unknown; variant?: unknown };
+  if (typeof label !== "string") return null;
+  if (by !== "learner" && by !== "coach") return null;
+  return { category: label, by, variant: typeof variant === "string" ? variant : "" };
 }
 
 // --- §1.4 VocabItem ------------------------------------------------------------

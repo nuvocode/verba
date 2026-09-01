@@ -42,7 +42,8 @@ export function buildSystem(
     `  "reply": "your natural conversational reply in ${s.profile.targetLanguage} (1-3 sentences)",`,
     `  "corrections": [ { "original": "the learner's exact wording that was wrong", "fixed": "the corrected version", "note": "a short explanation written in ${s.profile.nativeLanguage}", "severity": "minor or severe", "category": "grammar | vocabulary | wordOrder | register | pronunciation" } ],`,
     `  "suggestions": [ "a short example reply the learner could send next, in ${s.profile.targetLanguage}", "another option" ],`,
-    `  "goalsMet": [0, 2]`,
+    `  "goalsMet": [0, 2],`,
+    `  "repair": { "category": "HOLD | REPEAT | SLOW | CLARIFY | CONFIRM | PARAPHRASE", "variant": "the learner's exact words" }`,
     `}`,
     ``,
     `Rules:`,
@@ -52,6 +53,7 @@ export function buildSystem(
     `- "category" is which kind of mistake it is: grammar, vocabulary, wordOrder, register, or pronunciation. Pick the one that fits best.`,
     `- Give 2-3 "suggestions". Keep them natural and at the learner's level.`,
     `- "goalsMet" lists the index of every scenario goal the learner has JUST satisfied with their last message. An empty list is the normal answer. Never re-list a goal already met, and never credit a goal the learner only asked about.`,
+    `- "repair" is filled ONLY when the learner's last message actually performed one of the six repair moves (HOLD, REPEAT, SLOW, CLARIFY, CONFIRM, PARAPHRASE). Set "variant" to the learner's own wording, copied verbatim, never rephrased. Omit the field otherwise — that is the normal answer. Never report a category with a variant the learner did not literally write.`,
     `- Never mention that you are returning JSON.`,
   ].join("\n");
 }
@@ -112,6 +114,14 @@ export interface TurnResult {
   suggestions: string[];
   /** Indices into the scenario's goals that this turn just satisfied. */
   goalsMet: number[];
+  /**
+   * A reported repair move, shape-checked only. `parseTurn` has no access to the
+   * learner's message, so it cannot verify the variant — `verifyRepair` (repair.ts)
+   * does that in `useTalk.send`, and nothing is recorded if the variant was never
+   * actually written. `null` when the model reported nothing (the normal answer)
+   * or the shape is wrong.
+   */
+  repair: { category: string; variant: string } | null;
 }
 
 /** The JSON escapes worth decoding mid-stream; `\uXXXX` is handled separately. */
@@ -196,6 +206,19 @@ export function parseTurn(raw: string): TurnResult {
           .map((x: any) => Number(x))
           .filter((n: number) => Number.isInteger(n) && n >= 0)
       : [],
+    // A reported repair move, shape-checked only. `category` must be a string and
+    // `variant` a non-empty string for the field to survive — anything else is
+    // dropped, because `parseTurn` is not the gate that decides whether the move
+    // is believable. That gate lives in `verifyRepair` (repair.ts), which holds
+    // the learner's message.
+    repair:
+      obj?.repair &&
+      typeof obj.repair === "object" &&
+      typeof obj.repair.category === "string" &&
+      typeof obj.repair.variant === "string" &&
+      obj.repair.variant.trim() !== ""
+        ? { category: obj.repair.category, variant: obj.repair.variant }
+        : null,
   };
 }
 
