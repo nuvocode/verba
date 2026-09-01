@@ -9,8 +9,9 @@ import {
   type Chapter,
   type ListeningPiece,
   type ListeningOptions,
+  type ListenQuestion,
 } from "./listening";
-import { scoreAnswer, type Question } from "./questions";
+import { scoreAnswer } from "./questions";
 import { getPack } from "./packs";
 import { getSpeech, type Clip } from "./speech";
 import { spans, seek, back10, type Span } from "./timeline";
@@ -25,6 +26,8 @@ export interface ChapterProgress {
   answers: string[]; // index-aligned with the chapter's questions
   results: (boolean | undefined)[]; // per question, set the moment it is checked
   revealed: boolean; // transcript unlocked
+  /** The transcript was opened at least once this chapter — marks every question assisted. */
+  assisted: boolean;
 }
 
 const blank = (n: number): ChapterProgress => ({
@@ -33,6 +36,7 @@ const blank = (n: number): ChapterProgress => ({
   answers: Array(n).fill(""),
   results: Array(n).fill(undefined),
   revealed: false,
+  assisted: false,
 });
 
 /**
@@ -89,6 +93,7 @@ export function useListening(settings: Settings) {
   const lineRef = useRef(0); // which line `current` is, so back10 knows where it is
   const prepJob = useRef(0); // monotonic guard so a superseded prepare can't steal the stage
   const rateRef = useRef(1);
+  const replayingRef = useRef(false); // a replay's ended must not advance the chapter
   const [preparing, setPreparing] = useState(false);
   const [prepText, setPrepText] = useState(""); // "Chapter 2 — line 4 of 11"
   const [position, setPosition] = useState(0); // seconds into the chapter
@@ -208,6 +213,13 @@ export function useListening(settings: Settings) {
           });
           c.el.addEventListener("ended", () => {
             if (currentRef.current !== c.el) return;
+            if (replayingRef.current) {
+              // A replay stops at its line's end — it must not advance the chapter.
+              replayingRef.current = false;
+              currentRef.current = null;
+              setPlaying(false);
+              return;
+            }
             if (i >= clipsRef.current.length - 1) {
               // Reaching the final line's *ended* is the only way to mark heard —
               // seeking past the end is not hearing the chapter.
@@ -293,10 +305,13 @@ export function useListening(settings: Settings) {
    * within a chapter is deliberately not stored — a chapter is short, and
    * restarting it is better than resuming mid-sentence.
    */
-  const saveProgress = useCallback(() => {
-    if (!piece) return;
-    void saveListeningProgress(settings.profile.targetLanguage, piece.title, piece, chapterIdx).catch(() => {});
-  }, [piece, chapterIdx, settings.profile.targetLanguage]);
+  const saveProgress = useCallback(
+    (at = chapterIdx) => {
+      if (!piece) return;
+      void saveListeningProgress(settings.profile.targetLanguage, piece.title, piece, at).catch(() => {});
+    },
+    [piece, chapterIdx, settings.profile.targetLanguage],
+  );
 
   /**
    * Re-enter an unfinished piece at the chapter it was left on. Returns whether a
@@ -457,13 +472,47 @@ export function useListening(settings: Settings) {
     });
   }, [chapterIdx]);
 
+  /**
+   * Open the transcript for this chapter. Opening it once marks the chapter's
+   * comprehension signals assisted — every question in the chapter, not only the
+   * ones answered after. The learner had the text available; that is the fact
+   * being recorded. Nothing about the screen changes when it is set.
+   */
   const reveal = useCallback(() => {
     setProgress((p) => {
       const next = [...p];
-      next[chapterIdx] = { ...next[chapterIdx], revealed: true };
+      const cur = next[chapterIdx];
+      if (!cur) return p;
+      next[chapterIdx] = { ...cur, revealed: true, assisted: true };
       return next;
     });
   }, [chapterIdx]);
+
+  /**
+   * Replay the audio a question's answer came from — `spans[lineIdx]`, computed at
+   * playback time and never stored. Plays the line and stops at its end (it does
+   * not advance to the next line, as normal playback does). Bound to one key (`r`)
+   * on the listening surface, so the count announced is the count that works.
+   */
+  const replayRange = useCallback(
+    (lineIdx: number) => {
+      if (!speech.seekable || !clipsRef.current.length) return;
+      if (lineIdx < 0 || lineIdx >= clipsRef.current.length) return;
+      const was = currentRef.current;
+      if (was && was !== clipsRef.current[lineIdx].el) was.pause();
+      const el = clipsRef.current[lineIdx].el;
+      el.currentTime = 0;
+      el.playbackRate = rateRef.current;
+      currentRef.current = el;
+      lineRef.current = lineIdx;
+      setLineIdx(lineIdx);
+      setPlaying(true);
+      // The shared `ended` listener sees this flag and stops instead of advancing.
+      replayingRef.current = true;
+      void el.play().catch(() => {});
+    },
+    [speech],
+  );
 
   /** Fold the whole piece into the level signal, then mark it finished. */
   const finish = useCallback(async () => {
@@ -503,7 +552,7 @@ export function useListening(settings: Settings) {
     if (chapterIdx >= piece.chapters.length - 1) return void finish();
     const nextIdx = chapterIdx + 1;
     setChapterIdx(nextIdx);
-    saveProgress();
+    saveProgress(nextIdx);
     void prepareRef.current(nextIdx);
   }, [piece, chapterIdx, finish, stop, saveProgress]);
 
@@ -517,6 +566,10 @@ export function useListening(settings: Settings) {
    * carrying its own text. `score` is the two numbers on screen; this is what the
    * surface needs to write one signal per question (§1.3), and a chapter left
    * unanswered contributes nothing rather than a row of silent misses.
+   *
+   * `assisted` rides along per question: opening the transcript once in a chapter
+   * marks that chapter's comprehension signals assisted (PLAN-026) — recorded,
+   * never scored.
    */
   const graded = (piece?.chapters ?? [])
     .flatMap((c, ci) =>
@@ -525,9 +578,10 @@ export function useListening(settings: Settings) {
         given: progress[ci]?.answers[qi] ?? "",
         answer: q.answer,
         correct: progress[ci]?.results[qi],
+        assisted: progress[ci]?.assisted ?? false,
       })),
     )
-    .filter((g): g is { prompt: string; given: string; answer: string; correct: boolean } => g.correct !== undefined);
+    .filter((g): g is { prompt: string; given: string; answer: string; correct: boolean; assisted: boolean } => g.correct !== undefined);
 
   return {
     piece,
@@ -570,6 +624,7 @@ export function useListening(settings: Settings) {
     check,
     nextQuestion,
     reveal,
+    replayRange,
     next,
     reset: () => {
       stop();
@@ -581,4 +636,4 @@ export function useListening(settings: Settings) {
 }
 
 export type Listening = ReturnType<typeof useListening>;
-export type { Question };
+export type { ListenQuestion };

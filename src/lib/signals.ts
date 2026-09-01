@@ -141,6 +141,8 @@ export interface GradedQuestion {
   given: string;
   answer: string;
   correct: boolean;
+  /** The transcript was open for this question's chapter (PLAN-026). Optional — reading never sets it. */
+  assisted?: boolean;
 }
 
 // The two comprehension labels are fixed rather than per-question: a question's
@@ -178,7 +180,20 @@ export function listenSignals(activityId: ActivityId, graded: GradedQuestion[]):
   return graded.map((q) => ({
     activityId,
     kind: "comprehension" as const,
-    payload: { label: LISTENING, correct: q.correct, prompt: q.prompt, given: q.given, answer: q.answer },
+    payload: {
+      label: LISTENING,
+      correct: q.correct,
+      prompt: q.prompt,
+      given: q.given,
+      answer: q.answer,
+      // PLAN-026: the transcript was open for this chapter. Recorded, never
+      // scored — the learner had the text available, and that is the fact being
+      // recorded. Coach filters assisted signals out of its metrics, so this
+      // moves no number.
+      ...(q.assisted
+        ? { assisted: true, source: "listen-transcript", definition: "you had the transcript open for this chapter" }
+        : {}),
+    },
   }));
 }
 

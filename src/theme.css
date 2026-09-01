@@ -503,10 +503,14 @@ input { font: inherit; }
 .ask .len.on .n { color: var(--ink2); }
 
 /* ---------- listening ---------- */
-.listen { max-width: 640px; margin: 0 auto; padding: 40px 24px 80px; }
+/* The page balances (PLAN-026): a three-row grid — head, player, work — that fills
+   the viewport. The transport is vertically centred in its row and the question
+   block grows into the space rather than the page ending halfway down. No fixed
+   pixel heights; dvh and minmax, so it survives a resized window. */
+.listen { height: 100dvh; display: grid; grid-template-rows: auto minmax(0, auto) minmax(0, 1fr); max-width: 640px; margin: 0 auto; padding: 40px 24px 24px; }
 .listen-head { margin-bottom: 24px; }
 .listen-title { font-family: var(--serif); font-size: 26px; font-weight: 500; margin-top: 6px; }
-.listen-play { margin-bottom: 34px; min-height: 46px; display: flex; align-items: center; }
+.listen-play { min-height: 46px; display: flex; align-items: center; }
 .speaking { display: flex; align-items: center; gap: 4px; }
 .speaking em { font-style: normal; font-size: 13px; color: var(--accent-ink); margin-right: 10px; }
 .speaking i { width: 3px; height: 18px; background: var(--accent); border-radius: 2px; animation: vbar .7s ease infinite; }
@@ -529,6 +533,10 @@ input { font: inherit; }
 .listen-note { font-size: 13px; color: var(--ink2); }
 .listen-note button { margin-left: 6px; }
 .listen-hint { color: var(--ink2); font-size: 14px; }
+/* The work row grows into the space; when the question block (or an open
+   transcript) is taller than the window, it scrolls rather than pushing the
+   transport off-screen. */
+.listen-work { min-height: 0; overflow-y: auto; }
 .listen-count { margin-bottom: 12px; }
 .listen-qs { display: flex; flex-direction: column; gap: 22px; margin-bottom: 28px; }
 .listen-q { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
@@ -538,9 +546,15 @@ input { font: inherit; }
 .listen-input { width: 100%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 7px; padding: 10px 12px; font-size: 14px; outline: none; font-family: inherit; }
 .listen-input:focus { border-color: var(--ink3); }
 .listen-fix { margin-top: 14px; font-size: 13px; color: var(--ink2); }
+.listen-why { margin-top: 6px; color: var(--ink2); }
 .listen-line { margin-top: 6px; font-style: italic; color: var(--ink3); }
 .listen-good { margin-top: 12px; font-size: 13px; color: var(--good); }
 .listen-after { display: flex; flex-direction: column; gap: 20px; align-items: flex-start; }
+/* The miss panel (PLAN-026): the right answer, why the chosen one was wrong, a
+   replay of the line it came from, and the source line only if the transcript is
+   open. */
+.listen-miss { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; margin-top: 18px; padding: 16px 18px; border: 1px solid var(--warn); border-radius: 12px; }
+.listen-miss .listen-fix { margin-top: 0; }
 .listen-transcript p { font-size: 15px; line-height: 1.6; margin: 0 0 10px; }
 .listen-transcript .tr-native { color: var(--ink2); }
 

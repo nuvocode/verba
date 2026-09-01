@@ -469,6 +469,25 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         else void listening.play();
         return;
       }
+      // The transcript toggle (PLAN-026): `t` opens or closes it. Opening it once
+      // marks the chapter assisted — recorded, never scored.
+      if (space === "listening" && e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        listening.reveal();
+        return;
+      }
+      // Replay the line a wrong answer came from (PLAN-026): `r` plays
+      // spans[lineIdx] and stops at its end. Only live while a miss panel is
+      // showing the replay button — the hint line announces it only then.
+      if (space === "listening" && e.key.toLowerCase() === "r") {
+        const q = listening.chapter?.questions[listening.progress.step];
+        const miss = listening.progress.results[listening.progress.step] === false;
+        if (q && miss) {
+          e.preventDefault();
+          listening.replayRange(q.lineIdx);
+          return;
+        }
+      }
 
       // The nav keys come from the one table, and only where they are actually
       // live: on Talk, 1–3 are suggestions *while suggestions are on screen*, and

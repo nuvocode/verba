@@ -96,6 +96,13 @@ export const KEYS: Shortcut[] = [
   // ---- listening ----
   { keys: [" "], label: "space", does: "play the chapter", on: ["listening"], when: "idle" },
   { keys: [" "], label: "space", does: "stop", on: ["listening"], when: "playing" },
+  // The transcript toggle (PLAN-026): one labelled key in the transport, closed by
+  // default, available from the start of a chapter. Opening it marks the chapter
+  // assisted — recorded, never scored.
+  { keys: ["t"], label: "T", does: "show or hide the transcript", on: ["listening"] },
+  // Replay the line a wrong answer came from (PLAN-026) — plays spans[lineIdx] and
+  // stops at its end. Only live while a miss panel is showing the replay button.
+  { keys: ["r"], label: "R", does: "replay that part", on: ["listening"], when: "replay" },
   { keys: ["Escape"], label: "esc", does: "one level up", on: ["listening"] },
 
   // ---- memory (the collection) ----

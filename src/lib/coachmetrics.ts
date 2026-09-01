@@ -75,7 +75,9 @@ export function coachMetrics(signals: Signal[], now: number): Metric[] {
 
   // comprehension — 100 * correct / answered
   // Reveals (PLAN-021) are already excluded from the window above — they are
-  // recorded, never scored, so they move no metric and no sample.
+  // recorded, never scored, so they move no metric and no sample. A listening
+  // question answered with the transcript open is *not* a reveal: it is a genuine
+  // answer with an `assisted` note, counted like any other (PLAN-026).
   const comprehension = inWindow.filter((s) => s.kind === "comprehension");
   const answered = comprehension.length;
   const correct = comprehension.filter((s) => !signalMiss(s)).length;

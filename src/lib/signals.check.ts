@@ -187,6 +187,28 @@ assert.deepEqual(
   "the whole question survives into the payload — 15c reads correct, a Coach screen may want the rest",
 );
 
+// PLAN-026: an assisted listening signal (the transcript was open) is a real,
+// answered question with a note. It carries the flag and a definition, and — unlike
+// Talk's reveal — it is NOT filtered out of the metrics: it is not a reveal.
+const assistedListen = listenSignals("listen-1", [
+  { ...q("where were they?", false), assisted: true },
+  { ...q("who paid?", true), assisted: true },
+]);
+assert.equal(assistedListen.length, 2, "assisted questions still write one signal each");
+for (const d of assistedListen) {
+  const p = d.payload as { assisted: boolean; source: string; definition: string };
+  assert.equal(p.assisted, true, "an assisted listening signal is marked assisted");
+  assert.equal(p.source, "listen-transcript", "…names its source");
+  assert(typeof p.definition === "string" && p.definition.length > 0, "…and carries a definition");
+  assert.equal(
+    isAssistedReveal({ ...d, id: "x", observedAt: 0 }),
+    false,
+    "an assisted listening answer is not a reveal — the door is faithful to its name",
+  );
+}
+// A plain (unassisted) listening signal is not a reveal either.
+assert.equal(isAssistedReveal({ ...listen[0], id: "x", observedAt: 0 }), false, "a plain listening signal is not assisted");
+
 const mem = memorySignals("memory-1", [{ term: "la cuenta", grade: 0 }, { term: "el mercado", grade: 2 }]);
 assert.deepEqual(mem.map((d) => d.kind), ["lexicalItem", "lexicalItem"], "a review is an observation about a word");
 assert.deepEqual(
@@ -302,10 +324,11 @@ if (offenders.length > 0) {
   assert(!/talk-subtitles/.test(confidenceSrc), "confidence.ts must not reference the reveal source");
 }
 
-// --- source scan: coachmetrics excludes assisted reveals ----------------------
+// --- source scan: coachmetrics excludes talk reveals --------------------------
 // PLAN-021: a reveal is recorded, never scored. Coach's six metrics must be
 // identical whether or not reveals are present — feed the same signal set with
-// and without reveals and assert the six metrics do not move.
+// and without Talk's reveals and assert the six metrics do not move. (Listening's
+// assisted answers are real answers and count — that is pinned in coachmetrics.check.)
 {
   const base = [
     sigAt("comprehension", { label: "c", correct: true }),
@@ -321,8 +344,8 @@ if (offenders.length > 0) {
   const withR = coachMetrics(withReveals, NOW);
   for (const m of without) {
     const other = withR.find((x) => x.id === m.id)!;
-    assert.equal(other.value, m.value, `metric ${m.id} must not move when reveals are present`);
-    assert.equal(other.sample, m.sample, `metric ${m.id} sample must not move when reveals are present`);
+    assert.equal(other.value, m.value, `metric ${m.id} must not move when talk reveals are present`);
+    assert.equal(other.sample, m.sample, `metric ${m.id} sample must not move when talk reveals are present`);
   }
 }
 
