@@ -24,6 +24,7 @@ import {
   freshWait,
   armWait,
   onWaitElapsed,
+  onSpeechEnd,
   onHold,
   clearWait,
   type WaitState,
@@ -42,39 +43,73 @@ const unready: Baseline = { median: 0, mad: 0, sample: 0, ready: false };
 
 // --- the timeline harness -----------------------------------------------------
 // A faithful replica of the production wait/offer flow, driven on a virtual
-// clock. `say` is a queue replica: a clip is pushed and plays for `clipMs`;
-// when the queue empties the coach stops speaking. The state machine is the
+// clock. `say(dur)` is the speech queue: clips play in order, and when the queue
+// empties the coach falls silent — which is the only place a deadline is set,
+// exactly as `say`'s queue-empty path is in useTalk. The state machine is the
 // real one from patience.ts.
+//
+// The harness records, for every offer, how long the learner had actually been
+// in silence when it fired. That number is the thing §6.1 is about: a wait the
+// coach's own audio has already spent is not a wait.
 class Harness {
   now = 0;
   state: WaitState = freshWait();
   speaking = false;
-  queue: string[] = [];
-  offers: number[] = [];
-  timer: number | null = null;
+  queue: number[] = [];
   clipEnd: number | null = null;
-  clipMs: number;
+  /** When the coach last fell silent; null while it is speaking. */
+  quietSince: number | null = 0;
+  offers: number[] = [];
+  /** Silence before each offer — offers[i] fired after silences[i] ms of quiet. */
+  silences: number[] = [];
+  timer: number | null = null;
   ms: number | null;
+  offerClipMs: number;
 
-  constructor(ms: number | null, clipMs = 0) {
+  constructor(ms: number | null, offerClipMs = 0) {
     this.ms = ms;
-    this.clipMs = clipMs;
+    this.offerClipMs = offerClipMs;
   }
 
-  /** The coach speaks a line (a reply, or an offer) — a clip joins the queue. */
-  say() {
-    this.queue.push("clip");
+  /** The coach speaks a line — a clip joins the queue. */
+  say(dur: number) {
+    this.queue.push(dur);
     if (!this.speaking) {
       this.speaking = true;
-      this.clipEnd = this.now + this.clipMs;
+      this.quietSince = null;
+      this.playNext();
     }
   }
 
-  /** Turn land: arm the wait and start the coach's reply clip. */
-  turnLands() {
-    this.state = armWait(this.state, this.now, this.ms);
+  /** The queue advances; when it empties the coach stops speaking. */
+  private playNext() {
+    const d = this.queue.shift();
+    if (d === undefined) {
+      this.speaking = false;
+      this.clipEnd = null;
+      this.quietSince = this.now;
+      // The only place a deadline is set — `say`'s queue-empty path.
+      this.state = onSpeechEnd(this.state, this.now, this.ms);
+      this.timer = this.state.deadline;
+      return;
+    }
+    this.clipEnd = this.now + d;
+  }
+
+  /** Turn land: raise the flag (no clock yet) and start the reply clip. */
+  turnLands(replyMs: number) {
+    this.state = armWait(this.state, this.ms);
+    // Whatever deadline the state says, the harness schedules — so an `armWait`
+    // that arms the clock at turn land is observed here, not silently ignored.
     this.timer = this.state.deadline;
-    this.say();
+    this.say(replyMs);
+  }
+
+  /** Turn land with speech off: nothing is ever queued, so the silence is now. */
+  turnLandsSilent() {
+    this.state = armWait(this.state, this.ms);
+    this.state = onSpeechEnd(this.state, this.now, this.ms);
+    this.timer = this.state.deadline;
   }
 
   /** The armed timer fires — the wait elapsed. */
@@ -83,7 +118,8 @@ class Harness {
     this.state = onWaitElapsed(this.state, this.now, this.ms, this.speaking);
     if (this.state.offerCount > before) {
       this.offers.push(this.now);
-      this.say();
+      this.silences.push(this.quietSince === null ? 0 : this.now - this.quietSince);
+      this.say(this.offerClipMs);
     }
     this.timer = this.state.deadline;
   }
@@ -94,54 +130,65 @@ class Harness {
     this.timer = this.state.deadline;
   }
 
-  /** A clip ends; if the queue is empty the coach stops speaking. */
-  clipEnds() {
-    this.queue.shift();
-    this.clipEnd = null;
-    if (this.queue.length === 0) this.speaking = false;
-    else this.clipEnd = this.now + this.clipMs;
-  }
-
-  nextEvent(): number | null {
-    const c = [this.timer, this.clipEnd].filter((x): x is number => x !== null);
-    return c.length ? Math.min(...c) : null;
-  }
-
-  /** Advance the clock by dt, firing timers and ending clips as they come due. */
+  /**
+   * Advance the clock by dt, firing timers and ending clips as they come due.
+   * One event at a time: a timer and a clip ending in the same millisecond are
+   * resolved timer-first, so the elapse still sees the coach speaking and
+   * re-arms rather than cutting in on the last word.
+   */
   advance(dt: number) {
     const target = this.now + dt;
-    while (true) {
-      const next = this.nextEvent();
-      if (next === null || next > target) break;
-      this.now = next;
-      if (next === this.timer) this.fire();
-      if (next === this.clipEnd) this.clipEnds();
+    for (;;) {
+      const due = [this.timer, this.clipEnd].filter((x): x is number => x !== null && x <= target);
+      if (due.length === 0) break;
+      const at = Math.min(...due);
+      this.now = at;
+      if (this.timer === at) {
+        this.timer = null;
+        this.fire();
+      } else {
+        this.playNext();
+      }
     }
     this.now = target;
   }
 }
 
-// --- case 1: waiting is raised at turn land, not when the queue empties ------
-// patience ledger 11 — nothing is shown while waiting; the chips stay hidden
-// while the coach speaks.
+// --- case 1: the flag rises at turn land, the clock starts at silence --------
+// patience ledger 11 — nothing is shown while waiting; and ledger 10 — the wait
+// is a full wait of *silence*, not one the coach's own audio has spent.
 {
   const ms = waitMs(ready(20_000), "normal")!; // 50s
-  const h = new Harness(ms, 60_000); // the reply clip outlasts the wait
-  h.turnLands();
-  // The wait is raised at turn land — before any speech has finished.
+  const h = new Harness(ms);
+  h.turnLands(6_000); // an ordinary reply: shorter than the wait
+  // The flag is up at turn land, before any speech has finished — the chips are
+  // hidden for the whole of the coach's reply.
   assert.equal(h.state.waiting, true, "case 1: waiting is raised at turn land");
   assert.equal(h.speaking, true, "case 1: the coach is still speaking");
-  // The chips stay hidden while the coach speaks: the wait is still pending.
-  h.advance(ms - 1);
-  assert.equal(h.state.waiting, true, "case 1: still waiting while the coach speaks");
+  // …and no clock is running yet. Arming the deadline here would spend the wait
+  // on the coach's own audio.
+  assert.equal(h.state.deadline, null, "case 1: no deadline until the coach falls silent");
 
-  // Wiring: `armWait` is called at turn land (start/send), not from `say`'s
-  // queue-empty path. If the fix is reverted (arm at queue-empty), this fails.
+  // The reply ends; now the clock starts, and the offer is a full wait away.
+  h.advance(6_000);
+  assert.equal(h.speaking, false, "case 1: the coach has stopped speaking");
+  assert.equal(h.state.deadline, 6_000 + ms, "case 1: the deadline is a full wait from the silence");
+  h.advance(ms);
+  assert.deepEqual(h.offers, [6_000 + ms], "case 1: the offer fires a full wait after the coach stopped");
+  assert.deepEqual(h.silences, [ms], "case 1: the learner had a full wait of silence");
+
+  // Wiring: `armWait` raises the flag at turn land; the deadline is set only by
+  // `say`'s queue-empty path (and, with speech off, at the turn). If the fix is
+  // reverted — the deadline armed at turn land — this fails.
   const useTalk = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
   const sayBlock = useTalk.slice(useTalk.indexOf("const say ="), useTalk.indexOf("const clearWait"));
-  assert(!/armWait/.test(sayBlock), "case 1: say's queue-empty path must not arm the wait");
-  // The turn-land call sites raise waiting and arm the wait.
+  assert(/armDeadlineRef\.current\(\)/.test(sayBlock), "case 1: say's queue-empty path starts the clock");
+  const armBlock = useTalk.slice(useTalk.indexOf("const armWait ="), useTalk.indexOf("const armDeadline ="));
+  assert(!/setTimeout/.test(armBlock), "case 1: armWait sets the flag, never the timer");
   assert(/setWaiting\(true\);\s*armWait\(\)/.test(useTalk), "case 1: the turn raises waiting and arms the wait");
+  const src = readFileSync(join(ROOT, "src/lib/patience.ts"), "utf8");
+  const fn = src.slice(src.indexOf("export function armWait"), src.indexOf("export function onSpeechEnd"));
+  assert(!/deadline: now/.test(fn), "case 1: armWait must not set a deadline");
 }
 
 // --- case 2: praise text lives outside reply, and Talk renders it gated ------
@@ -163,35 +210,41 @@ class Harness {
   assert.equal(noFor.praise, null, "case 2: a praise with no for is dropped at parse");
 
   // Talk renders the praise only when it survived the gate — a dropped praise
-  // never reaches the screen, and the reply stands on its own without it.
+  // never reaches the screen, and the reply stands on its own without it. It is
+  // the coach's own target-language text, so it sits inside PLAN-021's curtain:
+  // with subtitles off it stays hidden until the line is revealed.
   const talk = readFileSync(join(ROOT, "src/views/Talk.tsx"), "utf8");
-  assert(/m\.praise &&/.test(talk), "case 2: Talk renders praise only when present");
-  // The praise sentence is stored on the message, not folded into reply.
+  assert(/m\.praise && \(settings\.subtitles \|\| revealed\.has\(i\)\)/.test(talk), "case 2: the praise render is gated on the gate and on the curtain");
+  // The praise sentence is stored on the message, not folded into reply, and it
+  // is spoken like any other coach line — Talk is voice-primary (PLAN-018).
   const useTalk = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
   assert(/praise: praiseText/.test(useTalk), "case 2: useTalk stores the kept praise text on the message");
+  assert(/if \(praiseText\) say\(praiseText\)/.test(useTalk), "case 2: a kept praise is spoken");
   assert(!/turn\.reply\s*=/.test(useTalk), "case 2: useTalk never rewrites turn.reply");
 }
 
-// --- case 3: fireOffer skips while the coach is speaking, then fires ---------
+// --- case 3: no offer cuts into a rewind, and the wait after it is full ------
 // patience ledger 10 — the offer is a coach line like any other, and it must
 // not cut into a rewind's own → repeat.
 {
-  const ms = waitMs(ready(20_000), "normal")!; // 50s
-  const h = new Harness(ms, 60_000); // the reply clip outlasts the first wait
-  h.turnLands();
-  // The first wait elapses while the coach is still speaking — no offer, re-arm.
-  h.advance(ms);
-  assert.equal(h.offers.length, 0, "case 3: no offer while the coach is speaking");
-  assert.equal(h.state.offerCount, 0, "case 3: the offer count is untouched while speaking");
-  // The reply ends; the next wait elapses and the offer fires.
-  h.advance(60_000 - ms); // the reply clip ends
-  assert.equal(h.speaking, false, "case 3: the coach has stopped speaking");
-  h.advance(ms);
-  // The offer fires at the timer deadline: the first wait (50s) re-armed to
-  // 100s, and the offer lands there.
-  assert.deepEqual(h.offers, [ms * 2], "case 3: the offer fires after the coach stops speaking");
+  const ms = waitMs(ready(1_000), "normal")!; // the floor, 8s
+  const h = new Harness(ms);
+  h.turnLands(3_000); // the reply ends at 3s and starts the clock: deadline 11s
+  h.advance(3_000);
+  assert.equal(h.state.deadline, 3_000 + ms, "case 3: the clock started when the reply ended");
+  // A rewind's own → repeat joins the floor at 4s and holds it for 8s, straddling
+  // the deadline at 11s.
+  h.advance(1_000);
+  h.say(8_000);
+  h.advance(20_000);
+  // The offer did not cut in mid-rewind…
+  assert(h.offers.every((t) => t >= 12_000), "case 3: no offer while the rewind held the floor");
+  // …and when it came, it came after a full wait of silence, not a remainder.
+  assert.equal(h.offers.length, 1, "case 3: one offer fired");
+  assert.deepEqual(h.silences, [ms], "case 3: a full wait of silence after the rewind");
+  assert.equal(h.offers[0], 12_000 + ms, "case 3: the offer is a full wait after the rewind ended");
 
-  // Wiring: onWaitElapsed checks `speaking` and re-arms instead of offering.
+  // Wiring: onWaitElapsed consults `speaking` and re-arms instead of offering.
   const src = readFileSync(join(ROOT, "src/lib/patience.ts"), "utf8");
   const fn = src.slice(src.indexOf("export function onWaitElapsed"), src.indexOf("export function onHold"));
   assert(/speaking/.test(fn), "case 3: onWaitElapsed consults the speaking flag");
@@ -201,8 +254,8 @@ class Harness {
 // patience ledger 10 — a learner who asked for time is not then offered help.
 {
   const ms = waitMs(ready(20_000), "normal")!; // 50s
-  const h = new Harness(ms, 0);
-  h.turnLands();
+  const h = new Harness(ms);
+  h.turnLandsSilent();
   // A verified HOLD lands: the offers are closed and a full wait re-arms.
   h.hold();
   assert.equal(h.state.offerCount, OFFER_CAP, "case 4: a HOLD closes the turn's offers");
@@ -243,8 +296,8 @@ class Harness {
 
   // Timeline: a HOLD turn closes the offers — no offer fires after it.
   const ms = waitMs(ready(20_000), "normal")!;
-  const h = new Harness(ms, 0);
-  h.turnLands();
+  const h = new Harness(ms);
+  h.turnLandsSilent();
   h.hold();
   h.advance(ms * 3);
   assert.equal(h.offers.length, 0, "case 5: a HOLD turn produces no offer");
@@ -278,8 +331,8 @@ class Harness {
     assert.equal(typeof got, "object", `case 8: null and not a number — a "sensible default" cannot creep in`);
   }
   // A null wait arms nothing: the state machine leaves the state unchanged.
-  const h = new Harness(null, 0);
-  h.turnLands();
+  const h = new Harness(null);
+  h.turnLands(3_000);
   assert.equal(h.state.waiting, false, "case 8: a null wait raises nothing");
   assert.equal(h.state.deadline, null, "case 8: a null wait arms no timer");
 }
@@ -310,8 +363,8 @@ class Harness {
 // patience ledger 10 — the offer is capped.
 {
   const ms = waitMs(ready(20_000), "normal")!; // 50s
-  const h = new Harness(ms, 0);
-  h.turnLands();
+  const h = new Harness(ms);
+  h.turnLandsSilent();
   // Two offers fire, each a full wait apart; the third wait is silent.
   h.advance(ms);
   assert.equal(h.offers.length, 1, "case 10: the first offer fires");
@@ -402,6 +455,43 @@ class Harness {
   assert(/talk\.suggestions\.length > 0 && !talk\.waiting/.test(talk), "case 15: the suggestion render is gated on !waiting");
   assert(/!talk\.waiting/.test(talk), "case 15: the hint announcement is gated on !waiting");
   assert(/talk\.busy && !talk\.streaming/.test(talk), "case 15: the typing indicator is gated on busy, not on waiting");
+}
+
+// --- case 16: every offer follows a full wait of real silence ----------------
+// patience ledger 10 — the wait is the learner's silence, not the clock the
+// coach's own audio ran down.
+//
+// This is the boundary the whole plan turns on, and it is invisible to a
+// timeline whose clip either outlasts the wait or lasts nothing at all: the
+// ordinary turn is a reply *shorter* than the wait. With the deadline armed at
+// turn land, a six-second reply against the eight-second floor leaves the
+// learner two seconds before being offered help — §6.1's opening complaint,
+// reproduced by the app that exists to remove it.
+{
+  for (const median of [1_000, 3_000, 20_000]) {
+    for (const step of ["quick", "normal", "patient"] as PatienceStep[]) {
+      const ms = waitMs(ready(median), step)!;
+      // Replies on both sides of the wait, including the ones that make the
+      // remainder small: an ordinary reply, a long one, one just under the wait.
+      for (const replyMs of [0, 3_000, 6_000, ms - 1, ms, ms + 5_000]) {
+        const h = new Harness(ms, 2_000); // the offer holds the floor too
+        h.turnLands(replyMs);
+        h.advance(replyMs + ms * 4);
+        assert.equal(h.offers.length, OFFER_CAP, `case 16: both offers fire (median ${median}, ${step}, reply ${replyMs})`);
+        for (const [i, silence] of h.silences.entries()) {
+          assert.equal(
+            silence,
+            ms,
+            `case 16: offer ${i + 1} must follow a full wait of silence — median ${median}, ${step}, reply ${replyMs}: got ${silence}ms, wanted ${ms}ms`,
+          );
+          assert(
+            silence >= WAIT_FLOOR,
+            `case 16: no offer inside the floor — median ${median}, ${step}, reply ${replyMs}: got ${silence}ms`,
+          );
+        }
+      }
+    }
+  }
 }
 
 console.log("patience.check: ok");

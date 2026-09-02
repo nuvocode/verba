@@ -71,6 +71,7 @@ import {
   freshWait,
   armWait as armWaitState,
   onWaitElapsed,
+  onSpeechEnd,
   onHold,
   clearWait as clearWaitState,
   type WaitState,
@@ -337,6 +338,11 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   const [waiting, setWaiting] = useState(false);
   const waitState = useRef<WaitState>(freshWait());
   const waitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // `armDeadline` is defined after `say`, but `say` starts the clock when its
+  // queue empties — so it reaches the helper through this ref, which
+  // `armDeadline` keeps pointing at itself. No dependency cycle: `say` depends
+  // on the ref, `armDeadline` depends on `say` (through `fireOffer`).
+  const armDeadlineRef = useRef<() => void>(() => {});
   // Praise (PLAN-032): how many pieces of praise have been shown this session
   // (capped at PRAISE_CAP), and the correction records the model may cite — the
   // labels of this learner's past corrections, read through `signalLabel` from
@@ -397,6 +403,11 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         const next = speakQueue.current.shift();
         if (!next) {
           speaking.current = false;
+          // The coach has stopped speaking — the wait's clock starts here, and
+          // only here (PLAN-032). `waiting` is not touched: it went up when the
+          // turn landed and comes down when the wait expires or the learner
+          // speaks. `armDeadlineRef` points at the latest `armDeadline`.
+          armDeadlineRef.current();
           return;
         }
         const gen = speakGeneration.current;
@@ -489,23 +500,44 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   }, [pack, say, settings.patience]);
 
   /**
-   * Arm the wait (PLAN-032): schedule the first offer a full `waitMs` from now.
-   * A `null` wait (no baseline yet) arms nothing — the coach does not interrupt
-   * at all. Called at turn land, when the coach's reply has landed and the
-   * suggestions are about to be hidden. `waiting` is raised by the caller (the
-   * turn), not here — this function only arms the timer.
+   * Arm the wait at turn land (PLAN-032). The flag, not the clock: the chips are
+   * hidden from the moment the reply lands, and the deadline is set later, by
+   * `armDeadline`, when the coach actually stops speaking. A `null` wait (no
+   * baseline yet) arms nothing — the coach does not interrupt at all.
    */
   const armWait = useCallback(() => {
     const ms = waitMs(baseline.current, settings.patience);
-    const next = armWaitState(waitState.current, Date.now(), ms);
+    waitState.current = armWaitState(waitState.current, ms);
+    // No deadline is live until the coach falls silent; a timer left over from
+    // the previous turn must not fire into this one.
+    if (waitTimer.current) clearTimeout(waitTimer.current);
+    waitTimer.current = null;
+  }, [settings.patience]);
+
+  /**
+   * Start the wait's clock (PLAN-032): the coach has stopped speaking, so the
+   * learner's silence begins now and the offer is a full `waitMs` away. Called
+   * from `say` when the queue empties — a reply, a rewind's own → repeat, an
+   * offer's own line all end here — and at turn land when speech is off, since
+   * then nothing is ever queued and the coach never "stops speaking".
+   *
+   * Every wait the learner experiences is therefore a full wait of *silence*,
+   * not a wait the coach's own audio has already spent.
+   */
+  const armDeadline = useCallback(() => {
+    const ms = waitMs(baseline.current, settings.patience);
+    const next = onSpeechEnd(waitState.current, Date.now(), ms);
     waitState.current = next;
-    if (next.deadline === null) return; // no baseline — the coach does not interrupt at all
+    if (next.deadline === null) return;
     if (waitTimer.current) clearTimeout(waitTimer.current);
     waitTimer.current = setTimeout(() => {
       waitTimer.current = null;
       fireOffer();
     }, next.deadline - Date.now());
   }, [settings.patience, fireOffer]);
+
+  // `say` reaches `armDeadline` through this ref — see its declaration above.
+  armDeadlineRef.current = armDeadline;
 
   /**
    * A verified `HOLD` (PLAN-032): the learner asked for time, so the wait is
@@ -659,11 +691,14 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         prevCoachLine.current = turn.reply;
         say(turn.reply);
         // The wait begins at turn land (PLAN-032): raise `waiting` so the chips
-        // stay hidden while the coach speaks, and arm the timer. A null wait (no
-        // baseline yet) raises nothing — a first session never offers.
+        // stay hidden while the coach speaks. The clock itself starts when the
+        // coach falls silent — `say`'s queue-empty path — except when speech is
+        // off, where nothing is ever queued and the silence starts here. A null
+        // wait (no baseline yet) raises nothing: a first session never offers.
         if (waitMs(baseline.current, settings.patience) !== null) {
           setWaiting(true);
           armWait();
+          if (!settings.speak || !speech.canSpeak) armDeadline();
         }
       } catch (e: unknown) {
         const { say: said, log } = humanError(e);
@@ -674,7 +709,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         setBusy(false);
       }
     },
-    [settings, pack, say, speech, clearWait, armWait],
+    [settings, pack, say, speech, clearWait, armWait, armDeadline],
   );
 
   /**
@@ -1161,14 +1196,24 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         const obey = obeyRepair(repair, prevCoachLine.current);
         if (obey.kind === "repeat") say(obey.line, SLOW_RATE);
         say(turn.reply, obey.kind === "slow" ? SLOW_RATE : undefined);
+        // A praise that survived the gate is spoken, after the reply and as its
+        // own clip (PLAN-032). Talk is voice-primary (PLAN-018): a praise the
+        // learner can only read is one a learner talking with the coach never
+        // receives. It rides `say` like any other coach line, so its duration
+        // lands in `spokeMs` and the next turn's latency stays honest, and it
+        // does not touch `prevCoachLine` — a REPEAT repeats the reply.
+        if (praiseText) say(praiseText);
         if (obey.kind === "slow") shortenNext.current = true;
         prevCoachLine.current = turn.reply;
         // The wait begins at turn land (PLAN-032): raise `waiting` so the chips
-        // stay hidden while the coach speaks, and arm the timer. A null wait (no
-        // baseline yet) raises nothing — a first session never offers.
+        // stay hidden while the coach speaks. The clock itself starts when the
+        // coach falls silent — `say`'s queue-empty path — except when speech is
+        // off, where nothing is ever queued and the silence starts here. A null
+        // wait (no baseline yet) raises nothing: a first session never offers.
         if (waitMs(baseline.current, settings.patience) !== null) {
           setWaiting(true);
           armWait();
+          if (!settings.speak || !speech.canSpeak) armDeadline();
         }
 
         // The rewind, if the decision asked for one: drive the four steps after
@@ -1189,7 +1234,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         setBusy(false);
       }
     },
-    [busy, scenario, msgs, settings, say, nameSession, pack, driveRewind, clearWait, armWait, resetWaitOnHold],
+    [busy, scenario, msgs, settings, say, nameSession, pack, driveRewind, clearWait, armWait, armDeadline, resetWaitOnHold],
   );
 
   /**

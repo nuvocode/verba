@@ -96,13 +96,36 @@ export interface WaitState {
 export const freshWait = (): WaitState => ({ waiting: false, offerCount: 0, deadline: null });
 
 /**
- * Arm the wait at turn land: raise `waiting` (so the chips stay hidden while the
- * coach speaks) and set the deadline a full `ms` from now. On a `null` wait the
- * state is unchanged — the coach does not interrupt at all.
+ * Arm the wait at turn land. The flag and the deadline are two different things
+ * and this only sets the flag: `waiting` goes up the moment the turn lands, so
+ * the chips stay hidden for the whole of the coach's reply, but the clock does
+ * not start until the coach stops speaking (`onSpeechEnd`). Arming the deadline
+ * here instead would spend the wait on the coach's own audio — a six-second
+ * reply against an eight-second wait leaves the learner two seconds of silence
+ * before being offered help, which is the behaviour §6.1 exists to remove.
+ *
+ * On a `null` wait the state is unchanged — the coach does not interrupt at all.
  */
-export function armWait(state: WaitState, now: number, ms: number | null): WaitState {
+export function armWait(state: WaitState, ms: number | null): WaitState {
   if (ms === null) return state;
-  return { ...state, waiting: true, deadline: now + ms };
+  return { ...state, waiting: true, deadline: null };
+}
+
+/**
+ * The coach stopped speaking — the clock starts now. This is the only place a
+ * deadline is set from, so every wait the learner actually experiences is a full
+ * `ms` of silence, whatever the reply, the rewind or the offer before it took.
+ *
+ * Two ways it declines. At the cap the coach is silent for the rest of the turn,
+ * so nothing re-arms. And a wait that is not open — no `waiting`, no offer fired
+ * yet — belongs to no turn: that is the clip still draining after the learner
+ * has already sent, and arming there would offer help into their next message.
+ */
+export function onSpeechEnd(state: WaitState, now: number, ms: number | null): WaitState {
+  if (ms === null) return state;
+  if (state.offerCount >= OFFER_CAP) return state;
+  if (!state.waiting && state.offerCount === 0) return state;
+  return { ...state, deadline: now + ms };
 }
 
 /**
@@ -111,6 +134,12 @@ export function armWait(state: WaitState, now: number, ms: number | null): WaitS
  * later. Otherwise fire one offer: the count goes up, `waiting` drops (the
  * suggestions appear), and a full wait re-arms for the next offer. At the cap the
  * coach is silent — the deadline clears and nothing re-arms.
+ */
+/*
+ * The `now + ms` these transitions set is the speech-off deadline: when nothing
+ * is spoken there is no `onSpeechEnd` to start the clock, so the elapse and the
+ * HOLD arm it themselves. With speech on, the clip that follows ends into
+ * `onSpeechEnd`, which pushes the deadline out to a full wait of real silence.
  */
 export function onWaitElapsed(state: WaitState, now: number, ms: number | null, speaking: boolean): WaitState {
   if (ms === null) return state;

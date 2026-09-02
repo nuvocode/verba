@@ -623,8 +623,15 @@ export default function Talk({
                   {/* Praise (PLAN-032): the sentence that survived praiseGate,
                       rendered beside the reply. A dropped praise never reaches
                       the screen — the field is absent, and the reply stands on
-                      its own without it. */}
-                  {m.praise && <div className="praise">{m.praise}</div>}
+                      its own without it. It is the coach's own text in the target
+                      language, so it sits inside PLAN-021's curtain: with
+                      subtitles off it stays hidden until the line is revealed,
+                      and it is spoken either way. */}
+                  {m.praise && (settings.subtitles || revealed.has(i)) && (
+                    <div className="praise" dir={talk.dir}>
+                      {m.praise}
+                    </div>
+                  )}
                 </div>
               ))}
 
