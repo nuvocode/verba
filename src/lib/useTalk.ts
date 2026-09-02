@@ -67,8 +67,13 @@ import {
 import {
   waitMs,
   OFFER_LINE,
-  OFFER_CAP,
   praiseGate,
+  freshWait,
+  armWait as armWaitState,
+  onWaitElapsed,
+  onHold,
+  clearWait as clearWaitState,
+  type WaitState,
 } from "./patience";
 import {
   addMessage,
@@ -94,6 +99,11 @@ export interface TalkMsg {
   /** Corrections shown under the message right away vs. held back for the reflection. */
   inline: boolean;
   isAsk?: boolean; // a ⌘K question to the coach, not part of the scenario
+  /**
+   * A praise sentence that survived `praiseGate` (PLAN-032). Rendered beside the
+   * coach's reply only when present — a dropped praise never reaches the screen.
+   */
+  praise?: string;
 }
 
 export interface Reflection extends SessionSummary {
@@ -320,23 +330,13 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   // Patience (PLAN-032): whether the coach is waiting for the learner, and the
   // deadline the wait runs to. `waiting` gates the suggestions render in Talk —
   // while it is true the screen is exactly what it was when the coach finished
-  // speaking. `waitDeadline` is the absolute time the wait expires; `waitTimer`
-  // is the armed timeout. `offerCount` is how many offers this turn has already
-  // fired (capped at OFFER_CAP). All rebuilt per turn and per HOLD.
+  // speaking. It is raised at turn land (not when the queue empties), so the
+  // chips stay hidden while the coach speaks. The state machine lives in
+  // patience.ts (`WaitState`); this ref is the live copy, and the helpers below
+  // drive it through the pure transitions.
   const [waiting, setWaiting] = useState(false);
-  const waitDeadline = useRef<number | null>(null);
+  const waitState = useRef<WaitState>(freshWait());
   const waitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const offerCount = useRef(0);
-  // `armWait` is defined after `say`, but `say` arms the wait when the queue
-  // empties — so `say` reaches it through this ref, which `armWait` keeps
-  // pointing at itself. No dependency cycle: `say` depends on the ref, `armWait`
-  // depends on `say`.
-  const armWaitRef = useRef<() => void>(() => {});
-  // When an *offer* is spoken (PLAN-032), its clip ending must not re-arm the
-  // wait — the offer already re-arms its own timer, and re-arming would re-hide
-  // the suggestions that appear when the wait expires. `fireOffer` sets this
-  // before `say`, and `say`'s queue-empty path clears it and skips the arm.
-  const armSuppressed = useRef(false);
   // Praise (PLAN-032): how many pieces of praise have been shown this session
   // (capped at PRAISE_CAP), and the correction records the model may cite — the
   // labels of this learner's past corrections, read through `signalLabel` from
@@ -397,15 +397,6 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         const next = speakQueue.current.shift();
         if (!next) {
           speaking.current = false;
-          // The coach has stopped speaking — the wait begins now (PLAN-032).
-          // `armWaitRef` points at the latest `armWait`; a null wait (no
-          // baseline yet) arms nothing, so a first session never offers. An
-          // offer's own clip ending is suppressed — it re-arms its own timer.
-          if (armSuppressed.current) {
-            armSuppressed.current = false;
-            return;
-          }
-          armWaitRef.current();
           return;
         }
         const gen = speakGeneration.current;
@@ -452,8 +443,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       clearTimeout(waitTimer.current);
       waitTimer.current = null;
     }
-    waitDeadline.current = null;
-    armSuppressed.current = false;
+    waitState.current = clearWaitState(waitState.current);
     setWaiting(false);
   }, []);
 
@@ -466,65 +456,77 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
    * offer ends the wait — the suggestions appear — and re-arms a full `waitMs`
    * for the next offer. At most `OFFER_CAP` per turn; past that the coach is
    * silent until the learner says something.
+   *
+   * If the coach is still speaking (`speaking.current`), the offer must not
+   * interrupt mid-sentence — a rewind's own → repeat is still on the floor. It
+   * re-arms a full wait and returns, so the offer waits for the next quiet
+   * stretch rather than cutting in.
    */
   const fireOffer = useCallback(() => {
-    if (offerCount.current >= OFFER_CAP) return;
-    offerCount.current += 1;
-    // The wait expires here: the suggestions appear. The offer's own clip must
-    // not re-arm the wait (which would re-hide them), so suppress the arm.
-    setWaiting(false);
-    armSuppressed.current = true;
-    const packId = pack?.id ?? "en";
-    say(OFFER_LINE[packId] ?? OFFER_LINE.en);
-    // Re-arm a full wait from the moment the offer was spoken. When speech is
-    // on, `say`'s queue-empty path is suppressed, so this timer is the only arm;
-    // when speech is off, `say` never arms, so this timer is the only arm too.
     const ms = waitMs(baseline.current, settings.patience);
-    if (ms !== null) {
-      waitDeadline.current = Date.now() + ms;
+    const before = waitState.current;
+    const next = onWaitElapsed(before, Date.now(), ms, speaking.current);
+    waitState.current = next;
+    if (next.deadline === null) {
       if (waitTimer.current) clearTimeout(waitTimer.current);
-      waitTimer.current = setTimeout(() => {
-        waitTimer.current = null;
-        fireOffer();
-      }, ms);
+      waitTimer.current = null;
+      setWaiting(false);
+      return;
     }
-  }, [pack, say, settings.patience]);
-
-  /**
-   * Arm the wait (PLAN-032): schedule the first offer a full `waitMs` from now,
-   * and raise the `waiting` flag so Talk renders nothing new while it runs. A
-   * `null` wait (no baseline yet) arms nothing — the coach does not interrupt at
-   * all. Called from `say` when the queue empties (the coach stopped speaking),
-   * and from the turn when speech is off (the coach never "stops speaking").
-   */
-  const armWait = useCallback(() => {
-    const ms = waitMs(baseline.current, settings.patience);
-    if (ms === null) return; // no baseline — the coach does not interrupt at all
-    armSuppressed.current = false;
-    waitDeadline.current = Date.now() + ms;
-    setWaiting(true);
+    // An offer actually fired (the count went up): speak it and show the
+    // suggestions. If the coach was mid-speech, the state re-armed without
+    // firing — nothing is spoken and the wait continues.
+    if (next.offerCount > before.offerCount) {
+      const packId = pack?.id ?? "en";
+      say(OFFER_LINE[packId] ?? OFFER_LINE.en);
+      setWaiting(false);
+    }
     if (waitTimer.current) clearTimeout(waitTimer.current);
     waitTimer.current = setTimeout(() => {
       waitTimer.current = null;
       fireOffer();
-    }, ms);
-  }, [settings.patience, fireOffer]);
-
-  // `say` reaches `armWait` through this ref — see its declaration above.
-  armWaitRef.current = armWait;
+    }, next.deadline - Date.now());
+  }, [pack, say, settings.patience]);
 
   /**
-   * A verified `HOLD` (PLAN-032): re-arm the deadline at a **full** wait from the
-   * moment the HOLD landed, and zero the turn's offer count. Not "waits a bit
-   * more": a full wait again. A second `HOLD` resets it again, with no cap. Only
-   * a `HOLD` that survived `verifyRepair` counts — the observation in
-   * `repairs.current`, not `turn.repair`. A reported move the learner never
-   * wrote changes nothing here.
+   * Arm the wait (PLAN-032): schedule the first offer a full `waitMs` from now.
+   * A `null` wait (no baseline yet) arms nothing — the coach does not interrupt
+   * at all. Called at turn land, when the coach's reply has landed and the
+   * suggestions are about to be hidden. `waiting` is raised by the caller (the
+   * turn), not here — this function only arms the timer.
+   */
+  const armWait = useCallback(() => {
+    const ms = waitMs(baseline.current, settings.patience);
+    const next = armWaitState(waitState.current, Date.now(), ms);
+    waitState.current = next;
+    if (next.deadline === null) return; // no baseline — the coach does not interrupt at all
+    if (waitTimer.current) clearTimeout(waitTimer.current);
+    waitTimer.current = setTimeout(() => {
+      waitTimer.current = null;
+      fireOffer();
+    }, next.deadline - Date.now());
+  }, [settings.patience, fireOffer]);
+
+  /**
+   * A verified `HOLD` (PLAN-032): the learner asked for time, so the wait is
+   * re-armed at a **full** wait from the moment the HOLD landed, and the turn's
+   * offer count is closed — a learner who asked for time is not then offered
+   * help. Not "waits a bit more": a full wait again. A second `HOLD` re-arms it
+   * again, with no cap. Only a `HOLD` that survived `verifyRepair` counts — the
+   * observation in `repairs.current`, not `turn.repair`. A reported move the
+   * learner never wrote changes nothing here.
    */
   const resetWaitOnHold = useCallback(() => {
-    offerCount.current = 0;
-    armWait();
-  }, [armWait]);
+    const ms = waitMs(baseline.current, settings.patience);
+    const next = onHold(waitState.current, Date.now(), ms);
+    waitState.current = next;
+    if (next.deadline === null) return;
+    if (waitTimer.current) clearTimeout(waitTimer.current);
+    waitTimer.current = setTimeout(() => {
+      waitTimer.current = null;
+      fireOffer();
+    }, next.deadline - Date.now());
+  }, [settings.patience, fireOffer]);
 
   /**
    * Name the session in the history list. Deliberately not awaited: the coach
@@ -591,7 +593,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // offers fired, no praise spent, and the correction records the model may
       // cite are rebuilt from the signals about to be loaded.
       clearWait();
-      offerCount.current = 0;
+      waitState.current = freshWait();
       praiseUsed.current = 0;
       correctionRecords.current = [];
       setBusy(true);
@@ -656,10 +658,13 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         // learner REPEAT on the very first sentence repeats it, not "" (PLAN-030 §5).
         prevCoachLine.current = turn.reply;
         say(turn.reply);
-        // When speech is off, `say` returns without queueing anything and the
-        // coach never "stops speaking" — arm the wait at the turn instead
-        // (PLAN-032). When speech is on, `say` arms it when the queue empties.
-        if (!settings.speak || !speech.canSpeak) armWait();
+        // The wait begins at turn land (PLAN-032): raise `waiting` so the chips
+        // stay hidden while the coach speaks, and arm the timer. A null wait (no
+        // baseline yet) raises nothing — a first session never offers.
+        if (waitMs(baseline.current, settings.patience) !== null) {
+          setWaiting(true);
+          armWait();
+        }
       } catch (e: unknown) {
         const { say: said, log } = humanError(e);
         console.warn("[talk] start failed:", log);
@@ -737,7 +742,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         // wait pending, no offers fired, no praise spent. The correction records
         // are rebuilt from the signals about to be loaded.
         clearWait();
-        offerCount.current = 0;
+        waitState.current = freshWait();
         praiseUsed.current = 0;
         correctionRecords.current = [];
         sessionId.current = sessionIdToResume;
@@ -912,7 +917,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // The learner is sending — they have not stalled. End the wait and show
       // the suggestions again (PLAN-032).
       clearWait();
-      offerCount.current = 0;
+      waitState.current = { ...waitState.current, offerCount: 0 };
       const idx = msgs.length;
       setMsgs((m) => [...m, { role: "user", text: msg, corrections: [], inline: false }]);
       // Latency is the time from the coach's line landing to this send. The
@@ -999,12 +1004,24 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
         // Praise needs a receipt (PLAN-032): the model's praise is shown only when
         // `praiseGate` says its `for` matches a real correction record exactly and
-        // the session cap is not spent. A dropped praise drops the field only —
-        // `turn.reply` is passed through byte-identical, because the prompt asked
-        // for a reply that does not depend on the praise.
+        // the session cap is not spent. The praise sentence lives in `text`,
+        // outside `reply`, so a dropped praise really drops — the field is not
+        // rendered, and `reply` stands on its own without it.
+        let praiseText: string | undefined;
         if (turn.praise) {
           const { keep } = praiseGate(turn.praise, correctionRecords.current, praiseUsed.current);
-          if (keep) praiseUsed.current += 1;
+          if (keep) {
+            praiseUsed.current += 1;
+            praiseText = turn.praise.text;
+          }
+        }
+        if (praiseText) {
+          setMsgs((m) => {
+            const next = [...m];
+            const last = next[next.length - 1];
+            if (last && last.role === "ai") next[next.length - 1] = { ...last, praise: praiseText };
+            return next;
+          });
         }
 
         // A goal the coach says was just met ticks — and only that one. A returned
@@ -1030,10 +1047,11 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
         // A verified HOLD (PLAN-032): the learner asked for time, so the wait is
         // re-armed at a full `waitMs` from the moment the HOLD landed, and the
-        // turn's offer count goes back to zero. Only a HOLD that survived
-        // `verifyRepair` counts — the observation in `repairs.current`, not
-        // `turn.repair`. A reported move the learner never wrote changes nothing
-        // here, exactly as it changes nothing in the inventory (PLAN-027).
+        // turn's offer count is closed — a learner who asked for time is not then
+        // offered help. Only a HOLD that survived `verifyRepair` counts — the
+        // observation in `repairs.current`, not `turn.repair`. A reported move
+        // the learner never wrote changes nothing here, exactly as it changes
+        // nothing in the inventory (PLAN-027).
         if (repair && repair.category === "HOLD" && repair.by === "learner") {
           resetWaitOnHold();
         }
@@ -1145,10 +1163,13 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         say(turn.reply, obey.kind === "slow" ? SLOW_RATE : undefined);
         if (obey.kind === "slow") shortenNext.current = true;
         prevCoachLine.current = turn.reply;
-        // When speech is off, `say` returns without queueing anything and the
-        // coach never "stops speaking" — arm the wait at the turn instead
-        // (PLAN-032). When speech is on, `say` arms it when the queue empties.
-        if (!settings.speak || !speech.canSpeak) armWait();
+        // The wait begins at turn land (PLAN-032): raise `waiting` so the chips
+        // stay hidden while the coach speaks, and arm the timer. A null wait (no
+        // baseline yet) raises nothing — a first session never offers.
+        if (waitMs(baseline.current, settings.patience) !== null) {
+          setWaiting(true);
+          armWait();
+        }
 
         // The rewind, if the decision asked for one: drive the four steps after
         // the turn's reply has been spoken — but only the *new* rewind was queued
@@ -1199,7 +1220,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     // The learner is taking the mic — they have not stalled. End the wait and
     // show the suggestions again (PLAN-032).
     clearWait();
-    offerCount.current = 0;
+    waitState.current = { ...waitState.current, offerCount: 0 };
     try {
       const heard = await speech.listen({
         locale: pack?.speech.locale,

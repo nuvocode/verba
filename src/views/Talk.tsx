@@ -620,6 +620,11 @@ export default function Talk({
                       noted — we'll revisit after the session
                     </div>
                   )}
+                  {/* Praise (PLAN-032): the sentence that survived praiseGate,
+                      rendered beside the reply. A dropped praise never reaches
+                      the screen — the field is absent, and the reply stands on
+                      its own without it. */}
+                  {m.praise && <div className="praise">{m.praise}</div>}
                 </div>
               ))}
 

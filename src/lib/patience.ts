@@ -75,6 +75,69 @@ export const OFFER_LINE: Record<string, string> = {
 /** At most this many offers per turn; past that the coach is silent. */
 export const OFFER_CAP = 2;
 
+// --- the wait/offer state machine --------------------------------------------
+//
+// The patience behaviour as a pure state machine, so the check can drive it on a
+// virtual clock. `useTalk` holds a `WaitState` and calls these transitions; the
+// only thing it adds is the real `setTimeout` scheduling. `ms` is
+// `waitMs(baseline, step)` — `null` means "no wait" (no baseline yet), and every
+// transition leaves the state unchanged on `null`, so a first session never
+// offers.
+
+export interface WaitState {
+  /** Whether the coach is waiting — gates the suggestions render in Talk. */
+  waiting: boolean;
+  /** How many offers this turn has fired (capped at OFFER_CAP). */
+  offerCount: number;
+  /** Absolute time the wait expires, or null when no wait is armed. */
+  deadline: number | null;
+}
+
+export const freshWait = (): WaitState => ({ waiting: false, offerCount: 0, deadline: null });
+
+/**
+ * Arm the wait at turn land: raise `waiting` (so the chips stay hidden while the
+ * coach speaks) and set the deadline a full `ms` from now. On a `null` wait the
+ * state is unchanged — the coach does not interrupt at all.
+ */
+export function armWait(state: WaitState, now: number, ms: number | null): WaitState {
+  if (ms === null) return state;
+  return { ...state, waiting: true, deadline: now + ms };
+}
+
+/**
+ * The wait elapsed. If the coach is still speaking (a rewind's own → repeat, or
+ * a reply still playing), do not cut in — re-arm a full wait and try again
+ * later. Otherwise fire one offer: the count goes up, `waiting` drops (the
+ * suggestions appear), and a full wait re-arms for the next offer. At the cap the
+ * coach is silent — the deadline clears and nothing re-arms.
+ */
+export function onWaitElapsed(state: WaitState, now: number, ms: number | null, speaking: boolean): WaitState {
+  if (ms === null) return state;
+  if (speaking) return { ...state, deadline: now + ms };
+  if (state.offerCount >= OFFER_CAP) return { ...state, waiting: false, deadline: null };
+  return { ...state, waiting: false, offerCount: state.offerCount + 1, deadline: now + ms };
+}
+
+/**
+ * A verified HOLD: the learner asked for time, so the turn's offers are closed
+ * (a learner who asked for time is not then offered help) and a full wait re-arms
+ * from the moment the HOLD landed. `waiting` stays true — the learner is still
+ * thinking.
+ */
+export function onHold(state: WaitState, now: number, ms: number | null): WaitState {
+  if (ms === null) return state;
+  return { ...state, offerCount: OFFER_CAP, deadline: now + ms };
+}
+
+/**
+ * Learner input or the session ending: clear the wait. The suggestions appear
+ * again.
+ */
+export function clearWait(state: WaitState): WaitState {
+  return { ...state, waiting: false, deadline: null };
+}
+
 // --- praise needs a receipt ---------------------------------------------------
 
 /**
@@ -90,12 +153,12 @@ export const PRAISE_CAP = 2;
  * referenced record is not a style violation, it is a fabrication — the same
  * class of error as an invented metric, and treated the same way.
  *
- * A dropped praise drops the field only. `turn.reply` is passed through
- * byte-identical, because the prompt asked for a reply that does not depend on
- * the praise.
+ * The praise sentence lives in `text`, outside `reply` — so a dropped praise
+ * really drops: the field is not shown, and `reply` stands on its own without
+ * it.
  */
 export function praiseGate(
-  praise: { for: string } | undefined,
+  praise: { for: string; text: string } | undefined,
   records: string[],
   usedThisSession: number,
 ): { keep: boolean } {
@@ -103,6 +166,7 @@ export function praiseGate(
   if (usedThisSession >= PRAISE_CAP) return { keep: false };
   const target = praise.for.trim().toLocaleLowerCase();
   if (!target) return { keep: false };
+  if (!praise.text.trim()) return { keep: false }; // a praise with no sentence is not shown
   const exact = records.some((r) => r.trim().toLocaleLowerCase() === target);
   return { keep: exact };
 }

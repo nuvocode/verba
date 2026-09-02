@@ -183,6 +183,10 @@ input { font: inherit; }
 .msg .corr .body b { font-weight: 600; color: var(--ink); }
 .msg .noted { font-size: 11px; color: var(--ink3); margin-top: 7px; display: flex; align-items: center; gap: 6px; }
 .msg .noted i { width: 5px; height: 5px; border-radius: 50%; background: var(--warn); display: inline-block; }
+/* Praise (PLAN-032): the sentence that survived praiseGate, beside the reply.
+   Quiet and specific — it names what the learner got right, never a general
+   compliment. */
+.msg .praise { font-size: 12px; color: var(--good); margin-top: 7px; font-style: italic; }
 /* Subtitles off (PLAN-021): the coach's line is a curtain, not a mode. The
    reveal bar says the message exists and offers the free reveal — full width,
    so it reads as a placeholder for the hidden line, not a separate message. */
