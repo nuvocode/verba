@@ -72,14 +72,19 @@ export function drowns(session: DrownCheck): boolean {
  * and `difficultyStep` is dropped immediately. Returns the patch to apply, or
  * null when the rule has not tripped or the drop already happened (a second
  * trip must not drop below 0 or double-count).
+ *
+ * It does **not** ask whether an axis is active. A session with no axis is
+ * exactly the session `pickAxis` hands a learner whose last one drowned — if the
+ * drop waited for an axis, the learner who drowns twice running, the one who
+ * most needs the step lowered, would never get it. §5.2 conditions the drop on
+ * the learner drowning, not on anything having been manufactured.
  */
 export function dropOnDrown(
   session: DrownCheck,
-  axis: Axis | null,
   step: number,
   alreadyDropped: boolean,
 ): { axis: null; step: number } | null {
-  if (axis === null || alreadyDropped || !drowns(session)) return null;
+  if (alreadyDropped || !drowns(session)) return null;
   return { axis: null, step: Math.max(0, step - 1) };
 }
 
@@ -119,12 +124,20 @@ export function pickAxis(
   if (!ctx.canSpeak) eligible = eligible.filter((a) => a !== "pace");
   if (eligible.length === 0) return null;
 
-  // Rotate through the eligible set so a learner does not sit on one axis: the
-  // next axis after the last one actually used, falling to the head for a fresh
-  // learner or after an all-excluded pass.
+  // Rotate through AXES, not through `eligible`. The last axis used is almost
+  // always one of the two this pick excludes, so looking for it inside the
+  // eligible set finds nothing, and a rotation that starts from "not found"
+  // collapses to "always the first eligible axis" — which left `structure` and
+  // `direction` unreachable for the life of the app. Walking AXES from the last
+  // one used and taking the first eligible axis after it keeps the wheel turning
+  // through all five.
   const lastUsed = history.find((r) => r.axis !== null)?.axis;
-  const start = lastUsed ? eligible.indexOf(lastUsed) + 1 : 0;
-  return eligible[start % eligible.length];
+  const from = lastUsed ? AXES.indexOf(lastUsed) + 1 : 0;
+  for (let i = 0; i < AXES.length; i++) {
+    const candidate = AXES[(from + i) % AXES.length];
+    if (eligible.includes(candidate)) return candidate;
+  }
+  return null; // unreachable: eligible is non-empty and is a subset of AXES
 }
 
 /**
@@ -177,11 +190,11 @@ export function recapsFrom(signals: Signal[]): SessionRecap[] {
     byStamp.set(s.observedAt, list);
   }
 
-  const recap = (list: Signal[]): SessionRecap => {
+  const recap = (list: Signal[]): SessionRecap | null => {
     let axis: Axis | null = null;
     let turns = 0;
     let heavy = 0;
-    let zero = true;
+    let breakdowns = 0;
     for (const s of list) {
       if (s.kind === "axisUsed") {
         const label = signalLabel(s);
@@ -191,14 +204,25 @@ export function recapsFrom(signals: Signal[]): SessionRecap[] {
       if (!bd) continue;
       turns++;
       if (bd.length >= 2) heavy++;
-      if (bd.length > 0) zero = false;
+      if (bd.length > 0) breakdowns++;
     }
-    return { axis, turns, drowned: drowns({ turns, heavy }), zero };
+    // A batch with no learner turn in it is not a session this plan may read.
+    // `recentSignals` returns every activity's signals, not the conversation's
+    // alone — a Read or a Listen writes a batch of its own, and counting one as
+    // a session with no breakdowns would hand `calibrate` a free "easy session"
+    // for every activity the learner finished. It would also make `zero` true
+    // for a conversation abandoned before its first turn. An empty batch is not
+    // evidence of an easy session; it is the absence of a session.
+    if (turns === 0) return null;
+    return { axis, turns, drowned: drowns({ turns, heavy }), zero: breakdowns === 0 };
   };
 
   // `order` is the input's (newest-first) order of first appearances, so mapping
   // over it keeps the recaps newest-first.
-  return order.map((stamp) => recap(byStamp.get(stamp)!));
+  return order.flatMap((stamp) => {
+    const r = recap(byStamp.get(stamp)!);
+    return r ? [r] : [];
+  });
 }
 
 /** The signal kinds this plan writes beside the turn signals. */

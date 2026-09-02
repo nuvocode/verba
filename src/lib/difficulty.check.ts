@@ -10,6 +10,7 @@
 import assert from "node:assert";
 import { readFileSync, readdirSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   AXES,
@@ -97,6 +98,27 @@ const unready = { ready: false } as const;
   // The third axis back counts again: two excluded, the next is eligible.
   const third = pickAxis(ready, [recap({ axis: "pace" }), recap({ axis: "direction" })], "B1", TTS);
   assert(third === "structure" || third === "vocabulary" || third === "length", `case 3: rotation should skip the last two, got ${third}`);
+
+  // The wheel must actually turn. Rotating inside the *eligible* set instead of
+  // inside AXES looks right on any single pair and is wrong over a run: the last
+  // axis used is almost always one of the two this pick excludes, so the search
+  // for it finds nothing and every session falls to the first eligible axis.
+  // That left `structure` and `direction` unreachable for the life of the app —
+  // a pair check cannot see it, so the run is the check.
+  let history: SessionRecap[] = [];
+  const run: (Axis | null)[] = [];
+  for (let i = 0; i < 15; i++) {
+    const a = pickAxis(ready, history, "B1", TTS);
+    run.push(a);
+    history = [recap({ axis: a }), ...history];
+  }
+  for (const a of AXES) {
+    assert(run.includes(a), `case 3: "${a}" is unreachable over 15 sessions — the rotation is stuck on ${[...new Set(run)].join(", ")}`);
+  }
+  // And it still never repeats within two sessions of itself.
+  for (let i = 2; i < run.length; i++) {
+    assert(run[i] !== run[i - 1] && run[i] !== run[i - 2], `case 3: session ${i} reused a recent axis (${run[i]})`);
+  }
 }
 
 // --- case 4: pace is never chosen when TTS is unavailable --------------------
@@ -120,6 +142,46 @@ const unready = { ready: false } as const;
   assert.equal(calibrate(1, drownedBetween), 1, "case 5: a break (a drowned session) stops the run");
   // The step is clamped at 4.
   assert.equal(calibrate(4, twoEasy), 4, "case 5: the step never rises above 4");
+
+  // The same rule over real stored signals, not hand-built recaps. `recentSignals`
+  // returns every activity's batch — a Read and a Listen write their own, and
+  // neither is a conversation. Counting one as a zero-breakdown session handed
+  // `calibrate` a free easy session for every activity the learner finished, so a
+  // single conversation full of breakdowns still raised the step.
+  const at = 1_000_000_000_000;
+  const sig = (kind: Signal["kind"], payload: unknown, stamp: number, id: string): Signal => ({
+    id,
+    activityId: "a1",
+    kind,
+    observedAt: stamp,
+    payload,
+  });
+  const learnerTurn = (breakdown: string[], stamp: number, id: string): Signal =>
+    sig("unpromptedTurn", { words: 6, sentences: 1, chars: 30, latencyMs: 3000, speakMs: 0, speakUnknown: false, breakdown }, stamp, id);
+
+  const aDay: Signal[] = [
+    // newest first, as recentSignals returns: a Listen batch, a Read batch, then
+    // the conversation — which went badly.
+    sig("comprehension", { label: "gist", correct: true }, at, "l1"),
+    sig("comprehension", { label: "detail", correct: true }, at, "l2"),
+    sig("lexicalItem", { label: "palabra", grade: 3 }, at - 60_000, "r1"),
+    learnerTurn(["disconnected", "keyWordMissing"], at - 120_000, "t1"),
+    learnerTurn(["overGeneral"], at - 120_000, "t2"),
+    learnerTurn([], at - 120_000, "t3"),
+    learnerTurn([], at - 120_000, "t4"),
+  ];
+  const dayRecaps = recapsFrom(aDay);
+  assert.equal(dayRecaps.length, 1, "case 5: a Read and a Listen are not sessions — only the conversation is");
+  assert.equal(dayRecaps[0].zero, false, "case 5: …and that conversation had breakdowns");
+  assert.equal(calibrate(0, dayRecaps), 0, "case 5: a day of activities behind a hard conversation must not raise the step");
+
+  // A conversation abandoned before its first turn is not an easy session either.
+  const abandoned: Signal[] = [
+    sig("axisUsed", { label: "pace" }, at, "a1"),
+    sig("axisUsed", { label: "length" }, at - 1000, "a2"),
+  ];
+  assert.deepEqual(recapsFrom(abandoned), [], "case 5: a conversation with no turn is not a session");
+  assert.equal(calibrate(0, recapsFrom(abandoned)), 0, "case 5: two abandoned conversations must not raise the step");
 }
 
 // --- case 6: drowning fires at half of turns over four, not at three ----------
@@ -140,16 +202,22 @@ const unready = { ready: false } as const;
 // difficulty ledger 16 — the in-session path sets the axis to null and drops the step.
 {
   // Not yet drowning → no drop.
-  assert.equal(dropOnDrown({ turns: 3, heavy: 2 }, "length", 2, false), null, "case 7: not yet over 4 turns, no drop");
+  assert.equal(dropOnDrown({ turns: 3, heavy: 2 }, 2, false), null, "case 7: not yet over 4 turns, no drop");
   // Drowning, axis set, not yet dropped → drop.
-  const hit = dropOnDrown({ turns: 4, heavy: 2 }, "length", 2, false);
+  const hit = dropOnDrown({ turns: 4, heavy: 2 }, 2, false);
   assert.deepEqual(hit, { axis: null, step: 1 }, "case 7: drowning drops the axis to null and the step by one");
   // Already dropped → no second drop (would double-count / go below 0).
-  assert.equal(dropOnDrown({ turns: 5, heavy: 4 }, "length", 1, true), null, "case 7: a second trip after the drop does nothing");
-  // A session with no axis never drops.
-  assert.equal(dropOnDrown({ turns: 8, heavy: 6 }, null, 2, false), null, "case 7: no axis, no drop");
+  assert.equal(dropOnDrown({ turns: 5, heavy: 4 }, 1, true), null, "case 7: a second trip after the drop does nothing");
+  // A session with no axis still drops. That session is exactly what `pickAxis`
+  // hands a learner whose last one drowned, so gating the drop on an active axis
+  // would deny it to the learner who drowns twice running — the one who needs it.
+  assert.deepEqual(
+    dropOnDrown({ turns: 8, heavy: 6 }, 2, false),
+    { axis: null, step: 1 },
+    "case 7: drowning drops the step even in a session with no axis",
+  );
   // Step is floored at 0.
-  assert.deepEqual(dropOnDrown({ turns: 6, heavy: 3 }, "length", 0, false), { axis: null, step: 0 }, "case 7: the drop never goes below 0");
+  assert.deepEqual(dropOnDrown({ turns: 6, heavy: 3 }, 0, false), { axis: null, step: 0 }, "case 7: the drop never goes below 0");
 }
 
 // --- case 8: an ease request sets `off`, clears the axis, and leaves the step --
@@ -182,18 +250,19 @@ const unready = { ready: false } as const;
   };
   walk(SRC);
 
-  // Probe 1: a seeded .tsx that reads difficultyStep must be caught.
-  const probeFile = join(SRC, "difficulty.probe.tsx");
-  const fsProbe = "const x = settings.difficultyStep;";
-  // The probe lives under a non-.tsx name so the walk never ships it, but the
-  // scan must still find it to prove it catches a seeded read. Write it as a
-  // temporary real .tsx, scan it explicitly (a .tsx written after the walk is not
-  // in the collected list), then remove it.
-  writeFileSync(probeFile, fsProbe);
-  assert(scan(["difficulty.probe.tsx"], /difficultyStep/).length === 1, "case 9 probe: the scan must catch a seeded difficultyStep read");
-  unlinkSync(probeFile);
-  // The real scan: no .tsx (re-scanned after the probe is gone) reads the step.
-  const realTsx = tsx.filter((f) => f !== "difficulty.probe.tsx");
+  // Probe 1: a seeded .tsx that reads difficultyStep must be caught. The probe
+  // is written to the OS temp directory, never into `src` — a check that seeds a
+  // real file inside the repo leaves one behind the moment anything between the
+  // write and the delete throws.
+  const probeFile = join(tmpdir(), "difficulty.probe.tsx");
+  writeFileSync(probeFile, "const x = settings.difficultyStep;");
+  try {
+    assert(/difficultyStep/.test(readFileSync(probeFile, "utf8")), "case 9 probe: the scan must catch a seeded difficultyStep read");
+  } finally {
+    unlinkSync(probeFile);
+  }
+  // The real scan: no .tsx reads the step.
+  const realTsx = tsx;
   const readsStep = scan(realTsx, /difficultyStep/);
   assert(readsStep.length === 0, `case 9: a surface reads difficultyStep:\n${readsStep.join("\n")}`);
   const readsAxisType = scan(realTsx, /type\s+Axis\b|\bAxis\b/);
@@ -202,10 +271,13 @@ const unready = { ready: false } as const;
   // Probe 2: an announcement string in a surface must be caught — the same scan,
   // fed a seeded violation, must flag it.
   const banned = /(making this harder|making it harder|easier session|too hard for you|raising the difficulty|lowered the difficulty|difficulty of this|this is getting harder)/;
-  const probeAnn = join(SRC, "difficulty.ann.probe.tsx");
-  writeFileSync(probeAnn, "const x = \"making this harder for you\";");
-  assert(banned.test(readFileSync(probeAnn, "utf8")), "case 9 probe: the announcement regex catches its own seeded text");
-  unlinkSync(probeAnn);
+  const probeAnn = join(tmpdir(), "difficulty.ann.probe.tsx");
+  writeFileSync(probeAnn, 'const x = "making this harder for you";');
+  try {
+    assert(banned.test(readFileSync(probeAnn, "utf8")), "case 9 probe: the announcement regex catches its own seeded text");
+  } finally {
+    unlinkSync(probeAnn);
+  }
 
   const announcing = realTsx.filter((f) => banned.test(readFileSync(join(SRC, f), "utf8")));
   assert(announcing.length === 0, `case 9: a surface announces difficulty change:\n${announcing.join("\n")}`);

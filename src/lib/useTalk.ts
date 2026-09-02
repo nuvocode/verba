@@ -927,15 +927,14 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         // `calibrate`. As the learner drowns, the axis is pulled null and the step
         // drops immediately, both without a word. `drownWatch` tracks this
         // session's turns; once tripped, `droppedAxis` stops a second drop.
-        if (sent && !droppedAxis.current && axis.current !== null) {
+        // The watch counts every turn, and the drop does not ask whether an axis
+        // is active: the session with no axis is exactly the one `pickAxis` hands
+        // a learner whose last session drowned, so gating either on an axis would
+        // deny the drop to the learner who drowns twice running.
+        if (sent && !droppedAxis.current) {
           drownWatch.current.turns += 1;
           if (sent.breakdown.length >= 2) drownWatch.current.heavy += 1;
-          const drop = dropOnDrown(
-            drownWatch.current,
-            axis.current,
-            settings.difficultyStep,
-            droppedAxis.current,
-          );
+          const drop = dropOnDrown(drownWatch.current, settings.difficultyStep, droppedAxis.current);
           if (drop) {
             droppedAxis.current = true;
             axis.current = drop.axis;
@@ -1143,16 +1142,25 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     // writes it, is the newest of the pair.
     try {
       const prior = await recentSignals(settings.profile.targetLanguage).catch(() => [] as Awaited<ReturnType<typeof recentSignals>>);
-      const current: SessionRecap = {
-        axis: axis.current,
-        turns: produced.current.length,
-        drowned: drowns({
-          turns: produced.current.length,
-          heavy: produced.current.filter((t) => t.breakdown.length >= 2).length,
-        }),
-        zero: produced.current.length > 0 && produced.current.every((t) => t.breakdown.length === 0),
-      };
-      const nextStep = calibrate(settings.difficultyStep, [current, ...recapsFrom(prior)]);
+      // A conversation with no learner turn in it is not a session — the same
+      // rule `recapsFrom` applies to the stored batches. It is left out rather
+      // than counted as an easy one: an empty conversation is the absence of
+      // evidence, not evidence that the level is too low.
+      const current: SessionRecap[] =
+        produced.current.length === 0
+          ? []
+          : [
+              {
+                axis: axis.current,
+                turns: produced.current.length,
+                drowned: drowns({
+                  turns: produced.current.length,
+                  heavy: produced.current.filter((t) => t.breakdown.length >= 2).length,
+                }),
+                zero: produced.current.every((t) => t.breakdown.length === 0),
+              },
+            ];
+      const nextStep = calibrate(settings.difficultyStep, [...current, ...recapsFrom(prior)]);
       if (nextStep !== settings.difficultyStep) onSettings?.({ difficultyStep: nextStep });
     } catch {
       /* calibration is best-effort — a store miss should not fail the wrap-up */
