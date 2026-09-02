@@ -17,6 +17,12 @@ export type ProviderId = "ollama" | "openai" | "anthropic" | "gemini" | "openrou
 /** When a correction is shown inline: as it happens, only when severe, or only at reflection. */
 export type CorrectionTiming = "adaptive" | "live" | "delayed";
 /**
+ * How long the coach waits before offering (PLAN-032). A multiple of the
+ * learner's own median latency, so it is "noticeably longer than their own
+ * average" for every learner rather than for the average one.
+ */
+export type Patience = "quick" | "normal" | "patient";
+/**
  * The two ways to work a passage. `passage` is close reading — focus a sentence, tap a
  * word, read the coach's note. `prompter` is the same text moving up the screen at a
  * pace you set, to be read out loud. Same passage, two exercises.
@@ -132,6 +138,13 @@ export interface Settings {
    * learner to read it as a level. Deliberately unpinned by settingsIndex.check.
    */
   difficultyStep: number;
+  /**
+   * How long the coach waits before offering (PLAN-032). A multiple of the
+   * learner's own median latency, so it is "noticeably longer than their own
+   * average" for every learner rather than for the average one. `normal` is the
+   * default; `quick` barely outruns their average, `patient` gives a long beat.
+   */
+  patience: "quick" | "normal" | "patient";
 }
 
 /** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
@@ -227,6 +240,10 @@ export const defaultSettings: Settings = {
   // has outgrown the level stays there across sessions (PLAN-031), and it is
   // never surfaced — §5.2's calibration is the only thing that moves it.
   difficultyStep: 0,
+  // Normal patience: the coach waits a multiple of the learner's own median
+  // latency before offering (PLAN-032). A first session, with no baseline yet,
+  // produces no offer at all.
+  patience: "normal",
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>

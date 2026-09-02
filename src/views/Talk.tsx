@@ -799,7 +799,9 @@ export default function Talk({
                 settings={settings}
                 surface="talk"
                 // 1–3 are announced only while there is something to pick with them.
-                has={talk.suggestions.length > 0 && !talk.reflecting ? ["suggestions"] : []}
+                // While the coach is waiting (PLAN-032) nothing is announced — the
+                // screen is exactly what it was when the coach finished speaking.
+                has={talk.suggestions.length > 0 && !talk.reflecting && !talk.waiting ? ["suggestions"] : []}
               />
               {settings.showHints && (
                 <span style={{ marginLeft: 22 }}>
@@ -855,7 +857,13 @@ export default function Talk({
             </>
           )}
 
-          {talk.suggestions.length > 0 && (
+          {/* Suggestions (PLAN-032): while the coach is waiting, nothing renders —
+              the screen is exactly what it was when the coach finished speaking.
+              The array stays as it is (it is data, and PLAN-021's reveal machinery
+              reads it); only the render is gated on `waiting`. Suggestions appear
+              when the wait expires, or at once when the learner has already started
+              typing or holding the mic (input ends the wait). */}
+          {talk.suggestions.length > 0 && !talk.waiting && (
             <>
               <div className="lbl">If you're stuck</div>
               <div style={{ marginBottom: 30 }}>

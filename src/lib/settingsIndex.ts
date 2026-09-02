@@ -29,6 +29,7 @@ export const SETTINGS_INDEX: SettingRow[] = [
   { id: "level", title: "My level", desc: "How hard the passages, corrections and role-plays are pitched.", panel: "learning" },
   { id: "daily-minutes", title: "Minutes a day", desc: "How long a session should be — the plan is built to about this.", panel: "learning" },
   { id: "coaching", title: "Coaching", desc: "When corrections appear: as they happen, only when meaning breaks, or at the end.", panel: "learning" },
+  { id: "patience", title: "Patience", desc: "How long the coach waits before offering — quick, normal, or a long patient beat.", panel: "learning" },
   { id: "keyboard-hints", title: "Keyboard hints", desc: "The small shortcut lines under each screen.", panel: "learning" },
   { id: "subtitles", title: "Subtitles", desc: "Show the coach's lines as they are spoken — hiding them is the deliberate step up.", panel: "learning" },
 

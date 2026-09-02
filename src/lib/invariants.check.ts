@@ -229,17 +229,17 @@ const REPAIR_LEDGER: RepairRow[] = [
   {
     id: 10,
     claim: "Patience derives from the learner's own average and is settable",
-    pending: "#66 — PLAN-032",
+    assertedIn: [{ file: "src/lib/patience.check.ts", marker: "patience ledger 10" }],
   },
   {
     id: 11,
     claim: "Nothing is shown while waiting",
-    pending: "#66 — PLAN-032",
+    assertedIn: [{ file: "src/lib/patience.check.ts", marker: "patience ledger 11" }],
   },
   {
     id: 12,
     claim: "Praise cites a profile record, and is capped per session",
-    pending: "#66 — PLAN-032",
+    assertedIn: [{ file: "src/lib/patience.check.ts", marker: "patience ledger 12" }],
   },
   {
     id: 13,

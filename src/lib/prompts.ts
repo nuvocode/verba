@@ -36,6 +36,7 @@ export function buildSystem(
   pack?: LanguagePack,
   memories: Memory[] = [],
   difficulty: SystemDifficulty = { axis: null, step: 0 },
+  corrections: string[] = [],
 ): string {
   return [
     `You are Verba, a warm and encouraging ${s.profile.targetLanguage} conversation tutor.`,
@@ -56,6 +57,14 @@ export function buildSystem(
     // last line, at the prompt level where it can hold.
     difficulty.axis ? axisGuidance(difficulty.axis, difficulty.step) : "",
     difficulty.axis ? DIFFICULTY_NO_ANNOUNCE : "",
+    // PLAN-032: the praise rule, in the same register as the "do NOT correct the
+    // learner inside reply" rule. Praise without a cited record is a fabrication,
+    // and the record it may cite is the list of things this learner has been
+    // corrected on before — the only things they could have "just got right".
+    `Do not praise the learner's language. Do not write "great", "well done", "excellent", "perfect", "nice job", or any equivalent. When the learner produces a correct sentence, the correct response is to answer what they said and keep the conversation moving. Praise is allowed **only** when you can point at something specific in the record below that they used to get wrong and just got right, and you must say what that thing was.`,
+    corrections.length
+      ? `Things this learner has been corrected on before (the record you may cite): ${corrections.join("; ")}.`
+      : `This learner has no correction record yet — so there is nothing to cite, and no praise is allowed.`,
     `You MUST answer with ONLY a valid JSON object, no prose outside it, in this exact shape:`,
     `{`,
     `  "reply": "your natural conversational reply in ${s.profile.targetLanguage} (1-3 sentences)",`,
@@ -65,6 +74,7 @@ export function buildSystem(
     `  "repair": { "category": "HOLD | REPEAT | SLOW | CLARIFY | CONFIRM | PARAPHRASE", "variant": "the learner's exact words" },`,
     `  "missed": ["keyWordMissing", "topicChange"],`,
     `  "keyWord": "the one word in YOUR OWN last line that carried the meaning",`,
+    `  "praise": { "for": "the exact record referred to" },`,
     `  "ease": false`,
     `}`,
     ``,
@@ -166,6 +176,14 @@ export interface TurnResult {
    * never announced.
    */
   ease: boolean;
+  /**
+   * A model-reported praise, shape-checked only. `for` is the record the praise
+   * claims to cite; `praiseGate` (patience.ts) decides whether it is believed —
+   * it must match a real correction record exactly, and the session cap is
+   * enforced there too. `null` when the model reported nothing (the normal
+   * answer) or the shape is wrong.
+   */
+  praise: { for: string } | null;
 }
 
 /** The JSON escapes worth decoding mid-stream; `\uXXXX` is handled separately. */
@@ -284,6 +302,17 @@ export function parseTurn(raw: string): TurnResult {
     // Whether the learner asked for an easier session (PLAN-031). Any truthy
     // reading counts — the model reports it in wording, not in a literal.
     ease: obj?.ease === true,
+    // A model-reported praise (PLAN-032), shape-checked only. `for` must be a
+    // non-empty string for the field to survive — the belief gate lives in
+    // `praiseGate` (patience.ts), which holds the correction record and the
+    // session cap.
+    praise:
+      obj?.praise &&
+      typeof obj.praise === "object" &&
+      typeof obj.praise.for === "string" &&
+      obj.praise.for.trim() !== ""
+        ? { for: obj.praise.for }
+        : null,
   };
 }
 

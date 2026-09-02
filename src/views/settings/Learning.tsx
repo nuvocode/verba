@@ -7,9 +7,33 @@ import { useEffect, useMemo, useState } from "react";
 import { LEVELS, TIMES } from "../../lib/choices";
 import { languages } from "../../lib/langs";
 import { progressByLang } from "../../lib/db";
-import { type CorrectionTiming } from "../../lib/settings";
+import { type CorrectionTiming, type Patience } from "../../lib/settings";
 import { listPacks, originLabel, packDocs, packOrigin, removeImportedPack } from "../../lib/packs";
 import { linkish, ToggleRow, type SectionProps } from "./parts";
+
+/**
+ * The three answers to "how long should the coach wait before offering", each
+ * with a sketch of what it looks like. What differs between them is *how much
+ * extra room* the coach gives on top of the learner's own average — so the
+ * sketch shows the room, not a fixed number of seconds.
+ */
+const PATIENCE: [Patience, string, string][] = [
+  [
+    "quick",
+    "Quick",
+    "The coach offers after barely longer than your own average pause.",
+  ],
+  [
+    "normal",
+    "Normal",
+    "The coach waits noticeably longer than your own average pause before offering.",
+  ],
+  [
+    "patient",
+    "Patient",
+    "The coach gives you a long beat before offering — the most room to think.",
+  ],
+];
 
 /**
  * The three answers to "when do I want correcting", each with a sketch of what
@@ -349,6 +373,19 @@ export default function Learning({
               >
                 {sketch}
               </div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="sec" style={{ marginTop: 44 }}>Patience</div>
+      <div data-setting="patience">
+        {PATIENCE.map(([id, name, desc]) => (
+          <button key={id} className="srow" onClick={() => onChange({ patience: id })}>
+            <div className={`radio ${settings.patience === id ? "on" : ""}`} />
+            <div style={{ flex: 1 }}>
+              <div className="name">{name}</div>
+              <div className="desc">{desc}</div>
             </div>
           </button>
         ))}
