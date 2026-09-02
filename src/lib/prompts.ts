@@ -4,6 +4,7 @@ import type { Persona, Scenario } from "./scenarios";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 import { worthLearning } from "./vocab.ts";
 import { BREAKDOWN_MEANING_SIGNALS } from "./breakdown.ts";
+import { axisGuidance, DIFFICULTY_NO_ANNOUNCE, type Axis } from "./difficulty.ts";
 
 /**
  * The most cards one conversation may offer.
@@ -16,6 +17,17 @@ export const MAX_VOCAB_PER_SESSION = 5;
 export type { Scenario } from "./scenarios";
 export { packGuidance } from "./packs/schema.ts";
 
+/**
+ * The difficulty a session was picked with (PLAN-031). `axis` is null for a
+ * session that deliberately manufactures none (a fresh learner, a recovered
+ * learner, or one who asked for ease); when it is set, `buildSystem` folds the
+ * axis guidance and the no-announce rule into the system prompt.
+ */
+export interface SystemDifficulty {
+  axis: Axis | null;
+  step: number;
+}
+
 /** System prompt for a normal conversational turn. Model must return the turn JSON. */
 export function buildSystem(
   s: Settings,
@@ -23,6 +35,7 @@ export function buildSystem(
   persona: Persona,
   pack?: LanguagePack,
   memories: Memory[] = [],
+  difficulty: SystemDifficulty = { axis: null, step: 0 },
 ): string {
   return [
     `You are Verba, a warm and encouraging ${s.profile.targetLanguage} conversation tutor.`,
@@ -38,6 +51,11 @@ export function buildSystem(
     ``,
     `Hold a natural conversation in ${s.profile.targetLanguage}. Match your vocabulary and sentence length to a ${levelOf(s.profile)} learner. Always keep the conversation going by ending your reply with a question or prompt.`,
     ``,
+    // PLAN-031: when a session has a difficulty axis, the model is told how to
+    // apply it and, beside it, that it must never announce the difficulty — §5.2's
+    // last line, at the prompt level where it can hold.
+    difficulty.axis ? axisGuidance(difficulty.axis, difficulty.step) : "",
+    difficulty.axis ? DIFFICULTY_NO_ANNOUNCE : "",
     `You MUST answer with ONLY a valid JSON object, no prose outside it, in this exact shape:`,
     `{`,
     `  "reply": "your natural conversational reply in ${s.profile.targetLanguage} (1-3 sentences)",`,
@@ -46,7 +64,8 @@ export function buildSystem(
     `  "goalsMet": [0, 2],`,
     `  "repair": { "category": "HOLD | REPEAT | SLOW | CLARIFY | CONFIRM | PARAPHRASE", "variant": "the learner's exact words" },`,
     `  "missed": ["keyWordMissing", "topicChange"],`,
-    `  "keyWord": "the one word in YOUR OWN last line that carried the meaning"`,
+    `  "keyWord": "the one word in YOUR OWN last line that carried the meaning",`,
+    `  "ease": false`,
     `}`,
     ``,
     `Rules:`,
@@ -59,6 +78,7 @@ export function buildSystem(
     `- "repair" is filled ONLY when the learner's last message actually performed one of the six repair moves (HOLD, REPEAT, SLOW, CLARIFY, CONFIRM, PARAPHRASE). Set "variant" to the learner's own wording, copied verbatim, never rephrased. Omit the field otherwise — that is the normal answer. Never report a category with a variant the learner did not literally write.`,
     `- "missed" lists which of these were observably true of the learner's LAST message: disconnected (did not answer what was asked), overGeneral ("yes", "maybe", "sure" and nothing else), apologyThenOn (said "sorry"/"pardon" and carried on regardless), keyWordMissing (the key word in YOUR last line appears nowhere in the reply), topicChange (the reply starts a different subject). An empty list is the normal answer. Never guess at what the learner was thinking.`,
     `- "keyWord" is the one word in your OWN last line that carried the meaning — the word "keyWordMissing" is verified against.`,
+    `- "ease" is true when in ANY wording the learner asked for an easier session — for example, "make it a bit easier", "let's take it slow", "this is too hard today", "I'm not in the mood for a challenge". It is false (the normal answer) otherwise. Report it even if the learner only hinted; the request is honoured unconditionally.`,
     `- Never mention that you are returning JSON.`,
   ].join("\n");
 }
@@ -140,6 +160,12 @@ export interface TurnResult {
    * name one.
    */
   keyWord: string;
+  /**
+   * Whether the learner asked for an easier session in any wording (PLAN-031).
+   * `false` is the normal answer. The request is honoured unconditionally and
+   * never announced.
+   */
+  ease: boolean;
 }
 
 /** The JSON escapes worth decoding mid-stream; `\uXXXX` is handled separately. */
@@ -255,6 +281,9 @@ export function parseTurn(raw: string): TurnResult {
     })(),
     // The key word the coach's last line carried — empty when the model named none.
     keyWord: typeof obj?.keyWord === "string" ? obj.keyWord : "",
+    // Whether the learner asked for an easier session (PLAN-031). Any truthy
+    // reading counts — the model reports it in wording, not in a literal.
+    ease: obj?.ease === true,
   };
 }
 

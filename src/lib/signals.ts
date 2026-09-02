@@ -45,6 +45,12 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
     // signal per observation, written through repair.ts — nothing else constructs
     // the payload, and the inventory is derived from these alone.
     ...repairSignals(activityId, r.repairs ?? []),
+    // The difficulty axis a session ran with, and whether the learner asked for
+    // ease (PLAN-031). Both ride the record so Coach can see the pattern; neither
+    // is ever scored. Written beside the turn signals so recapsFrom can group them
+    // into the session they belong to.
+    ...(r.axis ? [{ activityId, kind: "axisUsed" as const, payload: { label: r.axis } }] : []),
+    ...(r.easeRequested ? [{ activityId, kind: "easeRequest" as const, payload: { label: "ease requested" } }] : []),
   ];
 }
 

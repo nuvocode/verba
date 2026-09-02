@@ -254,17 +254,17 @@ const REPAIR_LEDGER: RepairRow[] = [
   {
     id: 15,
     claim: "At most one difficulty axis is active",
-    pending: "#65 — PLAN-031",
+    assertedIn: [{ file: "src/lib/difficulty.check.ts", marker: "difficulty ledger 15" }],
   },
   {
     id: 16,
     claim: "Difficulty rises without breakdowns, drops instantly on drowning",
-    pending: "#65 — PLAN-031",
+    assertedIn: [{ file: "src/lib/difficulty.check.ts", marker: "difficulty ledger 16" }],
   },
   {
     id: 17,
     claim: '"Do not push me today" is obeyed unconditionally',
-    pending: "#65 — PLAN-031",
+    assertedIn: [{ file: "src/lib/difficulty.check.ts", marker: "difficulty ledger 17" }],
   },
   {
     id: 18,

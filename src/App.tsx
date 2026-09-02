@@ -309,6 +309,20 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         run: () => update({ theme: settings.theme === "dark" ? "light" : "dark" }),
       },
       {
+        // PLAN-031: "Do not push me today" — the ⌘K path to the same ask the
+        // learner can make in the conversation, so it works with no mic and no
+        // ambiguity. Unconditional for the rest of the session; forgotten
+        // tomorrow. Named as the ask itself — nothing about difficulty is ever
+        // announced on a surface.
+        label: "Don't push me today",
+        desc: "Ask the coach for a gentle session today",
+        run: () => {
+          setPaletteOpen(false);
+          go("talk");
+          talk.ease();
+        },
+      },
+      {
         label: "Replay onboarding — clears your setup",
         run: () => {
           setPaletteOpen(false);

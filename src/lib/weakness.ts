@@ -29,6 +29,11 @@ const CATEGORY: Record<SignalKind, Weakness["category"]> = {
   // it can never become a weakness — this entry is unreachable, but SignalKind is
   // exhaustive and must stay so. "fluency" is the least-wrong slot.
   repairMove: "fluency",
+  // PLAN-031: an axis marker and an ease request are facts about the session, not
+  // observations of failure — neither is ever a miss (signalMiss returns false for
+  // kinds it does not special-case). Entries keep SignalKind exhaustive.
+  axisUsed: "fluency",
+  easeRequest: "fluency",
 };
 
 /** Same input, same id: the id has to survive being recomputed, since nothing stores it. */

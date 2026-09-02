@@ -125,6 +125,13 @@ export interface Settings {
    * hidden. Asking for the text back is recorded and costs nothing.
    */
   subtitles: boolean;
+  /**
+   * The active difficulty step, an integer `0..4` (PLAN-031). It is a fact about
+   * the learner, so it is persisted — but it appears in **no settings screen**:
+   * §5.2's calibration is the control, and a row in the index would invite the
+   * learner to read it as a level. Deliberately unpinned by settingsIndex.check.
+   */
+  difficultyStep: number;
 }
 
 /** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
@@ -216,6 +223,10 @@ export const defaultSettings: Settings = {
   prompterWpm: DEFAULT_WPM,
   memoryPaused: false,
   subtitles: true,
+  // Step 0: no manufactured difficulty. It is persisted because a learner who
+  // has outgrown the level stays there across sessions (PLAN-031), and it is
+  // never surfaced — §5.2's calibration is the only thing that moves it.
+  difficultyStep: 0,
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>

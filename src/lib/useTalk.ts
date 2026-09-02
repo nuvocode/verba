@@ -40,6 +40,16 @@ import {
   type SessionBudget,
 } from "./breakdown";
 import {
+  pickAxis,
+  recapsFrom,
+  calibrate,
+  dropOnDrown,
+  easeEffect,
+  drowns,
+  type Axis,
+  type SessionRecap,
+} from "./difficulty";
+import {
   SLOW_RATE,
   DENIED_HANDICAP,
   nextStep,
@@ -91,6 +101,14 @@ export interface Reflection extends SessionSummary {
   reveals: { what: "line" | "all" }[];
   /** Repair moves the learner used or the coach modelled (PLAN-027) — feeds `repairSignals`. */
   repairs: RepairObservation[];
+  /**
+   * The difficulty axis this session ran with (PLAN-031). Recorded on the day's
+   * record, never scored — Coach reads it to see which dimension was manufactured
+   * this session. null is normal (a session with no chosen axis).
+   */
+  axis: Axis | null;
+  /** Whether the learner asked for ease this session (PLAN-031) — recorded, never scored. */
+  easeRequested: boolean;
 }
 
 /** One thing the learner actually sent, and whether they found it themselves. */
@@ -179,7 +197,7 @@ function live(publish: (text: string) => void): (chunk: string) => void {
  * One conversation with the coach. Lives above the router so switching to Read
  * or opening ⌘K mid-sentence doesn't throw the session away.
  */
-export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settings>) => void) {
+export function useTalk(settings: Settings, onSettings?: (patch: Partial<Settings>) => void) {
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [msgs, setMsgs] = useState<TalkMsg[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -248,6 +266,21 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
   // here too and is never persisted; it expires with the session, because a
   // learner having a sharp day is not a fact about the learner.
   const budget = useRef<SessionBudget>({ used: 0, handicap: 0, off: false });
+  // The difficulty axis picked for this session (PLAN-031), and whether the
+  // learner asked for ease today. `axis` is null for a session that deliberately
+  // manufactures none; ease and a drowning turn both pull it null for the rest.
+  // Both are per-session facts, never persisted — a learner having an easy day
+  // is not a fact about the learner.
+  const axis = useRef<Axis | null>(null);
+  // Counts for §5.2's in-session drop: how many of the learner's turns have
+  // carried two or more breakdown signals, across how many turns.
+  const drownWatch = useRef<{ turns: number; heavy: number }>({ turns: 0, heavy: 0 });
+  // Whether the axis was already dropped this session — a second trip must not
+  // double-drop or drop below 0.
+  const droppedAxis = useRef(false);
+  // Whether the learner asked for ease this session — recorded on the day's
+  // record so Coach can see the pattern, but never persisted as a switch.
+  const easeAsked = useRef(false);
   // The per-session rewind state (PLAN-030): the gift cap (at most two for the
   // same category, at most one category per session) and the current step. Held
   // for this session and rebuilt by `start`/`resume`.
@@ -419,6 +452,12 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       // "don't interrupt" ask belong to the session, not to the app. `handicap` is
       // forgotten here too — a sharp day is not a fact about the learner (§3.3).
       budget.current = { used: 0, handicap: 0, off: false };
+      // A new session is a fresh difficulty watch (PLAN-031): the axis, the
+      // drowning counts, the ease ask and the drop flag all belong to the session.
+      axis.current = null;
+      drownWatch.current = { turns: 0, heavy: 0 };
+      droppedAxis.current = false;
+      easeAsked.current = false;
       rewind.current = freshRewind();
       setRewindExchange(null);
       prevCoachLine.current = "";
@@ -434,9 +473,22 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       const nowMs = Date.now();
       baseline.current = baselineFrom(known, nowMs);
       medianLen.current = medianTurnWords(known, nowMs);
+      // The one axis this session is made harder in (PLAN-031) — picked once, at
+      // the door, from the learner's readiness and the last sessions' outcomes.
+      // `null` is a real answer (a fresh learner, a recovered one, a learner who
+      // asked for ease); a `null` session is simply not manufactured.
+      const recaps = recapsFrom(known);
+      axis.current = pickAxis(
+        { ready: baseline.current.ready },
+        recaps,
+        levelOf(settings.profile),
+        { ease: false, canSpeak: speech.canSpeak },
+      );
       const system =
-        buildSystem(settings, sc, sc.persona, pack, memories) +
-        (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
+        buildSystem(settings, sc, sc.persona, pack, memories, {
+          axis: axis.current,
+          step: settings.difficultyStep,
+        }) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
       history.current = [{ role: "system", content: system }];
       try {
         try {
@@ -472,7 +524,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         setBusy(false);
       }
     },
-    [settings, pack, say],
+    [settings, pack, say, speech],
   );
 
   /**
@@ -526,6 +578,13 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         // cap and handicap were never persisted, so they cannot be recovered here
         // and are begun anew with the conversation.
         budget.current = { used: 0, handicap: 0, off: false };
+        // A resumed conversation carries no manufactured difficulty (PLAN-031):
+        // the axis is picked at *start*, and a resume is not a start — the old
+        // session's axis (or none) is forgotten, and nothing new is chosen here.
+        axis.current = null;
+        drownWatch.current = { turns: 0, heavy: 0 };
+        droppedAxis.current = false;
+        easeAsked.current = false;
         rewind.current = freshRewind();
         setRewindExchange(null);
         prevCoachLine.current = "";
@@ -550,7 +609,7 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
         baseline.current = baselineFrom(known, Date.now());
         medianLen.current = medianTurnWords(known, Date.now());
         history.current = [
-          { role: "system", content: buildSystem(settings, sc, sc.persona, pack, memories) },
+          { role: "system", content: buildSystem(settings, sc, sc.persona, pack, memories, { axis: null, step: settings.difficultyStep }) },
           ...rows.map((m) => ({
             role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
             content: m.content,
@@ -853,6 +912,39 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
           }
         }
 
+        // "Do not push me today" (PLAN-031): reachable two ways — the learner said
+        // it in the conversation (turn.ease), or via ⌘K → `ease()`. Effect,
+        // unconditionally and without a word: the axis goes null for the rest of
+        // the session and the rewind budget's `off` is set so nothing interrupts.
+        // `difficultyStep` is left byte-identical and nothing persists to settings.
+        if (turn.ease && !easeAsked.current) {
+          easeAsked.current = true;
+          axis.current = easeEffect(settings.difficultyStep).axis;
+          budget.current.off = true;
+        }
+
+        // The in-session drop (PLAN-031 §5.2) — the one that does NOT wait for
+        // `calibrate`. As the learner drowns, the axis is pulled null and the step
+        // drops immediately, both without a word. `drownWatch` tracks this
+        // session's turns; once tripped, `droppedAxis` stops a second drop.
+        if (sent && !droppedAxis.current && axis.current !== null) {
+          drownWatch.current.turns += 1;
+          if (sent.breakdown.length >= 2) drownWatch.current.heavy += 1;
+          const drop = dropOnDrown(
+            drownWatch.current,
+            axis.current,
+            settings.difficultyStep,
+            droppedAxis.current,
+          );
+          if (drop) {
+            droppedAxis.current = true;
+            axis.current = drop.axis;
+            // The drop is a fact about the learner, so it persists — calibration's
+            // rise lives in settings.difficultyStep too, so they cannot drift.
+            onSettings?.({ difficultyStep: drop.step });
+          }
+        }
+
         // The session is named off its first real exchange — that is also the turn
         // it starts showing up in the history list — and re-named exactly once,
         // when enough has been said for the subject to be the subject.
@@ -1041,8 +1133,31 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
       voice: voice.current,
       reveals: reveals.current,
       repairs: repairs.current,
+      axis: axis.current,
+      easeRequested: easeAsked.current,
     });
-  }, [scenario, busy, msgs, settings, pack]);
+    // Calibration (PLAN-031 §5.2): once, at the end of the session, over the
+    // verdicts. The rise needs two consecutive zero-breakdown sessions; the drop
+    // already happened in-session, so this only ever moves the step up. The
+    // stored signals are re-read so the current session, once the reflection
+    // writes it, is the newest of the pair.
+    try {
+      const prior = await recentSignals(settings.profile.targetLanguage).catch(() => [] as Awaited<ReturnType<typeof recentSignals>>);
+      const current: SessionRecap = {
+        axis: axis.current,
+        turns: produced.current.length,
+        drowned: drowns({
+          turns: produced.current.length,
+          heavy: produced.current.filter((t) => t.breakdown.length >= 2).length,
+        }),
+        zero: produced.current.length > 0 && produced.current.every((t) => t.breakdown.length === 0),
+      };
+      const nextStep = calibrate(settings.difficultyStep, [current, ...recapsFrom(prior)]);
+      if (nextStep !== settings.difficultyStep) onSettings?.({ difficultyStep: nextStep });
+    } catch {
+      /* calibration is best-effort — a store miss should not fail the wrap-up */
+    }
+  }, [scenario, busy, msgs, settings, pack, onSettings]);
 
   /**
    * Strike a word off the wrap-up. The conversation proposes; the learner disposes.
@@ -1148,6 +1263,19 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     [settings],
   );
 
+  /**
+   * "Do not push me today" (PLAN-031): the ⌘K path, so the ask works with no mic
+   * and no ambiguity. Effect is identical to the in-conversation ask — the axis
+   * goes null for the rest of the session and the rewind budget's `off` is set.
+   * Nothing about it persists to settings.
+   */
+  const ease = useCallback(() => {
+    if (easeAsked.current) return;
+    easeAsked.current = true;
+    axis.current = easeEffect(settings.difficultyStep).axis;
+    budget.current.off = true;
+  }, [settings.difficultyStep]);
+
   return {
     scenario,
     scenarios: listScenarios(),
@@ -1186,6 +1314,8 @@ export function useTalk(settings: Settings, _onSettings?: (patch: Partial<Settin
     /** The learner asked to see the coach's text — recorded, never scored. */
     reveal,
     ask,
+    /** "Do not push me today" — the ⌘K path (PLAN-031). */
+    ease,
     /** The rewind exchange on screen (PLAN-030), or null when none. */
     rewindExchange,
     /** "No, I understood" — clear the mark, raise the handicap, carry on. */

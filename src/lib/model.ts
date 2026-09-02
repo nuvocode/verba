@@ -90,7 +90,9 @@ export type SignalKind =
   | "comprehension" // result of a comprehension question
   | "pronunciation" // a pronunciation observation
   | "pace" // reading/speaking speed
-  | "repairMove"; // a repair move the learner used (or the coach modelled) (PLAN-027)
+  | "repairMove" // a repair move the learner used (or the coach modelled) (PLAN-027)
+  | "axisUsed" // the one difficulty axis a session chose (PLAN-031)
+  | "easeRequest"; // the learner asked not to be pushed that session (PLAN-031)
 
 export type Signal = {
   id: SignalId;
@@ -174,7 +176,23 @@ export function turnTiming(s: Signal): { latencyMs: number; speakMs: number; spe
 }
 
 /**
- * The fourth — and last — structural payload reader: is this a *reveal* — a
+ * The fifth structural payload reader: what a produced turn itself carried as
+ * breakdown signals (PLAN-028 → PLAN-031). `null` for a signal that is not a
+ * produced turn — a correction, a card, an axis marker. PLAN-031 reads this to
+ * turn a session's verdicts into "zero" and "drowned" without re-deriving them
+ * from the raw signals.
+ */
+export function turnBreakdown(s: Signal): string[] | null {
+  if (s.kind !== "unpromptedTurn" && s.kind !== "suggestionUsed") return null;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { breakdown } = p as { breakdown?: unknown };
+  if (!Array.isArray(breakdown)) return null;
+  return breakdown.map(String);
+}
+
+/**
+ * The sixth structural payload reader: is this a *reveal* — a
  * comprehension signal with no answer behind it, written solely because the
  * learner asked to see the coach's text (PLAN-021)?
  *
@@ -194,7 +212,7 @@ export function isAssistedReveal(s: Signal): boolean {
 }
 
 /**
- * The fifth — and last — structural payload reader: what did a `repairMove`
+ * The seventh structural payload reader: what did a `repairMove`
  * observe (PLAN-027)?
  *
  * A repair observation names its category, who made it, and the learner's own
