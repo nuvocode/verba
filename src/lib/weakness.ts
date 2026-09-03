@@ -37,6 +37,11 @@ const CATEGORY: Record<SignalKind, Weakness["category"]> = {
   // PLAN-034: a rehearsal batch marker is a fact about the record, not an
   // observation of failure — never a miss. Entry keeps SignalKind exhaustive.
   rehearsal: "fluency",
+  // PLAN-036: a listening walk-back is a fact about the record — the variable
+  // and the grade it walked back from — not an observation of failure. It is
+  // never a miss (signalMiss returns false for it), so it can never become a
+  // weakness. Entry keeps SignalKind exhaustive.
+  listenWalkBack: "fluency",
 };
 
 /** Same input, same id: the id has to survive being recomputed, since nothing stores it. */

@@ -279,7 +279,7 @@ const REPAIR_LEDGER: RepairRow[] = [
   {
     id: 20,
     claim: "Listening variables are graded; an unsupported grade is not shown",
-    pending: "#68 — PLAN-036",
+    assertedIn: [{ file: "src/lib/conditions.check.ts", marker: "conditions ledger 20" }],
   },
   {
     id: 21,

@@ -103,7 +103,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
   // Talk can write a level back: if onboarding was skipped, the first conversation places them.
   const talk = useTalk(settings, update);
   const read = useRead(settings);
-  const listening = useListening(settings);
+  const listening = useListening(settings, update);
   const paletteInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {

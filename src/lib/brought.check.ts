@@ -164,6 +164,30 @@ const text: BroughtText = {
   const localSettings: Settings = { ...defaultSettings, provider: "ollama", offline: false };
   const offlineSettings: Settings = { ...defaultSettings, provider: "anthropic", offline: true };
 
+  // The wait machine (PLAN-032) arms a `setTimeout` that fires `fireOffer` →
+  // `setWaiting(false)` as a macrotask — after the `act(async …)` block that
+  // drove `startBrought` has already resolved. That late state update is what
+  // React reports as "not wrapped in act". Capture the timers and fire them
+  // inside `act`, exactly as rehearsal.check.ts does, so every state update the
+  // wait machine makes lands inside an act block.
+  const timers: (() => void)[] = [];
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  globalThis.setTimeout = (fn: () => void) => {
+    timers.push(fn);
+    return timers.length;
+  };
+  globalThis.clearTimeout = () => {};
+  const fireTimers = () => {
+    for (const fn of [...timers]) {
+      try {
+        fn();
+      } catch {
+        /* a timer that re-arms is fine — the gate must hold across them */
+      }
+    }
+  };
+
   const harness = (settings: Settings) => {
     let talk: ReturnType<typeof useTalk> | undefined;
     function H() {
@@ -188,7 +212,7 @@ const text: BroughtText = {
     const h = harness(cloudSettings);
     await h.render();
     calls.length = 0;
-    await act(async () => { await h.talk().startBrought({ ...text, sentTo: "" }); });
+    await act(async () => { await h.talk().startBrought({ ...text, sentTo: "" }); fireTimers(); });
     assert.equal(calls.length, 0, "case 6: with a cloud provider and no approval, opening the discussion sends nothing");
     assert(h.talk().pendingBrought !== null, "case 6: the text is held for approval, not silently dropped");
     assert.equal(h.talk().pendingBrought?.title, text.title, "case 6: the held text is the one the learner brought");
@@ -199,7 +223,7 @@ const text: BroughtText = {
     const h = harness(cloudSettings);
     await h.render();
     calls.length = 0;
-    await act(async () => { await h.talk().startBrought({ ...text, sentTo: "ollama" }); });
+    await act(async () => { await h.talk().startBrought({ ...text, sentTo: "ollama" }); fireTimers(); });
     assert.equal(calls.length, 0, "case 6: an approval for Ollama is not an approval for Anthropic");
     assert(h.talk().pendingBrought !== null, "case 6: a mismatched approval still asks again");
   }
@@ -209,7 +233,7 @@ const text: BroughtText = {
     const h = harness(cloudSettings);
     await h.render();
     calls.length = 0;
-    await act(async () => { await h.talk().startBrought({ ...text, sentTo: "anthropic" }); });
+    await act(async () => { await h.talk().startBrought({ ...text, sentTo: "anthropic" }); fireTimers(); });
     assert.equal(calls.length, 1, "case 6: with a matching approval, exactly one call is recorded");
     const system = calls[0]?.messages?.[0]?.content ?? "";
     assert(system.includes(text.body), "case 6: the system prompt contains the body");
@@ -221,7 +245,7 @@ const text: BroughtText = {
     const h = harness(localSettings);
     await h.render();
     calls.length = 0;
-    await act(async () => { await h.talk().startBrought({ ...text, sentTo: "" }); });
+    await act(async () => { await h.talk().startBrought({ ...text, sentTo: "" }); fireTimers(); });
     assert.equal(calls.length, 1, "case 6: a local provider needs no confirmation and sends exactly one call");
     assert.equal(h.talk().pendingBrought, null, "case 6: a local provider holds nothing for approval");
     // The axis is picked (the mock store returns a ready baseline) and must
@@ -237,7 +261,7 @@ const text: BroughtText = {
     const h = harness(offlineSettings);
     await h.render();
     calls.length = 0;
-    await act(async () => { await h.talk().startBrought({ ...text, sentTo: "" }); });
+    await act(async () => { await h.talk().startBrought({ ...text, sentTo: "" }); fireTimers(); });
     assert.equal(calls.length, 1, "case 6: offline mode needs no confirmation and sends exactly one call");
     assert.equal(h.talk().pendingBrought, null, "case 6: offline mode holds nothing for approval");
   }
@@ -251,6 +275,9 @@ const text: BroughtText = {
     assert(/PROVIDERS\.find\(\(p\) => p\.id === settings\.provider\)/.test(confirm), "case 6: the confirmation resolves the provider by id");
     assert(/provider\?\.name/.test(confirm), "case 6: the confirmation names the provider, not the raw id");
   }
+
+  globalThis.setTimeout = realSetTimeout;
+  globalThis.clearTimeout = realClearTimeout;
 }
 
 // --- case 7: words saved from a brought text carry a source_surface ----------

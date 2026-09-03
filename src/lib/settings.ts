@@ -4,6 +4,7 @@ import { migrateSpeech, type Tier } from "./speech.ts";
 import { DEFAULT_WPM } from "./prompter.ts";
 import { snapTime } from "./choices.ts";
 import { CEFR_LEVELS, type CEFRLevel, type LearnerProfile } from "./model.ts";
+import type { Variable } from "./conditions.ts";
 
 /** What the documented Docker one-liners listen on — the placeholder, and the value
  *  "Local server" seeds itself with when it has nothing yet. */
@@ -158,6 +159,14 @@ export interface Settings {
    * through.
    */
   coachStyle: CoachStyle;
+  /**
+   * The learner's listening conditions, one grade per variable (PLAN-036). A
+   * fact about the learner, so it is persisted — but it appears in **no settings
+   * screen**: §8's walk-back and hardening are the only controls, and a row in
+   * the index would invite the learner to read it as a level. Deliberately
+   * unpinned by settingsIndex.check, exactly like `difficultyStep`.
+   */
+  listeningGrades: Partial<Record<Variable, number>>;
 }
 
 /** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
@@ -260,6 +269,11 @@ export const defaultSettings: Settings = {
   // Warm by default: the coach's voice is encouraging until the learner says
   // otherwise (PLAN-033 §6.4).
   coachStyle: "warm",
+  // No hardened listening conditions: grade 0 of every variable is today's
+  // Listen, byte for byte (PLAN-036). Persisted because a grade earned in one
+  // session must still be there in the next; never surfaced — §8's walk-back
+  // and hardening are the only controls.
+  listeningGrades: {},
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>

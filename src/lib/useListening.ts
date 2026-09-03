@@ -18,6 +18,17 @@ import { spans, seek, back10, type Span } from "./timeline";
 import { computeMetrics } from "./metrics";
 import { humanError } from "./fmt";
 import { recentMemories, saveListening, saveListeningProgress, latestListeningProgress, saveMetrics, vocabCounts } from "./db";
+import {
+  supported,
+  activeFrom,
+  applyTo,
+  paceMultiplier,
+  resumeAudio,
+  walkBack,
+  harden,
+  type Variable,
+  type ActiveSet,
+} from "./conditions";
 
 /** One chapter's worth of the learner's work — kept per chapter so it survives moving on. */
 export interface ChapterProgress {
@@ -76,7 +87,7 @@ function clipDuration(c: Clip): Promise<number> {
  * back to speaking the whole chapter: play/pause only, no fake bar. One clip per
  * line, not per chapter — line boundaries are the only timing that exists.
  */
-export function useListening(settings: Settings) {
+export function useListening(settings: Settings, onSettings?: (patch: Partial<Settings>) => void) {
   const [piece, setPiece] = useState<ListeningPiece | null>(null);
   const [chapterIdx, setChapterIdx] = useState(0);
   const [progress, setProgress] = useState<ChapterProgress[]>([]);
@@ -85,6 +96,10 @@ export function useListening(settings: Settings) {
   const [error, setError] = useState("");
   const [playing, setPlaying] = useState(false);
   const [finished, setFinished] = useState(false);
+  // The walk-backs this session has recorded (PLAN-036) — written as signals on
+  // finish, so the record of what defeated the learner survives without moving
+  // the comprehension number.
+  const walkBacks = useRef<{ variable: Variable; from: number }[]>([]);
 
   // ---- the player: clips per line, cumulative spans, and the transport ----
   const clipsRef = useRef<Clip[]>([]);
@@ -93,6 +108,11 @@ export function useListening(settings: Settings) {
   const lineRef = useRef(0); // which line `current` is, so back10 knows where it is
   const prepJob = useRef(0); // monotonic guard so a superseded prepare can't steal the stage
   const rateRef = useRef(1);
+  // PLAN-036: the pace multiplier the active conditions ask for, folded into the
+  // single rate door. `rateRef` is the learner's own rate; the effective rate a
+  // clip plays at is `rateRef * paceRef`. One door — `playFrom`, `resume` and
+  // `changeRate` all write through it, so a pace grade is never clobbered.
+  const paceRef = useRef(1);
   const replayingRef = useRef(false); // a replay's ended must not advance the chapter
   const [preparing, setPreparing] = useState(false);
   const [prepText, setPrepText] = useState(""); // "Chapter 2 — line 4 of 11"
@@ -103,7 +123,7 @@ export function useListening(settings: Settings) {
 
   const pack = getPack(settings.packId);
   const speech = useMemo(
-    () => getSpeech(settings),
+    () => getSpeech(settings, () => {}, pack?.speech.locale),
     // Same speech-settings surface useTalk watches — rebuild the adapter when any of it changes.
     [
       settings.offline,
@@ -119,6 +139,7 @@ export function useListening(settings: Settings) {
       settings.bundledSttModel,
       settings.ttsTier,
       settings.sttTier,
+      pack?.speech.locale,
     ],
   );
 
@@ -130,6 +151,39 @@ export function useListening(settings: Settings) {
   useEffect(() => {
     rateRef.current = rate;
   }, [rate]);
+
+  // PLAN-036: the grades this tier can honestly produce, and the active set the
+  // learner's persisted grades ask for. `supported` reads the tier's declared
+  // `can`, so an unsupported grade is not on screen at all.
+  const maxGrades = useMemo(() => supported(speech), [speech]);
+  const active = useMemo(() => activeFrom(settings.listeningGrades), [settings.listeningGrades]);
+  // A walk-back re-prepares the chapter with the *new* grades before the settings
+  // re-render lands, so `prepareFor` reads the live set through this ref rather
+  // than the closure's `active`.
+  const activeRef = useRef<ActiveSet>(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+  // The current grades, tracked through a ref so a walk-back or harden is
+  // idempotent even before the settings re-render lands — the closure's
+  // `settings.listeningGrades` is stale until then.
+  const gradesRef = useRef<Partial<Record<Variable, number>>>(settings.listeningGrades);
+  useEffect(() => {
+    gradesRef.current = settings.listeningGrades;
+  }, [settings.listeningGrades]);
+  // The variable that was just walked back (PLAN-036). A successful replay of the
+  // same chapter must not immediately re-harden the very condition that was
+  // eased — `harden` skips it. Cleared when the learner moves to a new chapter.
+  const justWalkedBack = useRef<Variable | null>(null);
+  // A miss has already eased the grade, so the replay it earned must not ease a
+  // second one (PLAN-036). Cleared by the replay that consumes it, and by
+  // moving on — a chapter the learner simply carried through keeps its grade.
+  const pendingReplay = useRef(false);
+  // The pace multiplier follows the active set, so the transport's rate door
+  // reads the live value even before a settings re-render lands.
+  useEffect(() => {
+    paceRef.current = paceMultiplier(active);
+  }, [active]);
 
   /** Release every clip of the current chapter and reset the transport. */
   const releaseChapter = useCallback(() => {
@@ -163,10 +217,16 @@ export function useListening(settings: Settings) {
       if (was && was !== clips[n].el) was.pause();
       const el = clips[n].el;
       el.currentTime = offset;
-      el.playbackRate = rateRef.current;
+      // The single rate door: the learner's own rate times the pace condition's
+      // multiplier. Every path that plays a clip goes through here (or `resume`,
+      // which reads the same refs), so a pace grade is never clobbered.
+      el.playbackRate = rateRef.current * paceRef.current;
       currentRef.current = el;
       lineRef.current = n;
       setLineIdx(n);
+      // A WebAudio context born outside a user gesture starts suspended — resume
+      // it on play or the routed element is silent (PLAN-036).
+      resumeAudio();
       void el.play().catch(() => {});
       setPlaying(true);
     },
@@ -198,9 +258,13 @@ export function useListening(settings: Settings) {
             locale: pack?.speech.locale,
             voiceHint: pack?.speech.voiceHint,
           });
-          c.el.playbackRate = rateRef.current;
-          made.push(c);
-          durations.push(await clipDuration(c));
+          // PLAN-036: route the clip through the WebAudio graph for the active
+          // conditions. The element is the same one — `ended` / `error` / cancel
+          // resolve exactly as they do now; only its output is filtered. Pace is
+          // not applied here — it flows through the transport's rate door.
+          const wrapped = applyTo(c, activeRef.current);
+          made.push(wrapped);
+          durations.push(await clipDuration(wrapped));
         }
         if (job !== prepJob.current) return void bail();
         clipsRef.current = made;
@@ -243,7 +307,7 @@ export function useListening(settings: Settings) {
         }
       }
     },
-    [speech, pack, releaseChapter, markHeard],
+    [speech, pack, releaseChapter, markHeard, active],
   );
   const prepareRef = useRef(prepareFor);
   prepareRef.current = prepareFor;
@@ -383,9 +447,10 @@ export function useListening(settings: Settings) {
     if (!speech.seekable || !clipsRef.current.length) return;
     const cur = currentRef.current ?? clipsRef.current[0].el;
     if (cur.ended) return playFrom(0, 0);
-    cur.playbackRate = rateRef.current;
+    cur.playbackRate = rateRef.current * paceRef.current;
     lineRef.current = clipsRef.current.findIndex((c) => c.el === cur);
     currentRef.current = cur;
+    resumeAudio();
     void cur.play().catch(() => {});
     setPlaying(true);
   }, [speech, playFrom]);
@@ -421,7 +486,9 @@ export function useListening(settings: Settings) {
   const changeRate = useCallback((r: number) => {
     setRate(r);
     rateRef.current = r;
-    clipsRef.current.forEach((c) => (c.el.playbackRate = r));
+    // The single rate door: the learner's own rate times the pace condition's
+    // multiplier, so a pace grade survives a rate change.
+    clipsRef.current.forEach((c) => (c.el.playbackRate = r * paceRef.current));
   }, []);
 
   const setAnswer = useCallback(
@@ -440,6 +507,61 @@ export function useListening(settings: Settings) {
     [chapterIdx],
   );
 
+  /**
+   * The grade half of the walk-back: ease the hardest active variable by one and
+   * re-prepare this chapter's audio at the new setting. Returns whether anything
+   * eased — nothing is active at grade 0, and a session with no active condition
+   * is today's Listen, byte for byte, including what a miss does.
+   *
+   * The reset half is deliberately *not* here. A miss has to stay on screen long
+   * enough for the learner to read it: PLAN-026's miss panel renders on
+   * `results[step] === false`, and clearing the results in the same tick that
+   * recorded them would delete the answer, the reason, and the replay-that-part
+   * button before they were ever drawn — and drop the miss out of `graded`, so
+   * the comprehension number could only ever read 100%.
+   */
+  const easeAfterMiss = useCallback((): boolean => {
+    if (!piece) return false;
+    const result = walkBack(gradesRef.current);
+    if (!result.walked) return false;
+    walkBacks.current.push(result.walked);
+    gradesRef.current = result.grades;
+    justWalkedBack.current = result.walked.variable;
+    onSettings?.({ listeningGrades: result.grades });
+    // Re-prepare with the new grades before the settings re-render lands.
+    activeRef.current = activeFrom(result.grades);
+    paceRef.current = paceMultiplier(activeRef.current);
+    // No re-synthesis here: the easier audio is only needed when the learner
+    // actually replays, and `walkBackAndReplay` prepares it then. Re-preparing
+    // at miss time would re-synthesise a whole chapter nobody asked to hear.
+    return true;
+  }, [piece, onSettings]);
+
+  /**
+   * A wrong answer walks the hardest active variable back one grade and replays
+   * the same chapter — never skipping it, never abandoning the piece, down to
+   * grade 0 if that is what it takes. The replay resets the chapter's `answers`
+   * and `heard`, so the questions are asked again against the new audio.
+   *
+   * The miss itself has already eased the grade (`check`), so a replay that
+   * follows one does not ease it a second time — one miss is one grade.
+   */
+  const walkBackAndReplay = useCallback(() => {
+    if (!piece) return;
+    if (pendingReplay.current) pendingReplay.current = false;
+    else easeAfterMiss();
+    // Reset this chapter's answers and heard — a replay is a second attempt, not
+    // a relabelling of the failure.
+    setProgress((p) => {
+      const next = [...p];
+      const cur = next[chapterIdx];
+      if (!cur) return p;
+      next[chapterIdx] = { ...cur, answers: Array(cur.answers.length).fill(""), results: Array(cur.results.length).fill(undefined), step: 0, heard: false };
+      return next;
+    });
+    void prepareRef.current(chapterIdx);
+  }, [piece, easeAfterMiss, chapterIdx]);
+
   /** Check the question in front of the learner; a missed cloze word falls into the SRS. */
   const check = useCallback(async () => {
     if (!chapter) return;
@@ -454,12 +576,17 @@ export function useListening(settings: Settings) {
       next[chapterIdx] = { ...next[chapterIdx], results };
       return next;
     });
+    // PLAN-036: a wrong answer eases the hardest active variable by one grade —
+    // the walk-back is the consequence of the miss, not of a button. The replay
+    // itself waits for the learner: the miss panel has to be readable first, and
+    // the miss has to stay in `graded` until they choose to try again.
+    if (!ok && easeAfterMiss()) pendingReplay.current = true;
     // A missed cloze used to seed a card here, with its meaning deliberately left
     // blank. Both halves were wrong: the answer is usually a detail of the piece (a
     // time, a name, a number) rather than a word, and a card with nothing on its
     // back cannot be reviewed. A missed question is a comprehension signal, and the
     // accuracy this feeds is where it belongs.
-  }, [chapter, here, chapterIdx]);
+  }, [chapter, here, chapterIdx, easeAfterMiss]);
 
   /** Move to the next question in this chapter (the last one hands off to the chapter, not here). */
   const nextQuestion = useCallback(() => {
@@ -502,13 +629,14 @@ export function useListening(settings: Settings) {
       if (was && was !== clipsRef.current[lineIdx].el) was.pause();
       const el = clipsRef.current[lineIdx].el;
       el.currentTime = 0;
-      el.playbackRate = rateRef.current;
+      el.playbackRate = rateRef.current * paceRef.current;
       currentRef.current = el;
       lineRef.current = lineIdx;
       setLineIdx(lineIdx);
       setPlaying(true);
       // The shared `ended` listener sees this flag and stops instead of advancing.
       replayingRef.current = true;
+      resumeAudio();
       void el.play().catch(() => {});
     },
     [speech],
@@ -549,12 +677,29 @@ export function useListening(settings: Settings) {
   const next = useCallback(() => {
     stop();
     if (!piece) return;
+    // PLAN-036: a chapter answered correctly at the current setting hardens one
+    // variable one grade, at most one per chapter, never announced. The grade is
+    // persisted so it is still there in the next session. A variable that was
+    // just walked back is skipped — a successful replay must not immediately
+    // re-harden the very condition that was eased.
+    const hereResults = progress[chapterIdx]?.results ?? [];
+    const allChecked = hereResults.length > 0 && hereResults.every((r) => r === true);
+    if (allChecked) {
+      const result = harden(gradesRef.current, maxGrades, justWalkedBack.current);
+      if (result.hardened) {
+        gradesRef.current = result.grades;
+        onSettings?.({ listeningGrades: result.grades });
+      }
+    }
+    // Moving on clears the walk-back guard — the next chapter is a fresh setting.
+    justWalkedBack.current = null;
+    pendingReplay.current = false;
     if (chapterIdx >= piece.chapters.length - 1) return void finish();
     const nextIdx = chapterIdx + 1;
     setChapterIdx(nextIdx);
     saveProgress(nextIdx);
     void prepareRef.current(nextIdx);
-  }, [piece, chapterIdx, finish, stop, saveProgress]);
+  }, [piece, chapterIdx, finish, stop, saveProgress, progress, maxGrades, onSettings]);
 
   const score = {
     correct: progress.flatMap((p) => p.results).filter((r) => r === true).length,
@@ -611,6 +756,9 @@ export function useListening(settings: Settings) {
     generate,
     resume: resumeSession,
     saveProgress,
+    /** Prepare a chapter's clips — exposed so a test can drive it after the
+     *  pieceRef effect has landed (PLAN-036). */
+    prepare: prepareRef.current,
     play,
     replay: play,
     stop,
@@ -626,11 +774,24 @@ export function useListening(settings: Settings) {
     reveal,
     replayRange,
     next,
+    // PLAN-036: the grades this tier can honestly produce, the active set the
+    // learner's persisted grades ask for, and the walk-backs this session
+    // recorded (written as signals on advance, never as comprehension).
+    maxGrades,
+    active,
+    walkBacks: walkBacks.current,
+    walkBackAndReplay,
+    markHeard,
     reset: () => {
       stop();
       releaseChapter();
       setPiece(null);
       setFinished(false);
+      // A fresh session is a fresh record — the walk-backs of the old one are
+      // gone with it (PLAN-036).
+      walkBacks.current = [];
+      justWalkedBack.current = null;
+      pendingReplay.current = false;
     },
   };
 }

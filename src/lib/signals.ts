@@ -258,3 +258,26 @@ export function revealSignal(activityId: ActivityId, what: "line" | "all"): Sign
     },
   };
 }
+
+/**
+ * A listening condition walked back one grade on a miss (PLAN-036). §8 wants the
+ * record of what defeated the learner, but it must not move the comprehension
+ * number — so it is its own kind, never a `comprehension` signal. `signalMiss`
+ * returns false for it (it carries no `correct`), so it can never become a
+ * weakness and `coachMetrics`'s comprehension is untouched.
+ */
+export function listenWalkBackSignals(
+  activityId: ActivityId,
+  walks: { variable: string; from: number }[],
+): SignalDraft[] {
+  return walks.map((w) => ({
+    activityId,
+    kind: "listenWalkBack" as const,
+    payload: {
+      label: `listening ${w.variable}`,
+      variable: w.variable,
+      from: w.from,
+      definition: `the ${w.variable} condition was walked back from grade ${w.from}`,
+    },
+  }));
+}

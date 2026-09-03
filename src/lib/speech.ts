@@ -47,6 +47,23 @@ export interface Tts {
   /** Whether this tier can hand back a seekable clip. `false` → play/pause only. */
   seekable: boolean;
   /**
+   * What this tier can actually do to its output (PLAN-036). Absent capabilities
+   * are never offered — a grade the speech engine cannot honestly produce is not
+   * shown, and never faked. Declared by each tier rather than inferred, because
+   * `webSpeech` has no `clip()` at all and there is nothing to filter on a tier
+   * that never hands back a sample.
+   */
+  can: {
+    /** Whether the tier honours a rate/pace change. All four tiers do today. */
+    rate: boolean;
+    /** How many distinct voices this tier can produce for one locale. One voice
+     *  means `speakers` stops at grade 0. */
+    voices: number;
+    /** Whether the tier hands back audio we hold — the only kind we can filter.
+     *  True exactly where `clip()` exists. */
+    filterable: boolean;
+  };
+  /**
    * Speak `text`, resolving with the milliseconds it actually held the floor
    * (PLAN-028). `0` when cancelled before starting, `0` on a tier that could
    * not speak, and the measured duration otherwise — so the leaner's thinking
@@ -120,8 +137,24 @@ function pickVoice(locale?: string, hint?: string): SpeechSynthesisVoice | undef
   return pool[0] ?? voices[0];
 }
 
+/**
+ * How many distinct voices this tier can produce for one locale (PLAN-036). The
+ * OS voice list loads asynchronously — `getVoices()` is empty until the first
+ * `voiceschanged` fires — so this kicks a load and counts against the locale's
+ * language, not the whole machine. A locale with one voice means `speakers`
+ * stops at grade 0.
+ */
+function voicesForLocale(locale?: string): number {
+  if (!synth) return 0;
+  synth.getVoices(); // kick the async load
+  const voices = synth.getVoices();
+  if (!locale) return voices.length;
+  const want = baseLang(locale);
+  return voices.filter((v) => baseLang(v.lang) === want).length;
+}
+
 /** The OS voices + whatever recogniser the webview has (in practice: none). */
-export function webSpeech(): SpeechAdapter {
+export function webSpeech(locale?: string): SpeechAdapter {
   let recognition: any = null;
   // Settles the in-flight utterance's promise. This tier speaks outside the
   // webview and a cancelled utterance fires nothing back, so `cancel` has to
@@ -133,6 +166,17 @@ export function webSpeech(): SpeechAdapter {
     // is no clip and nothing seekable — play/pause only, and the surface hides
     // what this tier cannot do rather than faking it.
     seekable: false,
+    // PLAN-036: the OS voice honours a rate. `voices` is how many distinct
+    // voices this tier can produce *for the locale* — counted against the pack's
+    // locale, not the whole machine, and read after a `voiceschanged` load so it
+    // is not empty on first call. But it hands back no bytes — `clip()` is
+    // absent — so there is nothing to band-pass or mix noise under.
+    // `filterable: false` is that fact, declared, and `supported` reads it.
+    can: {
+      rate: true,
+      voices: voicesForLocale(locale),
+      filterable: false,
+    },
     canListen: !!Recognition,
     // No webview ships a recogniser that can stream partials — this tier is
     // record-then-transcribe at best, and usually nothing at all.
@@ -490,6 +534,12 @@ export function byteTier(synthesize: (text: string, opts?: SpeakOptions) => Prom
   return {
     canSpeak: true,
     seekable: true,
+    // PLAN-036: a byte tier hands back a clip we hold, so it is filterable — the
+    // only kind of tier noise and channel can be applied to. It honours a rate
+    // through `playbackRate`, and it is one voice per adapter (a bundled model
+    // with many speaker ids is still one adapter at a time), so `speakers` stops
+    // at grade 0.
+    can: { rate: true, voices: 1, filterable: true },
     async speak(text, opts) {
       if (!text.trim()) return 0;
       const c = await synthesize(text, opts);
@@ -1011,8 +1061,8 @@ export function deepgramHelp(s: SpeechSettings, whisperReady: boolean): string {
  * conversation — and after one failure the half stays on the OS for the rest of
  * the session rather than stalling on every turn to retry a model that is gone.
  */
-export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void = () => {}): SpeechAdapter {
-  const web = webSpeech();
+export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void = () => {}, locale?: string): SpeechAdapter {
+  const web = webSpeech(locale);
 
   // resolveTier already asked whether the tier can serve, so these only ever build
   // the one it named; "native" (and a pin that could not serve) lands on the web.
@@ -1061,6 +1111,10 @@ export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void =
     // player reads it to decide what transport it can offer (PLAN-025). A tier
     // that cannot (`native`/`webSpeech`) has no `clip`, so the property stays false.
     seekable: tts.seekable,
+    // PLAN-036: what the serving tier can honestly do to its output. The
+    // listening surface reads this to decide which grades exist at all — a grade
+    // the engine cannot produce is not shown, and never faked.
+    can: tts.can,
     clip: tts.clip ? (text: string, opts?: SpeakOptions) => tts.clip!(text, opts) : undefined,
 
     async speak(text, opts) {
