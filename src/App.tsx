@@ -702,6 +702,10 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
             onCaptureKeys={setCaptured}
             onChange={update}
             onSettings={() => go("settings")}
+            onBrought={(text) => {
+              go("talk");
+              void talk.startBrought(text);
+            }}
           />
         )}
         {space === "listening" && (

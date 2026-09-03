@@ -57,6 +57,7 @@ function counts(s: Summary): string {
     [s.listening, "listening session"],
     [s.days, "day"],
     [s.memories, "note"],
+    [s.brought, "brought text"],
   ];
   const said = parts.filter(([n]) => n > 0).map(([n, w]) => `${n} ${w}${n === 1 ? "" : "s"}`);
   return said.length ? said.join(" · ") : "nothing yet";

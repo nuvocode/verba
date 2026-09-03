@@ -8,6 +8,7 @@ import { talkSignals } from "../lib/signals";
 import { getPack } from "../lib/packs";
 import type { RehearsalBrief } from "../lib/rehearsal";
 import { sessionGroups, sessionMessages, addVocab, type SessionDay, type SessionRow } from "../lib/db";
+import { PROVIDERS } from "../lib/models";
 import { when } from "../lib/fmt";
 import type { CorrectionCategory } from "../lib/prompts";
 import {
@@ -161,6 +162,32 @@ export default function Talk({
   // `day.next`, so the button is right on the reflection's first paint — before the effect
   // above has landed in state — and after it.
   const upNext = (day.plan?.activities ?? []).find((b) => b.kind !== closes && !day.isDone(b.kind))?.kind ?? null;
+
+  // ---- a brought text awaiting approval to send to a cloud provider ----
+  // PLAN-035: with a cloud provider selected, the learner's private text does
+  // not leave the machine until they have been told who will read it. The
+  // confirmation names the provider — an approval for Ollama is not an approval
+  // for Anthropic.
+  if (talk.pendingBrought) {
+    const provider = PROVIDERS.find((p) => p.id === settings.provider);
+    return (
+      <div className="today fade">
+        <div className="eyebrow">Your own text · {settings.profile.targetLanguage}</div>
+        <Nothing
+          title="Who reads this?"
+          why={`"${talk.pendingBrought.title}" is yours, and it stays on this machine. To talk about it, the coach sends it to ${provider?.name ?? settings.provider}, which runs online. Nothing is sent until you say so.`}
+        />
+        <div style={{ display: "flex", gap: 12, marginTop: 30 }}>
+          <button className="btn sm" onClick={() => void talk.confirmBrought(talk.pendingBrought!)}>
+            Send it to {provider?.name ?? settings.provider} →
+          </button>
+          <button className="btn sm ghost" onClick={talk.cancelBrought}>
+            Keep it on this machine
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ---- replaying an old conversation ----
   if (!talk.started && open)

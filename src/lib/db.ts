@@ -143,6 +143,18 @@ async function init(): Promise<Database> {
       observed_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS signals_lang_time ON signals (lang, observed_at);
+    -- PLAN-035: the learner's own text, brought in to be talked about. Scoped to
+    -- a language like every other table. sent_to records the provider the
+    -- learner approved for this text ('' = none yet), so an approval for one
+    -- provider is not an approval for another.
+    CREATE TABLE IF NOT EXISTS brought_texts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lang TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      sent_to TEXT NOT NULL DEFAULT ''
+    );
   `);
   // Added after the first release: the Coach breaks the composite back out into
   // its components, and that needs avg word length. Existing DBs get it here.
@@ -529,6 +541,54 @@ export async function latestReadingAtLevel(lang: string, cefr: string): Promise<
     [lang, cefr],
   );
   return rows[0] ? JSON.parse(rows[0].text) : null;
+}
+
+// ---- brought texts (PLAN-035) ----
+
+/** One row for the brought-text list — the body is fetched lazily by `getBrought`. */
+export interface BroughtRow {
+  id: number;
+  title: string;
+  created_at: number;
+  sent_to: string;
+}
+
+/** Save a brought text. Returns the row id the store assigned. */
+export async function saveBrought(lang: string, title: string, body: string): Promise<number> {
+  const r = await write(
+    "INSERT INTO brought_texts (lang, title, body, created_at, sent_to) VALUES ($1, $2, $3, $4, '')",
+    [lang, title, body, Date.now()],
+  );
+  return r.lastInsertId as number;
+}
+
+/** The learner's brought texts, newest first — the list Read shows. */
+export async function listBrought(lang: string): Promise<BroughtRow[]> {
+  const db = await getDb();
+  return db.select<BroughtRow[]>(
+    "SELECT id, title, created_at, sent_to FROM brought_texts WHERE lang = $1 ORDER BY created_at DESC",
+    [lang],
+  );
+}
+
+/** The full body for one brought text, or null when it is gone. */
+export async function getBrought(id: number): Promise<{ title: string; body: string; sent_to: string; created_at: number } | null> {
+  const db = await getDb();
+  const rows = await db.select<{ title: string; body: string; sent_to: string; created_at: number }[]>(
+    "SELECT title, body, sent_to, created_at FROM brought_texts WHERE id = $1",
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+/** Record the provider the learner approved for this text. */
+export async function approveBrought(id: number, provider: string): Promise<void> {
+  await write("UPDATE brought_texts SET sent_to = $1 WHERE id = $2", [provider, id]);
+}
+
+/** Delete one brought text — one row, one delete, no soft-delete. */
+export async function deleteBrought(id: number): Promise<void> {
+  await write("DELETE FROM brought_texts WHERE id = $1", [id]);
 }
 
 // ---- listening sessions ----

@@ -292,6 +292,7 @@ function allPromptNames(root: string): string[] {
   const names: string[] = [];
   let sawPrompts = false;
   let sawRehearsal = false;
+  let sawBrought = false;
   const walk = (dir: string) => {
     for (const e of readdirSync(dir)) {
       const p = join(dir, e);
@@ -306,6 +307,7 @@ function allPromptNames(root: string): string[] {
         const rel = relative(root, p);
         if (rel === "prompts.ts") sawPrompts = true;
         if (rel === "rehearsal.ts") sawRehearsal = true;
+        if (rel === "brought.ts") sawBrought = true;
         const text = readFileSync(p, "utf8");
         for (const m of text.matchAll(/export function (\w+Prompt)\(/g)) names.push(`${rel}:${m[1]}`);
       }
@@ -319,8 +321,10 @@ function allPromptNames(root: string): string[] {
   // repo. PLAN-034: `rehearsalSystem` is spoken but unstyled — it is hand-added
   // here so the completeness claim cannot quietly miss the one prompt this plan
   // adds; `debriefPrompt` ends in `Prompt` and is found by the scan itself.
+  // PLAN-035: `discussionSystem` is spoken and styled — hand-added the same way.
   if (sawPrompts) names.push("prompts.ts:buildSystem");
   if (sawRehearsal) names.push("rehearsal.ts:rehearsalSystem");
+  if (sawBrought) names.push("brought.ts:discussionSystem");
   return names;
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { Settings } from "./settings";
+import { isLocalProvider, type Settings } from "./settings";
 import { levelOf, signalLabel } from "./model";
 import { getProvider, type ChatMessage } from "./providers";
 import {
@@ -35,6 +35,11 @@ import {
   type Debrief,
   type RoleTurn,
 } from "./rehearsal";
+import {
+  broughtScenario,
+  discussionSystem,
+  type BroughtText,
+} from "./brought";
 import { BUNDLED_SCENARIOS, listScenarios, type Persona, type Scenario } from "./scenarios";
 import { getPack } from "./packs";
 import { computeMetrics, estimateLevelV2 } from "./metrics";
@@ -103,6 +108,7 @@ import {
   recentSignals,
   stampMemoryAsked,
   vocabCounts,
+  approveBrought,
 } from "./db";
 
 export interface TalkMsg {
@@ -329,6 +335,16 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   // for the very first rehearsal is still null. A ref is read at fire time, so
   // the gate always sees the current mode. Mirrored on every `setRehearsal`.
   const rehearsalRef = useRef<{ brief: RehearsalBrief } | null>(null);
+  // Brought content (PLAN-035): the learner's own text, being talked about. A
+  // state, not a ref — `end()` reads it to name the text on the vocab save
+  // path. Null is an ordinary session. Unlike rehearsal there is no ref: the
+  // wait machine's offer is not gated in a brought discussion — the coach is
+  // the coach, and the offer still fires.
+  const [brought, setBrought] = useState<BroughtText | null>(null);
+  // A brought text awaiting the learner's approval to send to a cloud provider
+  // (PLAN-035). Null when nothing is waiting. The confirmation names the
+  // provider; confirming records the approval and starts the discussion.
+  const [pendingBrought, setPendingBrought] = useState<BroughtText | null>(null);
   // Phase two: the role-play has ended and the debrief has been (or is being)
   // fetched. `inRole` is the one flag the mode's switches read — role-play and
   // feedback are separated across it.
@@ -640,12 +656,15 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
   /** Open a scenario and let the coach speak first. */
   const start = useCallback(
-    async (sc: Scenario, mode: "normal" | "rehearsal" = "normal", brief?: RehearsalBrief, goal?: string) => {
+    async (sc: Scenario, mode: "normal" | "rehearsal" | "brought" = "normal", brief?: RehearsalBrief, goal?: string, broughtText?: BroughtText) => {
       // PLAN-034: the mode is decided from the *parameters*, not from the
       // `rehearsal` state — `setRehearsal` only lands on the next render, so
       // reading it here would make the first call of a rehearsal behave like an
       // ordinary session. `inRole` is the one flag every switch below reads.
+      // PLAN-035: `inBrought` is the same lesson applied a second time — the
+      // mode comes from the parameter, never from the `brought` state.
       const inRole = mode === "rehearsal" && !!brief;
+      const inBrought = mode === "brought" && !!broughtText;
       setScenario(sc);
       setPersona(sc.persona);
       setGoalState((sc.goals ?? []).map(() => "pending" as const));
@@ -663,6 +682,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       rehearsalRef.current = inRole && brief ? { brief } : null;
       setOutOfRole(false);
       setDebrief(null);
+      // Brought content (PLAN-035): the text rides the session, or is cleared
+      // with the rest of it. `end()` reads it to name the text on the vocab
+      // save path.
+      setBrought(inBrought && broughtText ? broughtText : null);
       titleStage.current = 0;
       coachReplyAt.current = null;
       produced.current = [];
@@ -741,14 +764,23 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // observed to have used it.
       // PLAN-034: a supplier does not know the learner moved house last month —
       // `openingDetail` is not called in rehearsal, and no memory is stamped.
-      const opening = !inRole ? openingDetail(memories, Date.now()) : null;
+      // PLAN-035: a brought discussion opens on the learner's own text, not on a
+      // memory detail — `openingDetail` is not called there either, and no memory
+      // is stamped. Stamping a fact as "asked" without ever supplying it to the
+      // prompt would spend the opening for nothing.
+      const opening = !inRole && !inBrought ? openingDetail(memories, Date.now()) : null;
       if (opening) void stampMemoryAsked(opening.id).catch(() => {});
       const system = inRole
         ? rehearsalSystem(settings, brief!, sc, pack)
-        : buildSystem(settings, sc, sc.persona, pack, memories, {
-            axis: axis.current,
-            step: settings.difficultyStep,
-          }, correctionRecords.current, opening) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
+        : inBrought
+          ? discussionSystem(settings, broughtText!, sc, pack, {
+              axis: axis.current,
+              step: settings.difficultyStep,
+            }, correctionRecords.current)
+          : buildSystem(settings, sc, sc.persona, pack, memories, {
+              axis: axis.current,
+              step: settings.difficultyStep,
+            }, correctionRecords.current, opening) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
       history.current = [{ role: "system", content: system }];
       try {
         try {
@@ -814,6 +846,49 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     },
     [start],
   );
+
+  /**
+   * Brought content's own entry (PLAN-035): build the synthetic scenario from
+   * the text and start in brought mode. The scenario is never saved to the
+   * catalogue, and the loop is this loop, not a fork of it.
+   *
+   * The approval gate lives here, at the door, not in `start`: with a cloud
+   * provider selected and no recorded approval, opening the discussion sends
+   * nothing — the learner is asked who will read it first. `settings.offline`,
+   * or a local provider, needs no confirmation: nothing leaves the machine.
+   * The approval is recorded in `sent_to`, so it survives a restart and so
+   * that changing provider asks again.
+   */
+  const startBrought = useCallback(
+    async (text: BroughtText) => {
+      const local = settings.offline || isLocalProvider(settings.provider);
+      if (!local && text.sentTo !== settings.provider) {
+        setPendingBrought(text);
+        return;
+      }
+      await start(broughtScenario(text), "brought", undefined, undefined, text);
+    },
+    [start, settings.offline, settings.provider],
+  );
+
+  /**
+   * The learner confirmed who will read their text (PLAN-035). Records the
+   * approval and starts the discussion. The confirmation names the provider —
+   * an approval for Ollama is not an approval for Anthropic.
+   */
+  const confirmBrought = useCallback(
+    async (text: BroughtText) => {
+      setPendingBrought(null);
+      if (text.id) await approveBrought(text.id, settings.provider).catch(() => {});
+      await start(broughtScenario({ ...text, sentTo: settings.provider }), "brought", undefined, undefined, { ...text, sentTo: settings.provider });
+    },
+    [start, settings.provider],
+  );
+
+  /** The learner declined to send their text to the cloud provider. */
+  const cancelBrought = useCallback(() => {
+    setPendingBrought(null);
+  }, []);
 
   /**
    * The role-play is over (PLAN-034): the learner ended it, the coach steps out
@@ -928,6 +1003,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         rehearsalRef.current = null;
         setOutOfRole(false);
         setDebrief(null);
+        // A resumed conversation is an ordinary conversation (PLAN-035): the
+        // brought text belongs to the session, like every other reset above it.
+        setBrought(null);
         sessionId.current = sessionIdToResume;
         // The provider context is rebuilt from the stored transcript so the next
         // turn continues the conversation rather than starting a new one.
@@ -1519,7 +1597,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       for (const it of parseVocab(vocabRaw)) {
         const added = await addVocab(settings.profile.targetLanguage, it, {
           capturedBy: "coach",
-          surface: "talk",
+          surface: brought ? `brought:${brought.title}` : "talk",
           learnerLevel: levelOf(settings.profile),
         }, "candidate").catch(() => false);
         if (added) words.push({ term: it.term, translation: it.translation });
@@ -1629,7 +1707,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         /* calibration is best-effort — a store miss should not fail the wrap-up */
       }
     }
-  }, [scenario, busy, msgs, settings, pack, onSettings, clearWait, rehearsal, debrief]);
+  }, [scenario, busy, msgs, settings, pack, onSettings, clearWait, rehearsal, debrief, brought]);
 
   /**
    * Strike a word off the wrap-up. The conversation proposes; the learner disposes.
@@ -1801,6 +1879,20 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     outOfRole,
     /** The debrief, once it landed (PLAN-034) — null while loading or before. */
     debrief,
+    /**
+     * Brought content (PLAN-035): the text a session is discussing, or null for
+     * an ordinary conversation. `end()` reads it to name the text on the vocab
+     * save path.
+     */
+    brought,
+    /** A brought text awaiting the learner's approval to send to a cloud provider. */
+    pendingBrought,
+    /** PLAN-035: the brought entry — build the scenario, start the discussion. */
+    startBrought,
+    /** PLAN-035: the learner confirmed who will read their text. */
+    confirmBrought,
+    /** PLAN-035: the learner declined to send their text to the cloud provider. */
+    cancelBrought,
     resume,
     send,
     mic,

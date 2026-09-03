@@ -39,3 +39,4 @@ export async function addVocab() {
 }
 export async function deleteVocabTerm() {}
 export async function keepVocab() {}
+export async function approveBrought() {}

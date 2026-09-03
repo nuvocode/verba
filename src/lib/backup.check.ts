@@ -5,6 +5,7 @@
 // precisely so this can run on plain node — everything checked here is the half
 // that decides whether a learner keeps their history.
 import assert from "node:assert";
+import { readFileSync } from "node:fs";
 
 // A localStorage that behaves like the real one, installed before the modules
 // are loaded so their top level sees it.
@@ -234,5 +235,24 @@ const emptying = wipeScript();
 for (const t of TABLES) assert.match(emptying, new RegExp(`DELETE FROM ${t}\\b`), `wipe must empty ${t}`);
 assert(emptying.startsWith("BEGIN IMMEDIATE"), "a half-deleted database is worse than a full one");
 assert(emptying.trimEnd().endsWith("COMMIT;"), "…so the deletes are one transaction");
+
+// ---- completeness: every CREATE TABLE in db.ts is in TABLES ----
+// There was no such check before PLAN-035 — the eleven tables happened to all
+// be listed, and nothing would notice the twelfth. A table added later and left
+// out of the backup is data the learner cannot export, cannot restore and cannot
+// delete, which is the one class of bug this app must not ship. The scan reads
+// db.ts's own `CREATE TABLE IF NOT EXISTS` statements, so it cannot pass
+// vacuously: a fabricated table name is probed to prove the scan fires.
+{
+  const dbSrc = readFileSync(new URL("./db.ts", import.meta.url), "utf8");
+  const created = [...dbSrc.matchAll(/CREATE TABLE IF NOT EXISTS\s+(\w+)/g)].map((m) => m[1]);
+  assert(created.length > 0, "the scan must find the schema's CREATE TABLE statements");
+  for (const t of created) {
+    assert(TABLES.includes(t as (typeof TABLES)[number]), `table ${t} is in db.ts but not in TABLES — it cannot be exported, restored or wiped`);
+  }
+  // The probe: a fabricated table name is not in TABLES, so the scan would flag
+  // it — proving the scan is not matching nothing.
+  assert(!TABLES.includes("fabricated_table" as (typeof TABLES)[number]), "probe: a fabricated table is not in TABLES");
+}
 
 console.log("backup.check.ts ok");

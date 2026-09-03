@@ -633,6 +633,10 @@ export const SPOKEN_PROMPTS = [
   // PLAN-034: the debrief is the coach, out of role, talking to the learner —
   // the coach's voice applies here, and nowhere in the role.
   "rehearsal.ts:debriefPrompt",
+  // PLAN-035: the brought discussion is the coach reading the learner's own
+  // text with them — the coach is the coach, so the style applies. The opposite
+  // call from `rehearsalSystem`, for the opposite reason.
+  "brought.ts:discussionSystem",
 ] as const;
 
 /**

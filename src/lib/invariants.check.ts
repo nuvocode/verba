@@ -274,7 +274,7 @@ const REPAIR_LEDGER: RepairRow[] = [
   {
     id: 19,
     claim: "Brought content stays local and reaches Memory",
-    pending: "#67 — PLAN-035",
+    assertedIn: [{ file: "src/lib/brought.check.ts", marker: "brought ledger 19" }],
   },
   {
     id: 20,

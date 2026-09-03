@@ -44,6 +44,7 @@ export const TABLES = [
   "review_log",
   "memories",
   "signals",
+  "brought_texts",
 ] as const;
 
 /**
@@ -130,6 +131,7 @@ export interface Summary {
   listening: number;
   days: number;
   memories: number;
+  brought: number;
 }
 
 export function summarize(b: Backup): Summary {
@@ -141,6 +143,7 @@ export function summarize(b: Backup): Summary {
     listening: n("listening_sessions"),
     days: n("daily_sessions"),
     memories: n("memories"),
+    brought: n("brought_texts"),
   };
 }
 
