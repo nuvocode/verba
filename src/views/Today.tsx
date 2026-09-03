@@ -86,12 +86,15 @@ export default function Today({
   day,
   onBegin,
   onOpen,
+  onRehearse,
 }: {
   settings: Settings;
   day: Day;
   onBegin: (kind: ActivityKind) => void;
   /** Where yesterday's trace goes — the record of what happened lives in Coach. */
   onOpen: (space: "coach") => void;
+  /** PLAN-034: the rehearsal is reached from Today's overflow, not from the plan. */
+  onRehearse: () => void;
 }) {
   // surface today: loading — the day's plan is the thing Today generates; this is
   // the "being built" state.
@@ -222,6 +225,16 @@ export default function Today({
           : day.done.length
             ? `keeps the ${day.done.length} you have finished and rebuilds the rest.`
             : "rebuilds today on the next topic in the rotation."}
+      </div>
+
+      {/* PLAN-034: the rehearsal lives in Today's overflow — not on the plan, not
+          a card, not an ActivityKind. Something the learner reaches for when life
+          demands it, exactly when they know which conversation they need. */}
+      <div style={{ marginLeft: 22, marginBottom: 46, fontSize: 13, color: "var(--ink3)" }}>
+        <button className="linky" onClick={onRehearse}>
+          rehearse a conversation
+        </button>
+        {" — the coach plays the other side for a conversation you actually have coming."}
       </div>
 
       <div className="eyebrow" style={{ marginBottom: 10 }}>

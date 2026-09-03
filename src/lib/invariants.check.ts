@@ -269,7 +269,7 @@ const REPAIR_LEDGER: RepairRow[] = [
   {
     id: 18,
     claim: "Rehearsal works; role-play and feedback are separated",
-    pending: "#67 — PLAN-034",
+    assertedIn: [{ file: "src/lib/rehearsal.check.ts", marker: "rehearsal ledger 18" }],
   },
   {
     id: 19,

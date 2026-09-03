@@ -191,6 +191,12 @@ export function recapsFrom(signals: Signal[]): SessionRecap[] {
   }
 
   const recap = (list: Signal[]): SessionRecap | null => {
+    // A rehearsal (PLAN-034) is never a session this plan may read. It writes
+    // turn signals like any conversation, but its difficulty was deliberately
+    // switched off — counting it as a session would let two rehearsals in a row
+    // raise the step on the strength of sessions in which difficulty was absent.
+    // One marker per batch, written at the same stamp as the batch's turns.
+    if (list.some((s) => s.kind === "rehearsal")) return null;
     let axis: Axis | null = null;
     let turns = 0;
     let heavy = 0;
@@ -227,6 +233,13 @@ export function recapsFrom(signals: Signal[]): SessionRecap[] {
 
 /** The signal kinds this plan writes beside the turn signals. */
 export const DIFFICULTY_SIGNAL_KINDS = ["axisUsed", "easeRequest"] as const;
+
+/**
+ * The marker kind PLAN-034 writes once per rehearsal batch. Kept beside this
+ * plan's own kinds so the two "marks on the record, never scored" families read
+ * together; `recapsFrom` is the only reader.
+ */
+export const REHEARSAL_SIGNAL_KIND = "rehearsal" as const;
 
 /**
  * The rise (§5.2): two consecutive sessions with zero breakdowns → `step + 1`.

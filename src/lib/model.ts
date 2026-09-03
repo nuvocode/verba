@@ -92,7 +92,8 @@ export type SignalKind =
   | "pace" // reading/speaking speed
   | "repairMove" // a repair move the learner used (or the coach modelled) (PLAN-027)
   | "axisUsed" // the one difficulty axis a session chose (PLAN-031)
-  | "easeRequest"; // the learner asked not to be pushed that session (PLAN-031)
+  | "easeRequest" // the learner asked not to be pushed that session (PLAN-031)
+  | "rehearsal"; // a rehearsal batch marker — one per rehearsal, never an ActivityKind (PLAN-034)
 
 export type Signal = {
   id: SignalId;

@@ -301,6 +301,11 @@ input { font: inherit; }
 .wchip .x { font-family: Geist, sans-serif; font-size: 14px; line-height: 1; color: var(--ink3); margin-left: 8px; opacity: 0; transition: opacity .15s ease, color .15s ease; }
 .wchip:hover .x { opacity: 1; }
 .wchip .x:hover { color: var(--sev); }
+/* The debrief's phrase chips (PLAN-034): the "+" is always visible, not hidden
+   behind a hover — a chip whose only affordance appears on hover is one nobody
+   taps on a touch surface. A chip already kept shows as kept. */
+.wchip .x.add { opacity: 1; }
+.wchip .x.add:hover { color: var(--accent-ink); }
 
 /* ---------- read ---------- */
 .read { min-height: 100%; display: grid; grid-template-columns: 1fr 620px 280px 1fr; padding: 56px 0 120px; }

@@ -606,10 +606,15 @@ export function styleGuidance(style: CoachStyle): string {
 }
 
 /**
- * The prompts the learner hears the coach through — the ones that must carry
- * `styleGuidance`. Every `export function …Prompt(` in `src/lib`, plus
+ * The prompts the learner hears the coach through — really, the ones that carry
+ * the **coach's style**. Every `export function …Prompt(` in `src/lib`, plus
  * `buildSystem`, appears in exactly one of this list or `STRUCTURED_PROMPTS`;
  * `prompts.check.ts` asserts the completeness.
+ *
+ * `rehearsalSystem` (PLAN-034) is the one prompt that is spoken by the coach's
+ * voice but must **not** carry `styleGuidance`: in role there is no coach — the
+ * register is the brief's — so it lives in the other list, with the reason
+ * written beside its entry.
  *
  * Each entry is a `file:name` key, so two prompts that share a name in different
  * files (e.g. `listening.ts:outlinePrompt` and `reading.ts:outlinePrompt`) are
@@ -625,12 +630,15 @@ export const SPOKEN_PROMPTS = [
   "learn.ts:recapPrompt",
   "reading.ts:notesPrompt",
   "reading.ts:explainWordPrompt",
+  // PLAN-034: the debrief is the coach, out of role, talking to the learner —
+  // the coach's voice applies here, and nowhere in the role.
+  "rehearsal.ts:debriefPrompt",
 ] as const;
 
 /**
- * The prompts that extract structured data — a JSON schema has no voice to be
- * consistent in, and a tone paragraph there is noise the learner never reads.
- * Must **not** carry `styleGuidance`.
+ * The prompts that extract structured data or speak **without the coach's
+ * voice** — a JSON schema has no voice to be consistent in, and a tone paragraph
+ * there is noise the learner never reads. Must **not** carry `styleGuidance`.
  */
 export const STRUCTURED_PROMPTS = [
   "prompts.ts:vocabPrompt",
@@ -645,6 +653,9 @@ export const STRUCTURED_PROMPTS = [
   "reading.ts:draftPrompt",
   "reading.ts:rewritePrompt",
   "reading.ts:comprehensionPrompt",
+  // PLAN-034: in role there is no coach — the register is the brief's formality
+  // and the other party's own voice. Spoken, but deliberately not styled.
+  "rehearsal.ts:rehearsalSystem",
 ] as const;
 
 /** The date as the record carries it, and as Settings shows it: "14 Jul 2026". */

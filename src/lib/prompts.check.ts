@@ -291,6 +291,7 @@ function promptSource(file: string, name: string): string {
 function allPromptNames(root: string): string[] {
   const names: string[] = [];
   let sawPrompts = false;
+  let sawRehearsal = false;
   const walk = (dir: string) => {
     for (const e of readdirSync(dir)) {
       const p = join(dir, e);
@@ -304,17 +305,22 @@ function allPromptNames(root: string): string[] {
         // `promptSource`, and silently collapse it with one at the top level.
         const rel = relative(root, p);
         if (rel === "prompts.ts") sawPrompts = true;
+        if (rel === "rehearsal.ts") sawRehearsal = true;
         const text = readFileSync(p, "utf8");
         for (const m of text.matchAll(/export function (\w+Prompt)\(/g)) names.push(`${rel}:${m[1]}`);
       }
     }
   };
   walk(root);
-  // `buildSystem` is a prompt builder whose name does not end in `Prompt`, so the
-  // scan cannot find it — it is added by hand, and only when the walk actually
-  // covered the file that declares it. A probe scanning a temp directory gets the
-  // prompts it really contains and nothing borrowed from the repo.
+  // Two prompt builders whose names do not end in `Prompt` (or would not be
+  // found by the scan for other reasons) are added by hand, and only when the
+  // walk actually covered the file that declares them. A probe scanning a temp
+  // directory gets the prompts it really contains and nothing borrowed from the
+  // repo. PLAN-034: `rehearsalSystem` is spoken but unstyled — it is hand-added
+  // here so the completeness claim cannot quietly miss the one prompt this plan
+  // adds; `debriefPrompt` ends in `Prompt` and is found by the scan itself.
   if (sawPrompts) names.push("prompts.ts:buildSystem");
+  if (sawRehearsal) names.push("rehearsal.ts:rehearsalSystem");
   return names;
 }
 

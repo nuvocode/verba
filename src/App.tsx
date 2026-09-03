@@ -66,6 +66,10 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
   const [query, setQuery] = useState("");
   const [pIdx, setPIdx] = useState(0);
   const [reviewSignal, setReviewSignal] = useState(0);
+  // PLAN-034: the rehearsal brief form, opened from ⌘K ("Rehearse a conversation
+  // you have to have") and from Today's overflow. It is a form over the Talk
+  // surface, not a route — Talk renders it, App only decides whether it is open.
+  const [rehearsalDraft, setRehearsalDraft] = useState(false);
   // A view (Memory's review) can claim the keyboard; global shortcuts stand down.
   const [captured, setCaptured] = useState(false);
   // Replaying onboarding throws away the current setup — never on one stray click.
@@ -176,7 +180,7 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
         case "talk":
         case "roleplay":
           go("talk");
-          if (!talk.started || talk.reflection) void talk.start(talk.scenarioById(activity?.scenarioId), activity?.goal);
+          if (!talk.started || talk.reflection) void talk.start(talk.scenarioById(activity?.scenarioId), "normal", undefined, activity?.goal);
           break;
         case "read":
           go("read");
@@ -251,6 +255,18 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       { label: "Memory — everything you've met", kbd: "5", run: () => enter("memory") },
       { label: "Coach — your weekly report", kbd: "6", run: () => go("coach") },
       { label: "Settings — providers, packs, offline", kbd: ",", run: () => go("settings") },
+      // PLAN-034: the rehearsal. Not a planned activity and not an ActivityKind —
+      // something the learner reaches for when life demands it, entered when it
+      // is asked for, never scheduled.
+      {
+        label: "Rehearse a conversation you have to have",
+        desc: "The coach plays the other side, then steps out and talks it through",
+        run: () => {
+          go("talk");
+          if (talk.rehearsal && !talk.outOfRole) return; // a role-play is already running
+          setRehearsalDraft(true);
+        },
+      },
       // Every settings row, from the one index — the same list the Settings
       // search reads, so the palette and the search cannot describe a setting
       // differently (#29). They join only once a query is typed: the palette is
@@ -439,6 +455,12 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       if (space === "talk" && e.key.toLowerCase() === "s") {
         e.preventDefault();
         return update({ subtitles: !settings.subtitles });
+      }
+      // The rehearsal's "end the role-play" (PLAN-034): the learner decides when
+      // it is over, and the key says the same thing the button does.
+      if (space === "talk" && e.key.toLowerCase() === "e" && talk.rehearsal && !talk.outOfRole) {
+        e.preventDefault();
+        return void talk.endRole();
       }
       if (space === "read" && read.text) {
         // P is the door between the two views, and it is open from both sides.
@@ -659,8 +681,18 @@ export default function App({ appVersion, boot }: { appVersion: string; boot: Sy
       </div>
 
       <div className="body">
-        {space === "today" && <Today settings={settings} day={day} onBegin={begin} onOpen={go} />}
-        {space === "talk" && <Talk settings={settings} talk={talk} day={day} onAdvance={advance} onChange={update} />}
+        {space === "today" && <Today settings={settings} day={day} onBegin={begin} onOpen={go} onRehearse={() => { go("talk"); setRehearsalDraft(true); }} />}
+        {space === "talk" && (
+          <Talk
+            settings={settings}
+            talk={talk}
+            day={day}
+            onAdvance={advance}
+            onChange={update}
+            rehearsalDraft={rehearsalDraft}
+            onCloseRehearsalDraft={() => setRehearsalDraft(false)}
+          />
+        )}
         {space === "read" && (
           <Read
             settings={settings}

@@ -34,6 +34,9 @@ const CATEGORY: Record<SignalKind, Weakness["category"]> = {
   // kinds it does not special-case). Entries keep SignalKind exhaustive.
   axisUsed: "fluency",
   easeRequest: "fluency",
+  // PLAN-034: a rehearsal batch marker is a fact about the record, not an
+  // observation of failure — never a miss. Entry keeps SignalKind exhaustive.
+  rehearsal: "fluency",
 };
 
 /** Same input, same id: the id has to survive being recomputed, since nothing stores it. */

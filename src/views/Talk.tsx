@@ -6,7 +6,8 @@ import type { Day } from "../lib/useDay";
 import type { Talk as TalkState } from "../lib/useTalk";
 import { talkSignals } from "../lib/signals";
 import { getPack } from "../lib/packs";
-import { sessionGroups, sessionMessages, type SessionDay, type SessionRow } from "../lib/db";
+import type { RehearsalBrief } from "../lib/rehearsal";
+import { sessionGroups, sessionMessages, addVocab, type SessionDay, type SessionRow } from "../lib/db";
 import { when } from "../lib/fmt";
 import type { CorrectionCategory } from "../lib/prompts";
 import {
@@ -50,6 +51,8 @@ export default function Talk({
   day,
   onAdvance,
   onChange,
+  rehearsalDraft = false,
+  onCloseRehearsalDraft,
 }: {
   settings: Settings;
   talk: TalkState;
@@ -58,6 +61,10 @@ export default function Talk({
   onAdvance: (kind: ActivityKind) => void;
   /** The one door settings are written through — the subtitles toggle uses it. */
   onChange: (patch: Partial<Settings>) => void;
+  /** PLAN-034: the rehearsal brief form is open (⌘K / Today's overflow asked for it). */
+  rehearsalDraft?: boolean;
+  /** Close the brief form without starting. */
+  onCloseRehearsalDraft?: () => void;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -65,6 +72,10 @@ export default function Talk({
   const [open, setOpen] = useState<SessionRow | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [transcript, setTranscript] = useState<{ role: string; content: string }[]>([]);
+  // The rehearsal brief (PLAN-034): three short questions, one screen. Free text,
+  // no list of scenarios to pick from — the conversation the learner needs is not
+  // in our catalogue. Held here, and handed to `startRehearsal` in one go.
+  const [brief, setBrief] = useState<RehearsalBrief>({ who: "", about: "", formality: "neutral" });
   // Which coach lines the learner has revealed while subtitles are off (PLAN-021).
   // A revealed line shows its text; the rest show the "Coach spoke · Show this
   // line" bar. Reset when a new conversation starts.
@@ -190,6 +201,59 @@ export default function Talk({
     const registry = scenarioRegistry();
     const byId = new Map(registry.map((r) => [r.scenario.id, r.origin]));
     const { main, easier } = bandSplit(talk.scenarios, levelOf(settings.profile));
+
+    // The rehearsal brief (PLAN-034): one screen, three questions. `who` is the
+    // only one that is required — "a customer at work" is enough to build a
+    // person; the rest refine.
+    if (rehearsalDraft) {
+      const canStart = brief.who.trim().length > 0;
+      return (
+        <div className="today fade">
+          <div className="eyebrow">Rehearsal · {settings.profile.targetLanguage}</div>
+          <Nothing
+            title="What do you have to walk into?"
+            why="The coach plays the other side — in role, no corrections — and then steps out to talk it through. Name the person and the moment."
+          />
+          <div style={{ maxWidth: 640 }}>
+            <div className="row2">
+              <div className="k">Who are you talking to?</div>
+              <input
+                autoFocus
+                value={brief.who}
+                onChange={(e) => setBrief((b) => ({ ...b, who: e.target.value }))}
+                placeholder="my landlord"
+              />
+            </div>
+            <div className="row2">
+              <div className="k">About what?</div>
+              <input
+                value={brief.about}
+                onChange={(e) => setBrief((b) => ({ ...b, about: e.target.value }))}
+                placeholder="the boiler that has not been fixed"
+              />
+            </div>
+            <div className="row2">
+              <div className="k">How will you speak?</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {(["casual", "neutral", "formal"] as const).map((f) => (
+                  <button key={f} className={`chip ${brief.formality === f ? "" : "ghost"}`} onClick={() => setBrief((b) => ({ ...b, formality: f }))}>
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 12, marginTop: 30 }}>
+            <button className="btn sm" disabled={!canStart || talk.busy} onClick={() => { onCloseRehearsalDraft?.(); void talk.startRehearsal(brief); }}>
+              Begin the rehearsal →
+            </button>
+            <button className="btn sm ghost" onClick={onCloseRehearsalDraft}>
+              Back to scenarios
+            </button>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="today fade">
@@ -574,11 +638,82 @@ export default function Talk({
           <div className="stream-scroll" ref={scroll}>
             <div className="stream-inner">
               <div className="eyebrow" style={{ marginBottom: 6 }}>
-                Scenario · {levelOf(settings.profile)}
+                {talk.rehearsal ? "Rehearsal" : "Scenario"} · {levelOf(settings.profile)}
               </div>
               <div style={{ fontFamily: "var(--serif)", fontSize: 30, fontWeight: 500, marginBottom: 34 }}>
                 {talk.scenario?.title}
               </div>
+
+              {/* The brief, at the top of the session (PLAN-034): a learner
+                  returning to a half-finished rehearsal knows what they were
+                  preparing for. Shown once, above the conversation, never repeated
+                  per turn. */}
+              {talk.rehearsal && (
+                <div style={{ marginBottom: 30, fontSize: 13, color: "var(--ink3)" }}>
+                  Rehearsing with <b style={{ color: "var(--ink)" }}>{talk.rehearsal.brief.who}</b>
+                  {talk.rehearsal.brief.about.trim() ? <> about {talk.rehearsal.brief.about}</> : null} · {talk.rehearsal.brief.formality}
+                </div>
+              )}
+
+              {/* The debrief (PLAN-034): its own block, after the coach steps out.
+                  "stuck" names real turns; the phrases are offered to Memory
+                  through the existing vocab save path — the learner chooses,
+                  nothing is auto-saved. */}
+              {talk.rehearsal && talk.outOfRole && (
+                <div className="debrief fade" style={{ borderLeft: "2px solid var(--line)", paddingLeft: 18, marginBottom: 30 }}>
+                  <div className="eyebrow" style={{ marginBottom: 10 }}>
+                    Out of role · how it went
+                  </div>
+                  {talk.debrief?.stuck.map((st) => (
+                    <div key={st.turn} style={{ marginBottom: 10, fontSize: 15 }}>
+                      <div className="meta" style={{ color: "var(--ink3)", fontSize: 12 }}>
+                        turn {st.turn + 1}
+                      </div>
+                      <div>{st.moment}</div>
+                      {st.why && <div style={{ fontSize: 13, color: "var(--ink3)" }}>{st.why}</div>}
+                    </div>
+                  ))}
+                  {talk.debrief && talk.debrief.stuck.length === 0 && (
+                    <div style={{ fontSize: 13, color: "var(--ink3)", marginBottom: 10 }}>
+                      No moment where you ran aground — the rehearsal went through.
+                    </div>
+                  )}
+                  {talk.debrief && talk.debrief.phrases.length > 0 && (
+                    <>
+                      <div className="meta" style={{ color: "var(--ink3)", fontSize: 12, margin: "16px 0 8px" }}>
+                        Phrases that would have helped · tap to keep the ones you want
+                      </div>
+                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                        {talk.debrief.phrases.map((p) => (
+                          <div className="wchip" key={p}>
+                            {p}
+                            <button
+                              className="x add"
+                              title="Keep in Memory"
+                              onClick={() => {
+                                // The existing vocab save path — the learner chooses;
+                                // nothing is auto-saved. The debrief's own "why" for the
+                                // turn it came from is the closest meaning on file; a
+                                // phrase without one carries itself.
+                                const from = talk.debrief?.stuck.find((st) => st.moment.includes(p));
+                                void addVocab(
+                                  settings.profile.targetLanguage,
+                                  { term: p, translation: from?.why || p, example: "", type: "phrase", levelBand: null },
+                                  { capturedBy: "learner", surface: "talk", learnerLevel: levelOf(settings.profile) },
+                                  "kept",
+                                ).catch(() => {});
+                              }}
+                            >
+                              +
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {talk.busy && !talk.debrief && <div className="typing">…</div>}
+                </div>
+              )}
 
               {talk.msgs.map((m, i) => (
                 <div className={`msg ${m.role}`} key={i}>
@@ -913,14 +1048,28 @@ export default function Talk({
             </>
           )}
 
-          <button
-            className="btn sm ghost"
-            style={{ marginTop: 30, width: "100%", justifyContent: "center" }}
-            onClick={() => void talk.end()}
-            disabled={talk.busy}
-          >
-            End session → reflection
-          </button>
+          {/* PLAN-034: in role, the learner decides when it is over — one control,
+              and the rail's own button says exactly what it does. Once out of role
+              the session still ends as any other, straight into the reflection. */}
+          {talk.rehearsal && !talk.outOfRole ? (
+            <button
+              className="btn sm ghost"
+              style={{ marginTop: 30, width: "100%", justifyContent: "center" }}
+              onClick={() => void talk.endRole()}
+              disabled={talk.busy || talk.msgs.filter((m) => m.role === "user" && !m.isAsk).length === 0}
+            >
+              Okay, out of role — debrief
+            </button>
+          ) : (
+            <button
+              className="btn sm ghost"
+              style={{ marginTop: 30, width: "100%", justifyContent: "center" }}
+              onClick={() => void talk.end()}
+              disabled={talk.busy}
+            >
+              End session → reflection
+            </button>
+          )}
         </div>
       </div>
     </div>

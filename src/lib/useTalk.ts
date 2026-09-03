@@ -25,6 +25,16 @@ import {
   type Correction,
   type SessionSummary,
 } from "./prompts";
+import {
+  rehearsalScenario,
+  rehearsalSystem,
+  parseRole,
+  debriefPrompt,
+  parseDebrief,
+  type RehearsalBrief,
+  type Debrief,
+  type RoleTurn,
+} from "./rehearsal";
 import { BUNDLED_SCENARIOS, listScenarios, type Persona, type Scenario } from "./scenarios";
 import { getPack } from "./packs";
 import { computeMetrics, estimateLevelV2 } from "./metrics";
@@ -128,6 +138,13 @@ export interface Reflection extends SessionSummary {
   axis: Axis | null;
   /** Whether the learner asked for ease this session (PLAN-031) — recorded, never scored. */
   easeRequested: boolean;
+  /**
+   * The rehearsal this session ran as (PLAN-034), or null for an ordinary
+   * conversation. Carries the brief (so a returning learner sees what they were
+   * preparing for) and the debrief the coach produced after stepping out.
+   * In-role corrections never appear here — there were none to collect.
+   */
+  rehearsal?: { brief: RehearsalBrief; debrief: Debrief | null };
 }
 
 /** One thing the learner actually sent, and whether they found it themselves. */
@@ -300,6 +317,24 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   // Whether the learner asked for ease this session — recorded on the day's
   // record so Coach can see the pattern, but never persisted as a switch.
   const easeAsked = useRef(false);
+  // Rehearsal mode (PLAN-034): the coach is the other party, not a tutor. A
+  // state, not a ref — Talk renders the phase (role vs. debrief) off it and the
+  // picker must be able to read it. Null is an ordinary session. The brief is
+  // kept beside it: it is shown at the top of the session, so a learner
+  // returning to a half-finished rehearsal knows what they were preparing for.
+  const [rehearsal, setRehearsal] = useState<{ brief: RehearsalBrief } | null>(null);
+  // The mode as the wait machine sees it. `fireOffer` is armed by a timer that
+  // captured the closure from the render where the wait was scheduled — reading
+  // the `rehearsal` state there would see the value from *that* render, which
+  // for the very first rehearsal is still null. A ref is read at fire time, so
+  // the gate always sees the current mode. Mirrored on every `setRehearsal`.
+  const rehearsalRef = useRef<{ brief: RehearsalBrief } | null>(null);
+  // Phase two: the role-play has ended and the debrief has been (or is being)
+  // fetched. `inRole` is the one flag the mode's switches read — role-play and
+  // feedback are separated across it.
+  const [outOfRole, setOutOfRole] = useState(false);
+  // The debrief, once it has landed (or null while it is loading / never arrived).
+  const [debrief, setDebrief] = useState<Debrief | null>(null);
   // The per-session rewind state (PLAN-030): the gift cap (at most two for the
   // same category, at most one category per session) and the current step. Held
   // for this session and rebuilt by `start`/`resume`.
@@ -476,6 +511,25 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
    * stretch rather than cutting in.
    */
   const fireOffer = useCallback(() => {
+    // PLAN-034: in role the coach does not offer — "want me to start you off?"
+    // is the coach teaching, and the coach is not in the room. The wait runs to
+    // its end (the silence is the point) and then comes down with the offer:
+    // nothing is spoken, and nothing re-arms. Letting it re-arm would only
+    // schedule a second timer to be stood down again, and `waiting` gates the
+    // suggestion rail, which is empty in role either way.
+    //
+    // The gate lives here, at the wait, not on the rail — the rail is empty in
+    // role anyway, and the offer is what would speak over it. It reads the
+    // *ref*, not the state: the timer that fires this captured the closure from
+    // the render where the wait was scheduled, and for the first rehearsal that
+    // render's state was still null.
+    if (rehearsalRef.current) {
+      if (waitTimer.current) clearTimeout(waitTimer.current);
+      waitTimer.current = null;
+      waitState.current = { ...waitState.current, waiting: false, deadline: null };
+      setWaiting(false);
+      return;
+    }
     const ms = waitMs(baseline.current, settings.patience);
     const before = waitState.current;
     const next = onWaitElapsed(before, Date.now(), ms, speaking.current);
@@ -586,7 +640,12 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
   /** Open a scenario and let the coach speak first. */
   const start = useCallback(
-    async (sc: Scenario, goal?: string) => {
+    async (sc: Scenario, mode: "normal" | "rehearsal" = "normal", brief?: RehearsalBrief, goal?: string) => {
+      // PLAN-034: the mode is decided from the *parameters*, not from the
+      // `rehearsal` state — `setRehearsal` only lands on the next render, so
+      // reading it here would make the first call of a rehearsal behave like an
+      // ordinary session. `inRole` is the one flag every switch below reads.
+      const inRole = mode === "rehearsal" && !!brief;
       setScenario(sc);
       setPersona(sc.persona);
       setGoalState((sc.goals ?? []).map(() => "pending" as const));
@@ -596,6 +655,14 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       setReflection(null);
       setError("");
       setNotice("");
+      // Rehearsal mode (PLAN-034): the role starts now, and any previous
+      // session's debrief is gone with the rest of it. This is for the next
+      // render — the decisions above and below run off `inRole`. The ref is
+      // mirrored so the wait machine's gate sees the mode at fire time.
+      setRehearsal(inRole && brief ? { brief } : null);
+      rehearsalRef.current = inRole && brief ? { brief } : null;
+      setOutOfRole(false);
+      setDebrief(null);
       titleStage.current = 0;
       coachReplyAt.current = null;
       produced.current = [];
@@ -654,26 +721,34 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // the door, from the learner's readiness and the last sessions' outcomes.
       // `null` is a real answer (a fresh learner, a recovered one, a learner who
       // asked for ease); a `null` session is simply not manufactured.
-      const recaps = recapsFrom(known);
-      axis.current = pickAxis(
-        { ready: baseline.current.ready },
-        recaps,
-        levelOf(settings.profile),
-        { ease: false, canSpeak: speech.canSpeak },
-      );
+      // PLAN-034: a rehearsal picks no axis at all — `pickAxis` is not called,
+      // because the difficulty axes are off and there is nothing to calibrate
+      // against in a dress rehearsal for practice.
+      if (!inRole) {
+        const recaps = recapsFrom(known);
+        axis.current = pickAxis(
+          { ready: baseline.current.ready },
+          recaps,
+          levelOf(settings.profile),
+          { ease: false, canSpeak: speech.canSpeak },
+        );
+      }
       // PLAN-033: the one detail this session may open with, picked at the door
       // from the memory rows and nothing else. `null` is a real answer — a
       // learner with no recent, open-ended, unasked fact gets an opening with no
       // personal detail. When one is chosen it is stamped as asked *now*, the
       // moment it is supplied to the system prompt — not when the model is
       // observed to have used it.
-      const opening = openingDetail(memories, Date.now());
+      // PLAN-034: a supplier does not know the learner moved house last month —
+      // `openingDetail` is not called in rehearsal, and no memory is stamped.
+      const opening = !inRole ? openingDetail(memories, Date.now()) : null;
       if (opening) void stampMemoryAsked(opening.id).catch(() => {});
-      const system =
-        buildSystem(settings, sc, sc.persona, pack, memories, {
-          axis: axis.current,
-          step: settings.difficultyStep,
-        }, correctionRecords.current, opening) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
+      const system = inRole
+        ? rehearsalSystem(settings, brief!, sc, pack)
+        : buildSystem(settings, sc, sc.persona, pack, memories, {
+            axis: axis.current,
+            step: settings.difficultyStep,
+          }, correctionRecords.current, opening) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
       history.current = [{ role: "system", content: system }];
       try {
         try {
@@ -690,12 +765,17 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
           maxTokens: TURN_MAX_TOKENS,
           onDelta: live(setStreaming),
         });
-        const turn = parseTurn(raw);
+        // A rehearsal's opening line is parsed by `parseRole`: the in-role turn
+        // carries no corrections and no suggestions, and a model that sends them
+        // anyway has them ignored, not shown.
+        const turn = inRole ? parseRole(raw) : parseTurn(raw);
         history.current.push({ role: "assistant", content: turn.reply });
         if (sessionId.current) await addMessage(sessionId.current, "assistant", turn.reply);
         setStreaming(""); // same commit as the message that replaces it
         setMsgs([{ role: "ai", text: turn.reply, corrections: [], inline: false }]);
-        setSuggestions(turn.suggestions);
+        // In role the suggestion rail is empty: "want me to start you off?" is
+        // the coach teaching, and the coach is not in the room.
+        setSuggestions(inRole ? [] : (turn as { suggestions?: string[] }).suggestions ?? []);
         // The coach's opening line is `prevCoachLine` from the first word — a
         // learner REPEAT on the very first sentence repeats it, not "" (PLAN-030 §5).
         prevCoachLine.current = turn.reply;
@@ -721,6 +801,52 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     },
     [settings, pack, say, speech, clearWait, armWait, armDeadline],
   );
+
+  /**
+   * Rehearsal mode's own entry (PLAN-034): build the synthetic scenario from the
+   * brief and start in rehearsal mode. The scenario is never saved to the
+   * catalogue — the whole premise is that the conversation the learner needs is
+   * not in our catalogue — and the loop is this loop, not a fork of it.
+   */
+  const startRehearsal = useCallback(
+    async (brief: RehearsalBrief) => {
+      await start(rehearsalScenario(brief), "rehearsal", brief);
+    },
+    [start],
+  );
+
+  /**
+   * The role-play is over (PLAN-034): the learner ended it, the coach steps out
+   * ("okay, out of role"), and the debrief arrives as its own block. The
+   * conversation history stays untouched from here — the debrief is derived
+   * from it, not a turn in it.
+   */
+  const endRole = useCallback(async () => {
+    if (!rehearsal || outOfRole || busy) return;
+    setOutOfRole(true);
+    setBusy(true);
+    setError("");
+    try {
+      const provider = getProvider(settings);
+      const learnerTurns = msgs
+        .filter((m) => m.role === "user" && !m.isAsk)
+        .map((m) => m.text);
+      const raw = await provider.chat(
+        [...history.current, { role: "user" as const, content: debriefPrompt(settings, rehearsal.brief, learnerTurns, pack) }],
+        { json: true },
+      );
+      // The transcript handed to the parser is the same list the prompt numbered,
+      // so an index the model reports means something — one that does not exist
+      // in it is dropped at parse.
+      setDebrief(parseDebrief(raw, learnerTurns.length));
+    } catch (e: unknown) {
+      const { say: said, log } = humanError(e);
+      console.warn("[talk] debrief failed:", log);
+      setError(said);
+    } finally {
+      setBusy(false);
+    }
+  }, [rehearsal, outOfRole, busy, settings, pack, msgs]);
 
   /**
    * Resume a past conversation: load its stored messages back into the session
@@ -790,6 +916,18 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         waitState.current = freshWait();
         praiseUsed.current = 0;
         correctionRecords.current = [];
+        // A resumed conversation is an ordinary conversation (PLAN-034). The mode
+        // belongs to the session, like every other reset above it, and `resume`
+        // is the one door into a session that was not opening a rehearsal — left
+        // uncleared, a resumed session inherits the last rehearsal: no offer, no
+        // corrections shown, no suggestions, its turns parsed as in-role, a
+        // `rehearsal` marker written into the record and calibration skipped. The
+        // ref is mirrored here for the same reason `start` mirrors it: the wait's
+        // timer reads the ref, not the state.
+        setRehearsal(null);
+        rehearsalRef.current = null;
+        setOutOfRole(false);
+        setDebrief(null);
         sessionId.current = sessionIdToResume;
         // The provider context is rebuilt from the stored transcript so the next
         // turn continues the conversation rather than starting a new one.
@@ -844,9 +982,15 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
    * started — the flow moves repeat → unpack → gift rather than starting over.
    * Every transition is computed by `nextStep`, the single owner of the order;
    * nothing here hand-writes `repeat → unpack` or `unpack → gift`.
+   *
+   * `stopAfterRepeat` is PLAN-034's rehearsal cap: in role, `own` and `repeat`
+   * are a person saying it again, more slowly — any real supplier does that —
+   * but `unpack` explains the sentence and `gift` hands the learner a phrase,
+   * and both are teaching. The drive stops after `repeat`; the gift moves to
+   * the debrief, where a phrase the learner could have used belongs.
    */
   const driveRewind = useCallback(
-    async (turnIndex: number, line: string, advance: boolean) => {
+    async (turnIndex: number, line: string, advance: boolean, stopAfterRepeat = false) => {
       const packId = pack?.id ?? "en";
       const ex = rewindExchange;
 
@@ -888,6 +1032,14 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // turn (`missedAgain: false`) would resume, but advance is true, so a
       // repeat follows an unpack that resolved it, never a gift that skipped it.
       const from = rewind.current.step ?? "repeat";
+      // PLAN-034: in role a rewind that already reached `repeat` has nowhere to
+      // go — the role broke below it. `nextStep` is not consulted; the exchange
+      // simply comes down and the conversation resumes.
+      if (stopAfterRepeat) {
+        rewind.current.step = null;
+        setRewindExchange(null);
+        return;
+      }
       const to = nextStep(from, true);
 
       if (to === "unpack") {
@@ -1022,7 +1174,11 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
           maxTokens: TURN_MAX_TOKENS,
           onDelta: live(setStreaming),
         });
-        const turn = parseTurn(raw);
+        // The in-role turn (PLAN-034) is parsed by `parseRole`: `corrections`,
+        // `suggestions`, `goalsMet`, `praise` and `ease` a model sends anyway are
+        // ignored, not shown. In role there is no coach to teach with them.
+        const turn: RoleTurn & { corrections?: Correction[]; suggestions?: string[]; goalsMet?: number[]; praise?: { for: string; text: string } | null; ease?: boolean } =
+          rehearsal ? parseRole(raw) : parseTurn(raw);
         history.current.push({ role: "assistant", content: turn.reply });
         if (sessionId.current) await addMessage(sessionId.current, "assistant", turn.reply).catch(() => {});
         // The coach's reply has landed — stamp it so the next send can measure
@@ -1030,7 +1186,13 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         coachReplyAt.current = performance.now();
         const sent = produced.current[produced.current.length - 1];
 
-        const worst = turn.corrections.find((c) => c.severity === "severe") ?? turn.corrections[0];
+        // In role (PLAN-034) there are no corrections to show and no rail to fill:
+        // the other party does not grade, and "want me to start you off?" is the
+        // coach teaching. The wait itself still runs — the silence is the point.
+        const worst = rehearsal
+          ? undefined
+          : ((turn as { corrections?: Correction[] }).corrections ?? []).find((c) => c.severity === "severe") ??
+            (turn as { corrections?: Correction[] }).corrections?.[0];
         // Dropped in the same commit the real message lands in — anywhere earlier
         // and the DB write above sits between them as a frame of empty screen.
         setStreaming("");
@@ -1039,25 +1201,28 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
           if (next[idx])
             next[idx] = {
               ...next[idx],
-              corrections: turn.corrections,
-              inline: shouldShowInline(settings.correctionTiming, worst?.severity),
+              corrections: rehearsal ? [] : ((turn as { corrections?: Correction[] }).corrections ?? []),
+              inline: rehearsal ? false : shouldShowInline(settings.correctionTiming, worst?.severity),
             };
           next.push({ role: "ai", text: turn.reply, corrections: [], inline: false });
           return next;
         });
-        setSuggestions(turn.suggestions);
+        setSuggestions(rehearsal ? [] : (turn as { suggestions?: string[] }).suggestions ?? []);
 
         // Praise needs a receipt (PLAN-032): the model's praise is shown only when
         // `praiseGate` says its `for` matches a real correction record exactly and
         // the session cap is not spent. The praise sentence lives in `text`,
         // outside `reply`, so a dropped praise really drops — the field is not
         // rendered, and `reply` stands on its own without it.
+        // PLAN-034: in role praise is never kept at all — the other party has
+        // never seen a correction record to cite. It belongs in the debrief if
+        // anywhere.
         let praiseText: string | undefined;
-        if (turn.praise) {
-          const { keep } = praiseGate(turn.praise, correctionRecords.current, praiseUsed.current);
+        if (!rehearsal && (turn as { praise?: { for: string; text: string } | null }).praise) {
+          const { keep } = praiseGate((turn as { praise: { for: string; text: string } }).praise, correctionRecords.current, praiseUsed.current);
           if (keep) {
             praiseUsed.current += 1;
-            praiseText = turn.praise.text;
+            praiseText = (turn as { praise: { text: string } }).praise.text;
           }
         }
         if (praiseText) {
@@ -1072,10 +1237,12 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         // A goal the coach says was just met ticks — and only that one. A returned
         // index moves a pending goal to met and never moves it back; a goal already
         // met is left alone, and an index past the list is ignored.
-        if (turn.goalsMet.length) {
+        // PLAN-034: in role no goal is ever credited — the other party has no
+        // goals sheet.
+        if (!rehearsal && ((turn as { goalsMet?: number[] }).goalsMet ?? []).length) {
           setGoalState((gs) => {
             const next = [...gs];
-            for (const i of turn.goalsMet) {
+            for (const i of (turn as { goalsMet: number[] }).goalsMet) {
               if (i >= 0 && i < next.length && next[i] === "pending") next[i] = "met";
             }
             return next;
@@ -1160,7 +1327,8 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         // unconditionally and without a word: the axis goes null for the rest of
         // the session and the rewind budget's `off` is set so nothing interrupts.
         // `difficultyStep` is left byte-identical and nothing persists to settings.
-        if (turn.ease && !easeAsked.current) {
+        // PLAN-034: in role there is no coach to ask — `ease` is not read at all.
+        if (!rehearsal && (turn as { ease?: boolean }).ease && !easeAsked.current) {
           easeAsked.current = true;
           axis.current = easeEffect(settings.difficultyStep).axis;
           budget.current.off = true;
@@ -1212,6 +1380,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         // receives. It rides `say` like any other coach line, so its duration
         // lands in `spokeMs` and the next turn's latency stays honest, and it
         // does not touch `prevCoachLine` — a REPEAT repeats the reply.
+        // PLAN-034: in role no praise is spoken — none was ever kept.
         if (praiseText) say(praiseText);
         if (obey.kind === "slow") shortenNext.current = true;
         prevCoachLine.current = turn.reply;
@@ -1230,10 +1399,26 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         // the turn's reply has been spoken — but only the *new* rewind was queued
         // here; an advanced rewind's own → repeat already ran when it started, so
         // the next step's repeat → unpack → gift is the only thing left to drive.
+        // PLAN-034: in role the rewind stops after `repeat` — `unpack` explains
+        // the sentence and `gift` hands the learner a phrase to use on the coach,
+        // and both are teaching. A gift a rehearsal could have given lands in the
+        // debrief instead, where a phrase the learner could have used belongs.
         if (pendingRewind.current) {
           const queued = pendingRewind.current;
           pendingRewind.current = null;
-          void driveRewind(queued.turnIndex, queued.line, queued.advance);
+          if (rehearsal && !queued.advance) {
+            // A fresh rewind runs only own → repeat: the drive stops there, and
+            // the step stays at `repeat` so no later turn can advance past it.
+            void driveRewind(queued.turnIndex, queued.line, false, true);
+          } else if (rehearsal && queued.advance) {
+            // An in-role rewind that already reached `repeat` cannot advance —
+            // `unpack` and `gift` are out of role. The exchange stays where it
+            // is; the conversation resumes.
+            rewind.current.step = null;
+            setRewindExchange(null);
+          } else {
+            void driveRewind(queued.turnIndex, queued.line, queued.advance);
+          }
         }
       } catch (e: unknown) {
         const { say: said, log } = humanError(e);
@@ -1401,38 +1586,50 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       repairs: repairs.current,
       axis: axis.current,
       easeRequested: easeAsked.current,
+      // PLAN-034: a rehearsal rides its brief and its debrief on the reflection —
+      // the brief so the wrap-up shows what they were preparing for, the debrief
+      // so its phrases can be offered to Memory through the existing vocab save
+      // path (the learner chooses; nothing is auto-saved).
+      rehearsal: rehearsal ? { brief: rehearsal.brief, debrief } : undefined,
     });
     // Calibration (PLAN-031 §5.2): once, at the end of the session, over the
     // verdicts. The rise needs two consecutive zero-breakdown sessions; the drop
     // already happened in-session, so this only ever moves the step up. The
     // stored signals are re-read so the current session, once the reflection
     // writes it, is the newest of the pair.
-    try {
-      const prior = await recentSignals(settings.profile.targetLanguage).catch(() => [] as Awaited<ReturnType<typeof recentSignals>>);
-      // A conversation with no learner turn in it is not a session — the same
-      // rule `recapsFrom` applies to the stored batches. It is left out rather
-      // than counted as an easy one: an empty conversation is the absence of
-      // evidence, not evidence that the level is too low.
-      const current: SessionRecap[] =
-        produced.current.length === 0
-          ? []
-          : [
-              {
-                axis: axis.current,
-                turns: produced.current.length,
-                drowned: drowns({
+    // PLAN-034: a rehearsal is never a calibration session — `end()` skips
+    // `calibrate` entirely. `recapsFrom`'s marker rule keeps *later* sessions
+    // from counting the stored rehearsal signals as an easy one, but this call is
+    // skipped outright: a rehearsal in which the learner never struggled must not
+    // be the run's first "easy session".
+    if (!rehearsal) {
+      try {
+        const prior = await recentSignals(settings.profile.targetLanguage).catch(() => [] as Awaited<ReturnType<typeof recentSignals>>);
+        // A conversation with no learner turn in it is not a session — the same
+        // rule `recapsFrom` applies to the stored batches. It is left out rather
+        // than counted as an easy one: an empty conversation is the absence of
+        // evidence, not evidence that the level is too low.
+        const current: SessionRecap[] =
+          produced.current.length === 0
+            ? []
+            : [
+                {
+                  axis: axis.current,
                   turns: produced.current.length,
-                  heavy: produced.current.filter((t) => t.breakdown.length >= 2).length,
-                }),
-                zero: produced.current.every((t) => t.breakdown.length === 0),
-              },
-            ];
-      const nextStep = calibrate(settings.difficultyStep, [...current, ...recapsFrom(prior)]);
-      if (nextStep !== settings.difficultyStep) onSettings?.({ difficultyStep: nextStep });
-    } catch {
-      /* calibration is best-effort — a store miss should not fail the wrap-up */
+                  drowned: drowns({
+                    turns: produced.current.length,
+                    heavy: produced.current.filter((t) => t.breakdown.length >= 2).length,
+                  }),
+                  zero: produced.current.every((t) => t.breakdown.length === 0),
+                },
+              ];
+        const nextStep = calibrate(settings.difficultyStep, [...current, ...recapsFrom(prior)]);
+        if (nextStep !== settings.difficultyStep) onSettings?.({ difficultyStep: nextStep });
+      } catch {
+        /* calibration is best-effort — a store miss should not fail the wrap-up */
+      }
     }
-  }, [scenario, busy, msgs, settings, pack, onSettings, clearWait]);
+  }, [scenario, busy, msgs, settings, pack, onSettings, clearWait, rehearsal, debrief]);
 
   /**
    * Strike a word off the wrap-up. The conversation proposes; the learner disposes.
@@ -1590,6 +1787,20 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     userTurns,
     started: !!scenario,
     start,
+    /** PLAN-034: the rehearsal entry — build the scenario, start in role. */
+    startRehearsal,
+    /** PLAN-034: end the role-play; the coach steps out and the debrief arrives. */
+    endRole,
+    /**
+     * Rehearsal mode (PLAN-034): the brief a session is running as, or null for
+     * an ordinary conversation. Talk reads it to render the brief, the phase and
+     * the "end the role-play" control.
+     */
+    rehearsal,
+    /** True once the learner ended the role-play (PLAN-034). */
+    outOfRole,
+    /** The debrief, once it landed (PLAN-034) — null while loading or before. */
+    debrief,
     resume,
     send,
     mic,

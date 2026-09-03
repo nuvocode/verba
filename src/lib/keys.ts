@@ -64,6 +64,11 @@ export const KEYS: Shortcut[] = [
   // `live()` already guarantees that. It is the same control as the labelled
   // toggle in the composer bar, announced here so announced === working.
   { keys: ["s"], label: "S", does: "show or hide subtitles", on: ["talk"] },
+  // The rehearsal's "end the role-play" key (PLAN-034). `when: "rehearsal"` keeps
+  // it out of an ordinary session's hint line — a normal conversation has no
+  // role to step out of — and the invariant still holds: the announced count
+  // equals the working count, in every `has` combination the surface can be in.
+  { keys: ["e"], label: "E", does: "end the role-play", on: ["talk"], when: "rehearsal" },
 
   // ---- Esc — one verb, every surface (invariant 24) ----
   // Esc means "one level up" everywhere: backing out of a focused sentence, a

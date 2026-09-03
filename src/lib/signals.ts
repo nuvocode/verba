@@ -51,6 +51,12 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
     // into the session they belong to.
     ...(r.axis ? [{ activityId, kind: "axisUsed" as const, payload: { label: r.axis } }] : []),
     ...(r.easeRequested ? [{ activityId, kind: "easeRequest" as const, payload: { label: "ease requested" } }] : []),
+    // The rehearsal marker (PLAN-034): one per rehearsal batch, written beside the
+    // turn signals at the same stamp. A mark on the record, never a score —
+    // `recapsFrom` reads it to skip the batch, so a rehearsal can never become one
+    // of the two "easy sessions" that raise the difficulty. It is a SignalKind,
+    // not an ActivityKind: nothing is scheduled on the learner's day.
+    ...(r.rehearsal ? [{ activityId, kind: "rehearsal" as const, payload: { label: "rehearsal" } }] : []),
   ];
 }
 
