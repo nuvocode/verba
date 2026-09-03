@@ -22,8 +22,8 @@ const scenario = { id: "free", title: "Free talk", emoji: "💬", setup: "Talk a
 
 const JULY = new Date("2026-07-14T09:00:00Z").getTime();
 const known: Memory[] = [
-  { id: 3, fact: "Works as a backend developer", created_at: JULY },
-  { id: 5, fact: "Lives in Ankara", created_at: JULY },
+  { id: 3, fact: "Works as a backend developer", created_at: JULY, kind: "state", asked_at: null },
+  { id: 5, fact: "Lives in Ankara", created_at: JULY, kind: "state", asked_at: null },
 ];
 
 // --- the record carries its date, and shows it the way Settings does ---
@@ -50,30 +50,30 @@ assert(
 
 // Told twice is not two bullets, whatever the punctuation and case say.
 assert(
-  planMemory(known, [{ fact: "works as a Backend Developer!", replaces: null }]).length === 0,
+  planMemory(known, [{ fact: "works as a Backend Developer!", replaces: null, kind: "state" }]).length === 0,
   "a fact already on file is dropped",
 );
 // …and not twice within one answer either.
 assert(
   planMemory(known, [
-    { fact: "Has a sister in Izmir", replaces: null },
-    { fact: "has a sister in Izmir.", replaces: null },
+    { fact: "Has a sister in Izmir", replaces: null, kind: "state" },
+    { fact: "has a sister in Izmir.", replaces: null, kind: "state" },
   ]).length === 1,
   "one answer cannot record the same fact twice",
 );
 
 // A changed fact supersedes the row it names.
-const moved = planMemory(known, [{ fact: "Lives in Berlin", replaces: 5 }]);
+const moved = planMemory(known, [{ fact: "Lives in Berlin", replaces: 5, kind: "event" }]);
 assert(moved.length === 1 && moved[0].replaces === 5, "a fact that changed replaces the one it changed");
 
 // A hallucinated id must not delete a row the learner never contradicted.
-const ghost = planMemory(known, [{ fact: "Plays the guitar", replaces: 99 }]);
+const ghost = planMemory(known, [{ fact: "Plays the guitar", replaces: 99, kind: "state" }]);
 assert(ghost.length === 1 && ghost[0].replaces === null, "an id that names no row is written as new, deleting nothing");
 
 // The cap: a session that "learns" ten durable facts has stopped telling them from small talk.
 const flood = planMemory(
   [],
-  Array.from({ length: 10 }, (_, i) => ({ fact: `Fact number ${i}`, replaces: null })),
+  Array.from({ length: 10 }, (_, i) => ({ fact: `Fact number ${i}`, replaces: null, kind: "state" })),
 );
 assert(flood.length === 6, "at most six facts come out of one conversation");
 

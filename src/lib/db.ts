@@ -127,6 +127,8 @@ async function init(): Promise<Database> {
       fact TEXT NOT NULL,
       source_session_id INTEGER,   -- the conversation it was learned in; NULL if the DB row was gone
       created_at INTEGER NOT NULL,
+      kind TEXT,                   -- 'state' | 'event' | NULL (unclassified, PLAN-033)
+      asked_at INTEGER,            -- when a session opened with this fact; NULL = never asked
       UNIQUE(lang, fact)           -- the same sentence twice is still one fact
     );
     -- §1.3 Signals: what a finished activity observed about the learner. Coach
@@ -175,6 +177,12 @@ async function init(): Promise<Database> {
   // chapter is deliberately not stored — a chapter is short, and restarting it is
   // better than resuming mid-sentence. Older rows default to 0 (chapter 1).
   await db.execute("ALTER TABLE listening_sessions ADD COLUMN chapter_idx INTEGER NOT NULL DEFAULT 0").catch(() => {});
+  // PLAN-033: a memory is classified once at write time (`kind`), and a session
+  // that opens with a fact stamps it (`asked_at`) so the same question is never
+  // asked twice. Rows written before this plan keep NULLs — an unclassified fact
+  // is not an opening, and an unasked fact is one that has never been spent.
+  await db.execute("ALTER TABLE memories ADD COLUMN kind TEXT").catch(() => {});
+  await db.execute("ALTER TABLE memories ADD COLUMN asked_at INTEGER").catch(() => {});
   await migrateVocabToPerLanguage(db);
   return db;
 }
@@ -830,7 +838,7 @@ export const MEMORY_BUDGET = 20;
 export async function recentMemories(lang: string, limit = MEMORY_BUDGET): Promise<MemoryRow[]> {
   const db = await getDb();
   return db.select<MemoryRow[]>(
-    "SELECT id, lang, fact, source_session_id, created_at FROM memories WHERE lang = $1 ORDER BY created_at DESC, id DESC LIMIT $2",
+    "SELECT id, lang, fact, source_session_id, created_at, kind, asked_at FROM memories WHERE lang = $1 ORDER BY created_at DESC, id DESC LIMIT $2",
     [lang, limit],
   );
 }
@@ -839,9 +847,19 @@ export async function recentMemories(lang: string, limit = MEMORY_BUDGET): Promi
 export async function allMemories(lang: string): Promise<MemoryRow[]> {
   const db = await getDb();
   return db.select<MemoryRow[]>(
-    "SELECT id, lang, fact, source_session_id, created_at FROM memories WHERE lang = $1 ORDER BY created_at DESC, id DESC",
+    "SELECT id, lang, fact, source_session_id, created_at, kind, asked_at FROM memories WHERE lang = $1 ORDER BY created_at DESC, id DESC",
     [lang],
   );
+}
+
+/**
+ * Stamp a fact as asked (PLAN-033). Called at the door, the moment the detail is
+ * supplied to `buildSystem` — not when the model is observed to have used it. A
+ * fact that generated a question is spent; whether the coach actually asked is
+ * not verifiable from the reply, and the two failure modes are not equal.
+ */
+export async function stampMemoryAsked(id: number): Promise<void> {
+  await write("UPDATE memories SET asked_at = $1 WHERE id = $2", [Date.now(), id]);
 }
 
 /**
@@ -863,8 +881,8 @@ export async function saveMemories(lang: string, writes: MemoryWrite[], sessionI
     // OR IGNORE, because UNIQUE(lang, fact) is the last word on "told twice": the
     // normalised check in planMemory catches the re-wordings, this catches the rest.
     await write(
-      "INSERT OR IGNORE INTO memories (lang, fact, source_session_id, created_at) VALUES ($1, $2, $3, $4)",
-      [lang, w.fact, sessionId, Date.now()],
+      "INSERT OR IGNORE INTO memories (lang, fact, source_session_id, created_at, kind) VALUES ($1, $2, $3, $4, $5)",
+      [lang, w.fact, sessionId, Date.now(), w.kind],
     );
   }
 }

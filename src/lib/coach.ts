@@ -1,7 +1,7 @@
 import type { Settings } from "./settings.ts";
 import { levelOf } from "./model.ts";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
-import { memoryBrief, type Memory } from "./prompts.ts";
+import { memoryBrief, styleGuidance, type Memory } from "./prompts.ts";
 
 // Advanced coaching — the two AI features the phase asks for on top of the
 // learning engine: a weekly progress report and targeted weak-area drills.
@@ -23,6 +23,7 @@ export function weeklyReportPrompt(s: Settings, w: WeekStats, pack?: LanguagePac
     `You are a ${s.profile.targetLanguage} learning coach writing a short weekly progress report for a ${levelOf(s.profile)} learner.`,
     `Write in ${s.profile.nativeLanguage}. Be specific and encouraging, not generic.`,
     packGuidance(pack),
+    styleGuidance(s.coachStyle),
     memoryBrief(memories),
     // The one place a fact earns its keep unprompted: a week of numbers means
     // something measured against why they are learning at all. But only that —
@@ -73,6 +74,7 @@ export function drillPrompt(s: Settings, areas: string[], count = 4, pack?: Lang
   return [
     `Create ${count} short ${s.profile.targetLanguage} practice drills for a ${levelOf(s.profile)} learner.`,
     packGuidance(pack),
+    styleGuidance(s.coachStyle),
     focus.length ? `Target these weak areas: ${focus.join("; ")}.` : `Target common ${levelOf(s.profile)} sticking points.`,
     `Each drill is one small task the learner can answer in a sentence or two.`,
     `Answer with ONLY a JSON object: { "drills": [ { "area": "the skill being drilled", "prompt": "the task in ${s.profile.targetLanguage}", "hint": "a short hint in ${s.profile.nativeLanguage}", "example": "a model answer in ${s.profile.targetLanguage}" } ] }.`,

@@ -2,6 +2,7 @@ import type { Settings } from "./settings.ts";
 import { makePlan, planActivity, levelOf } from "./model.ts";
 import type { ActivityKind, DailyPlan, PlannedActivity, Weakness } from "./model.ts";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
+import { styleGuidance } from "./prompts.ts";
 
 // Learning engine — turns the app's separate activities into one coherent daily
 // session. Everything a learner does in a day hangs off a single theme so the
@@ -427,6 +428,7 @@ export function recapPrompt(
   return [
     `The learner just finished a daily ${s.profile.targetLanguage} session themed "${plan.theme}" (level ${levelOf(s.profile)}).`,
     packGuidance(pack),
+    styleGuidance(s.coachStyle),
     `They completed: ${done.join(", ") || "nothing"}.`,
     focus.length ? `They are working on: ${focus.join("; ")}.` : "",
     `Answer with ONLY a JSON object: { "recap": "2-3 encouraging sentences in ${s.profile.nativeLanguage} on what they practised", "nextFocus": ["one short thing to work on tomorrow", ...] }.`,

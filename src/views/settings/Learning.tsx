@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { LEVELS, TIMES } from "../../lib/choices";
 import { languages } from "../../lib/langs";
 import { progressByLang } from "../../lib/db";
-import { type CorrectionTiming, type Patience } from "../../lib/settings";
+import { type CoachStyle, type CorrectionTiming, type Patience } from "../../lib/settings";
 import { listPacks, originLabel, packDocs, packOrigin, removeImportedPack } from "../../lib/packs";
 import { linkish, ToggleRow, type SectionProps } from "./parts";
 
@@ -33,6 +33,18 @@ const PATIENCE: [Patience, string, string][] = [
     "Patient",
     "The coach gives you a long beat before offering — the most room to think.",
   ],
+];
+
+/**
+ * The three answers to "how should the coach speak to me" (PLAN-033 §6.4). What
+ * differs is the voice, not the content — `direct` means fewer softeners, never
+ * harder material. The sketch shows the tone without a sentence in any one
+ * language, which would be wrong for every learner not studying that one.
+ */
+const STYLES: [CoachStyle, string, string][] = [
+  ["warm", "Warm", "Friendly, supportive, and unhurried — the default."],
+  ["neutral", "Neutral", "A steady, plain tone — neither effusive nor clipped."],
+  ["direct", "Direct", "Fewer softeners, no padding — says what it means plainly."],
 ];
 
 /**
@@ -383,6 +395,19 @@ export default function Learning({
         {PATIENCE.map(([id, name, desc]) => (
           <button key={id} className="srow" onClick={() => onChange({ patience: id })}>
             <div className={`radio ${settings.patience === id ? "on" : ""}`} />
+            <div style={{ flex: 1 }}>
+              <div className="name">{name}</div>
+              <div className="desc">{desc}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="sec" style={{ marginTop: 44 }}>Coach's voice</div>
+      <div data-setting="coach-style">
+        {STYLES.map(([id, name, desc]) => (
+          <button key={id} className="srow" onClick={() => onChange({ coachStyle: id })}>
+            <div className={`radio ${settings.coachStyle === id ? "on" : ""}`} />
             <div style={{ flex: 1 }}>
               <div className="name">{name}</div>
               <div className="desc">{desc}</div>

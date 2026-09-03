@@ -23,6 +23,12 @@ export type CorrectionTiming = "adaptive" | "live" | "delayed";
  */
 export type Patience = "quick" | "normal" | "patient";
 /**
+ * The coach's voice (PLAN-033 §6.4). `warm` is the default; `direct` means fewer
+ * softeners, not harder content — difficulty is owned by PLAN-031. Applied
+ * identically on every surface the learner hears the coach through.
+ */
+export type CoachStyle = "warm" | "neutral" | "direct";
+/**
  * The two ways to work a passage. `passage` is close reading — focus a sentence, tap a
  * word, read the coach's note. `prompter` is the same text moving up the screen at a
  * pace you set, to be read out loud. Same passage, two exercises.
@@ -145,6 +151,13 @@ export interface Settings {
    * default; `quick` barely outruns their average, `patient` gives a long beat.
    */
   patience: "quick" | "normal" | "patient";
+  /**
+   * The coach's voice (PLAN-033 §6.4): `warm` (default), `neutral`, or `direct`.
+   * `direct` means fewer softeners, not harder content — difficulty is owned by
+   * PLAN-031. Applied identically on every surface the learner hears the coach
+   * through.
+   */
+  coachStyle: CoachStyle;
 }
 
 /** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
@@ -244,6 +257,9 @@ export const defaultSettings: Settings = {
   // latency before offering (PLAN-032). A first session, with no baseline yet,
   // produces no offer at all.
   patience: "normal",
+  // Warm by default: the coach's voice is encouraging until the learner says
+  // otherwise (PLAN-033 §6.4).
+  coachStyle: "warm",
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>

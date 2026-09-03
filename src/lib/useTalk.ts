@@ -15,6 +15,7 @@ import {
   parseTitle,
   memoryPrompt,
   parseMemory,
+  openingDetail,
   shouldShowInline,
   rewindOwnPrompt,
   parseOwnLine,
@@ -90,6 +91,7 @@ import {
   saveMetrics,
   recentMemories,
   recentSignals,
+  stampMemoryAsked,
   vocabCounts,
 } from "./db";
 
@@ -659,11 +661,19 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         levelOf(settings.profile),
         { ease: false, canSpeak: speech.canSpeak },
       );
+      // PLAN-033: the one detail this session may open with, picked at the door
+      // from the memory rows and nothing else. `null` is a real answer — a
+      // learner with no recent, open-ended, unasked fact gets an opening with no
+      // personal detail. When one is chosen it is stamped as asked *now*, the
+      // moment it is supplied to the system prompt — not when the model is
+      // observed to have used it.
+      const opening = openingDetail(memories, Date.now());
+      if (opening) void stampMemoryAsked(opening.id).catch(() => {});
       const system =
         buildSystem(settings, sc, sc.persona, pack, memories, {
           axis: axis.current,
           step: settings.difficultyStep,
-        }, correctionRecords.current) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
+        }, correctionRecords.current, opening) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
       history.current = [{ role: "system", content: system }];
       try {
         try {

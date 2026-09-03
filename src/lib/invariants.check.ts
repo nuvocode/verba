@@ -244,12 +244,12 @@ const REPAIR_LEDGER: RepairRow[] = [
   {
     id: 13,
     claim: "At most one personal detail per opening, never re-asked",
-    pending: "#66 — PLAN-033",
+    assertedIn: [{ file: "src/lib/prompts.check.ts", marker: "memory ledger 13" }],
   },
   {
     id: 14,
     claim: "Coach personality is consistent; style applies on every surface",
-    pending: "#66 — PLAN-033",
+    assertedIn: [{ file: "src/lib/prompts.check.ts", marker: "memory ledger 14" }],
   },
   {
     id: 15,

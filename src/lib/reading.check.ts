@@ -23,8 +23,8 @@ assert(!storyPrompt(s, { sentences: LENGTHS.short }).includes("Do not pad it out
 
 // --- topic: what the reader typed outranks the day's plan and the coach's file ---
 const known = [
-  { id: 1, fact: "Lives in Ankara", created_at: 0 },
-  { id: 2, fact: "Loves Superman comics", created_at: 0 },
+  { id: 1, fact: "Lives in Ankara", created_at: 0, kind: "state", asked_at: null },
+  { id: 2, fact: "Loves Superman comics", created_at: 0, kind: "state", asked_at: null },
 ];
 const asked = storyPrompt(s, { topic: "a trip to Japan", interests: "cooking", memories: known });
 assert(asked.includes("The learner asked for a passage about: a trip to Japan"), "the topic they named is the topic");

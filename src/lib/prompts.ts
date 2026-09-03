@@ -1,4 +1,4 @@
-import type { Settings } from "./settings.ts";
+import type { CoachStyle, Settings } from "./settings.ts";
 import { levelOf } from "./model.ts";
 import type { Persona, Scenario } from "./scenarios";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
@@ -37,17 +37,33 @@ export function buildSystem(
   memories: Memory[] = [],
   difficulty: SystemDifficulty = { axis: null, step: 0 },
   corrections: string[] = [],
+  opening: Memory | null = null,
 ): string {
   return [
     `You are Verba, a warm and encouraging ${s.profile.targetLanguage} conversation tutor.`,
     `For this session you are ${persona.name}, ${persona.role}. This persona is fixed for the whole session — stay in it throughout.`,
+    styleGuidance(s.coachStyle),
     `The learner's native language is ${s.profile.nativeLanguage}. Their self-reported level is ${levelOf(s.profile)}.`,
     `Scenario: ${scenario.setup}`,
     scenario.goals?.length ? `Help the learner practise these goals: ${scenario.goals.join("; ")}.` : "",
     packGuidance(pack),
     memoryBrief(memories),
     memories.length
-      ? `${memoryStance} The scenario is what you talk about. Never read the list back, and never tell the learner you keep notes on them.`
+      ? `${memoryStance} The scenario is what you talk about. Never read the list back, and never volunteer that you keep notes on them.`
+      : "",
+    // PLAN-033: the one exception to the stance, and only when a detail was
+    // supplied. The stance forbids reaching into the list; this hands the model
+    // one fact, already chosen and checked, and permits one question about it.
+    // The fact is named inline — a general "you may open on something you
+    // remember" would re-open the door the stance closes. No detail → no sentence.
+    opening
+      ? `You may open by asking after this one thing the learner told you: "${opening.fact}". Ask about it once, and only if it fits the moment — do not reach for anything else on the list.`
+      : "",
+    // PLAN-033: the honesty clause. If the learner asks how the coach knows
+    // something, the answer is the truth — Verba keeps notes, and they can read
+    // and delete all of them. Never deny, deflect, or claim to have guessed.
+    memories.length
+      ? `If the learner asks how you know something, answer honestly: Verba keeps notes of what they have said, and they can read and delete all of them on the Memory screen. Never deny it, deflect, or claim to have guessed.`
       : "",
     ``,
     `Hold a natural conversation in ${s.profile.targetLanguage}. Match your vocabulary and sentence length to a ${levelOf(s.profile)} learner. Always keep the conversation going by ending your reply with a question or prompt.`,
@@ -336,6 +352,7 @@ export function rewindOwnPrompt(s: Settings, pack?: LanguagePack): string {
     `Never say or imply that the learner did not understand, missed anything, or got anything wrong.`,
     `Do not ask a question and do not add anything else.`,
     packGuidance(pack),
+    styleGuidance(s.coachStyle),
     `Answer with ONLY a JSON object: { "line": "your one short line in ${s.profile.targetLanguage}" }.`,
   ]
     .filter(Boolean)
@@ -362,6 +379,7 @@ export function rewindUnpackPrompt(s: Settings, line: string, keyWord: string, p
     keyWord ? `The word that carried the meaning is "${keyWord}".` : `Name the one word in that line that carried the meaning.`,
     `Do not say the learner did not understand. Do not correct them.`,
     packGuidance(pack),
+    styleGuidance(s.coachStyle),
     `Answer with ONLY a JSON object: { "parts": ["a short chunk of the line", "another"], "keyWord": "the one word", "gloss": "that word's meaning in ${s.profile.nativeLanguage}" }.`,
   ]
     .filter(Boolean)
@@ -440,6 +458,7 @@ export function summaryPrompt(s: Settings, pack?: LanguagePack): string {
   return [
     `Summarise this ${s.profile.targetLanguage} practice session for the learner.`,
     packGuidance(pack),
+    styleGuidance(s.coachStyle),
     `Answer with ONLY a JSON object: { "summary": "2-3 sentences on what was practised, written in ${s.profile.nativeLanguage}", "strengths": ["short point", ...], "focus": ["short thing to work on next", ...] }.`,
     `Base "strengths" and "focus" on the learner's actual messages. Keep each point under 12 words.`,
     // One voice, across all history (PLAN-020 §2.2): the summary is a constraint,
@@ -524,12 +543,109 @@ export function parseTitle(raw: string): string {
  * One durable fact, in the learner's own language, with the day it was learned.
  * The date is part of the record: it is what lets the coach say "you mentioned a
  * few weeks ago…", and what lets a fact that has gone stale be spotted.
+ *
+ * `kind` is the classification made once at write time (PLAN-033): `"state"` is a
+ * closed attribute ("has two cats"), `"event"` is something that can be asked
+ * about again ("interviewing next week"). `null` means unclassified — every fact
+ * recorded before this plan — and an unclassified fact is **not** an opening.
+ *
+ * `asked_at` is stamped when a session opens with this fact as its one detail, so
+ * the same question is never asked twice.
  */
 export interface Memory {
   id: number;
   fact: string;
   created_at: number;
+  kind: "state" | "event" | null;
+  asked_at: number | null;
 }
+
+/**
+ * How old a fact may be and still open a session. Older than this is an archive,
+ * not an opening — a coach that opens on something from two months ago is
+ * performing recall, which is exactly what the stance forbids.
+ */
+export const OPENING_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * The one detail a session may open with, or `null` when there is none.
+ *
+ * Four rules, in order: recent (not older than 30 days), open-ended (`kind ===
+ * "event"`), unasked (`asked_at` is null), and told not derived (it takes
+ * `Memory[]` and nothing else, so no statistic can reach it). Returns `null`
+ * freely — a learner with only stale, stative, already-asked or unclassified
+ * facts gets an opening with no personal detail, which is fine. It is one detail
+ * **at most**, never a requirement, and never the least-bad candidate.
+ */
+export function openingDetail(memories: Memory[], now: number): Memory | null {
+  for (const m of memories) {
+    if (now - m.created_at > OPENING_MAX_AGE_MS) continue; // stale — an archive, not an opening
+    if (m.kind !== "event") continue; // stative or unclassified — not open-ended
+    if (m.asked_at !== null) continue; // already asked once
+    return m;
+  }
+  return null;
+}
+
+/**
+ * The paragraph that pins the coach's voice to a style (PLAN-033 §6.4). Appended
+ * to the prompts the learner hears the coach through — Talk, the weekly report,
+ * the Read notes. `direct` means fewer softeners, not harder content; difficulty
+ * is owned by PLAN-031 and nothing here touches it.
+ */
+export function styleGuidance(style: CoachStyle): string {
+  switch (style) {
+    case "direct":
+      return `Speak directly: fewer softeners, no padding, no "maybe you could". Say what you mean plainly.`;
+    case "neutral":
+      return `Keep a steady, plain tone: neither effusive nor clipped. Say what you mean without flourish.`;
+    case "warm":
+    default:
+      return `Keep a warm, encouraging tone: friendly, supportive, and unhurried.`;
+  }
+}
+
+/**
+ * The prompts the learner hears the coach through — the ones that must carry
+ * `styleGuidance`. Every `export function …Prompt(` in `src/lib`, plus
+ * `buildSystem`, appears in exactly one of this list or `STRUCTURED_PROMPTS`;
+ * `prompts.check.ts` asserts the completeness.
+ *
+ * Each entry is a `file:name` key, so two prompts that share a name in different
+ * files (e.g. `listening.ts:outlinePrompt` and `reading.ts:outlinePrompt`) are
+ * distinct rows and are classified independently.
+ */
+export const SPOKEN_PROMPTS = [
+  "prompts.ts:buildSystem",
+  "prompts.ts:rewindOwnPrompt",
+  "prompts.ts:rewindUnpackPrompt",
+  "prompts.ts:summaryPrompt",
+  "coach.ts:weeklyReportPrompt",
+  "coach.ts:drillPrompt",
+  "learn.ts:recapPrompt",
+  "reading.ts:notesPrompt",
+  "reading.ts:explainWordPrompt",
+] as const;
+
+/**
+ * The prompts that extract structured data — a JSON schema has no voice to be
+ * consistent in, and a tone paragraph there is noise the learner never reads.
+ * Must **not** carry `styleGuidance`.
+ */
+export const STRUCTURED_PROMPTS = [
+  "prompts.ts:vocabPrompt",
+  "prompts.ts:titlePrompt",
+  "prompts.ts:memoryPrompt",
+  "placement.ts:placementPrompt",
+  "listening.ts:outlinePrompt",
+  "listening.ts:chapterPrompt",
+  "reading.ts:outlinePrompt",
+  "reading.ts:storyPrompt",
+  "reading.ts:continueReadingPrompt",
+  "reading.ts:draftPrompt",
+  "reading.ts:rewritePrompt",
+  "reading.ts:comprehensionPrompt",
+] as const;
 
 /** The date as the record carries it, and as Settings shows it: "14 Jul 2026". */
 export const memoryDate = (ts: number): string =>
@@ -584,12 +700,13 @@ export function memoryPrompt(s: Settings, known: Memory[]): string {
     `From this conversation, record only what is durable: who they are, what they do, why they are learning ${s.profile.targetLanguage}, the people and places that recur in their life, what they have said they like and dislike.`,
     `Not what happened today, not what they practised, not how well they did — that is measured elsewhere.`,
     ``,
-    `Answer with ONLY a JSON object: { "facts": [ { "fact": "one short fact, written in ${s.profile.nativeLanguage}", "replaces": null } ] }.`,
+    `Answer with ONLY a JSON object: { "facts": [ { "fact": "one short fact, written in ${s.profile.nativeLanguage}", "replaces": null, "kind": "state | event" } ] }.`,
     `Rules:`,
     `- Never say the same thing twice. If a fact is already recorded above, leave it out entirely.`,
     `- If this conversation changed a recorded fact — they moved city, changed job, took up something new — write the fact as it now stands and set "replaces" to that fact's number. The old one is dropped, not kept beside it.`,
     `- "replaces" is null for anything genuinely new.`,
     `- A fact is a short third-person phrase, under 12 words: "Works as a backend developer", "Cooks most evenings, eats out at weekends".`,
+    `- "kind" is "event" when the fact is something that can be asked about again — an upcoming interview, a move, a trip, a new job. It is "state" when it is a closed attribute — a job title, a pet, a preference.`,
     `- Record nothing you are not sure of. { "facts": [] } is the right answer for a conversation that revealed nothing durable.`,
   ].join("\n");
 }
@@ -599,6 +716,12 @@ export interface MemoryWrite {
   fact: string;
   /** The id of the recorded fact this one replaces, or null when it is new. */
   replaces: number | null;
+  /**
+   * The classification made once at write time (PLAN-033): `"event"` is
+   * open-ended, `"state"` is a closed attribute. Anything else — a missing or
+   * unrecognised value — parses to `null`, and a `null` kind is never an opening.
+   */
+  kind: "state" | "event" | null;
 }
 
 export function parseMemory(raw: string): MemoryWrite[] {
@@ -610,9 +733,14 @@ export function parseMemory(raw: string): MemoryWrite[] {
       // Models hand back "3" as often as 3, and null / undefined / "" as often as
       // neither. Anything that is not a positive whole number means "this is new".
       const r = Number(f.replaces);
+      // `kind` is gated to the two values; anything else becomes null — an
+      // unclassified fact has not been shown to be open-ended, and a coach that
+      // opens on "has two cats" is the failure §6.3 describes.
+      const k = f.kind;
       return {
         fact: String(f.fact).replace(/\s+/g, " ").trim().slice(0, 120),
         replaces: Number.isInteger(r) && r > 0 ? r : null,
+        kind: k === "event" || k === "state" ? k : null,
       };
     });
 }
@@ -645,7 +773,12 @@ export function planMemory(known: Memory[], incoming: MemoryWrite[]): MemoryWrit
     if (out.length >= MEMORY_PER_SESSION) break;
     const key = factKey(w.fact);
     if (!key || seen.has(key)) continue; // …and `seen` grows as we go, so not twice within one batch either
-    out.push({ fact: w.fact, replaces: w.replaces != null && ids.has(w.replaces) ? w.replaces : null });
+    out.push({
+      fact: w.fact,
+      replaces: w.replaces != null && ids.has(w.replaces) ? w.replaces : null,
+      // The classification rides through unchanged — it was gated at parse.
+      kind: w.kind,
+    });
     seen.add(key);
   }
   return out;
