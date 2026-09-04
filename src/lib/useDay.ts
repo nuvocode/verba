@@ -165,9 +165,14 @@ export function useDay(settings: Settings): Day {
           // the plan is rebuilt, and the stale row stays on disk until it is overwritten.
           if (!isLegacyPlanShape(stored)) {
             const scores = await recentMetricScores(settings.profile.targetLanguage, 12);
+            // The day number is derived, not owned by the row: a plan saved by an
+            // older build carries whatever `dayNumber` said then, and PLAN-038 changed
+            // what it says. Recomputing it on resume keeps one number on screen all
+            // day and heals a row written before the fix, without a migration.
+            const dayIndex = await dayNumber(settings.profile.targetLanguage, date);
             if (!live) return;
             setLevelEstimate(levelEstimateFrom(scores));
-            setPlan(stored);
+            setPlan({ ...stored, dayIndex });
             setDone(JSON.parse(row.done));
             setRecap(row.recap ? JSON.parse(row.recap) : null);
             setFocus(nextFocus);
