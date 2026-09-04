@@ -3,7 +3,7 @@ id: PLAN-035
 title: The learner's own text, used as material
 branch: plan/m6-repair-layer
 base: master
-status: todo
+status: done
 executor: unassigned
 created: 2026-09-01
 issue: https://github.com/nuvocode/verba/issues/67

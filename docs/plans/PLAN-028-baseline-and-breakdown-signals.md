@@ -3,7 +3,7 @@ id: PLAN-028
 title: The learner's own baseline, and the eight breakdown signals
 branch: plan/m6-repair-layer
 base: master
-status: todo
+status: done
 executor: unassigned
 created: 2026-09-01
 issue: https://github.com/nuvocode/verba/issues/63

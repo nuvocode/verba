@@ -3,7 +3,7 @@ id: PLAN-030
 title: The coach stops and owns it
 branch: plan/m6-repair-layer
 base: master
-status: todo
+status: done
 executor: unassigned
 created: 2026-09-01
 issue: https://github.com/nuvocode/verba/issues/64
