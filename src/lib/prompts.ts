@@ -99,6 +99,7 @@ export function buildSystem(
     `Rules:`,
     `- Do NOT correct the learner inside "reply". Put every correction only in the "corrections" array.`,
     `- Only add a correction for a real grammar, word-choice, or spelling mistake. If the learner's message was fine, return "corrections": [].`,
+    `- Correct ONLY the learner's LAST message. Never re-correct wording from an earlier turn — it was already shown, and repeating it wastes the wrap-up.`,
     `- "severity" is "severe" when the mistake breaks meaning or grammar rules, "minor" when it is understandable but unnatural.`,
     `- "category" is which kind of mistake it is: grammar, vocabulary, wordOrder, register, or pronunciation. Pick the one that fits best.`,
     `- Give 2-3 "suggestions". Keep them natural and at the learner's level.`,
@@ -335,6 +336,32 @@ export function parseTurn(raw: string): TurnResult {
         ? { for: obj.praise.for, text: obj.praise.text }
         : null,
   };
+}
+
+/**
+ * The gate that turns reported corrections into believed ones — the same bargain as
+ * `verifyRepair` (repair.ts): the model may say what was wrong with the learner's
+ * words, but it may never correct words the learner did not just write. `parseTurn`
+ * only checks shape; it cannot see the message. A correction whose `original` is not
+ * literally in this turn's message — after case, punctuation and whitespace folding —
+ * is a re-correction of an earlier turn, and is dropped. Repeats within one turn are
+ * dropped too: one mistake is one correction.
+ */
+export function verifyCorrections(reported: Correction[], msg: string, locale: string): Correction[] {
+  // The same folding as `repairNorm` (repair.ts) and `norm` (questions.ts).
+  const fold = (s: string) => s.toLocaleLowerCase(locale).replace(/\p{P}/gu, "").replace(/\s+/g, " ").trim();
+  const said = fold(msg);
+  const seen = new Set<string>();
+  const kept: Correction[] = [];
+  for (const c of reported) {
+    const original = fold(c.original);
+    if (!original || !said.includes(original)) continue; // never written this turn → not a correction of it
+    const key = `${original}→${fold(c.fixed)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(c);
+  }
+  return kept;
 }
 
 // ---- the rewind (PLAN-030) ----------------------------------------------------
