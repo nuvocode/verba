@@ -5,7 +5,7 @@
 // process.
 //
 // Spec: docs/plans/5-verba-akicilik-ve-monitor-katmani-spec.md §2.4, §7.4, §9.
-import type { ActivityId, SignalDraft, SignalKind } from "./model.ts";
+import { signalLabel, type ActivityId, type Signal, type SignalDraft, type SignalKind } from "./model.ts";
 import type { VoiceTurn } from "./useTalk.ts";
 import type { Correction, CorrectionCategory, SelfRepairReport, Severity } from "./prompts.ts";
 import { shouldShowInline } from "./prompts.ts";
@@ -161,6 +161,50 @@ export function timingOf(v: VoiceTurn, packId: string): Timing | null {
     meanLengthOfRun,
     midClausePauseRatio,
     filledPauseRate,
+  };
+}
+
+/** What one 4/3/2 round measured — the round's own rates, not one recording's. */
+export type RoundTiming = Pick<Timing, "speechRate" | "articulationRate" | "meanLengthOfRun">;
+
+/**
+ * One 4/3/2 round's measurement, aggregated over every spoken recording in the
+ * round (§5.2, PLAN-044). `timingOf` measures one recording; a round is a whole
+ * session, so the card's numbers are recomputed across it: total words over the
+ * round's total utterance time, and total words over its total runs. The same
+ * floors apply per recording — a recording under 1.5 s, with no words, or with
+ * no speech frame has no tempo and is skipped.
+ *
+ * Null when the round holds no qualifying recording: an unmeasured round did not
+ * score nothing, it was not measured. Only the two fields the card shows are
+ * measured here; the four per-recording fields have no round-level meaning and
+ * stay null rather than being averaged into a number nobody can read.
+ */
+export function roundTimingOf(voice: VoiceTurn[]): RoundTiming | null {
+  let wordsTotal = 0;
+  let utteranceMs = 0;
+  let speakingMs = 0;
+  let runs = 0;
+  for (const v of voice) {
+    if (v.ms < 1500 || !v.text.trim() || !v.levels.length) continue;
+    const ws = words(v.text, v.locale);
+    if (!ws.length) continue;
+    const spoke = fromFirstSpeech(v.levels);
+    if (!spoke.length) continue;
+    const ms = v.ms * (spoke.length / v.levels.length);
+    wordsTotal += ws.length;
+    utteranceMs += ms;
+    speakingMs += ms * speechRatio(spoke);
+    runs += speechRuns(spoke, 0.25);
+  }
+  if (!wordsTotal || !utteranceMs) return null;
+  return {
+    speechRate: wordsTotal / (utteranceMs / 60000),
+    // The speaking time only — pauses removed, exactly as `timingOf` does it. A
+    // round that reused `speechRate` here would be claiming its pauses took no
+    // time at all.
+    articulationRate: wordsTotal / (Math.max(1, speakingMs) / 60000),
+    meanLengthOfRun: wordsTotal / Math.max(1, runs),
   };
 }
 
@@ -576,4 +620,143 @@ export function closingItems(corrections: Correction[], strengths: string[]): Cl
  */
 function noteOf(c: Correction): string {
   return c.note.trim() || c.fixed;
+}
+
+// --- §5: the four exercises (PLAN-044) ----------------------------------------
+
+/**
+ * Whether the 4/3/2 card shows its third number, `falseAlarmRepair` (§5.2's
+ * accuracy row). **Pinned `false`** — PLAN-041's `## Hand sample` is still blank,
+ * and that plan's bar is that a metric does not reach a screen until a human has
+ * sat with a real sample and disagreed with no more than a fifth of the
+ * surviving `falseAlarm`s. Until the hand sample is filled in, the card says the
+ * third column is withheld rather than inventing it — absent, never zero, applied
+ * to a whole column. Flipping this constant to `true` is a deliberate act tied
+ * to PLAN-041, which is why the reason is written here: the flip is a decision,
+ * not a drive-by.
+ */
+export const FALSE_ALARM_ON_SCREEN = false;
+
+/**
+ * The 4/3/2 lengths, in minutes (§5.2, PLAN-044 §2). One number, one place to
+ * change the ratio — the plan's "a 3/2/1 variant is the one constant that would
+ * change" is exactly this array.
+ */
+export const FOUR_THREE_TWO_MINUTES = [4, 3, 2] as const;
+
+/**
+ * The planning time this learner gets next (§5.1). 60 → 30 → 0, moved down after
+ * two sessions at a rung, and never moved back up on its own: the walk down is
+ * the exercise. `past` is this learner's planning times, most recent first.
+ *
+ * With no history the answer is 60 — the most support, not the least. A learner
+ * with nothing recorded is not a learner who needs no planning time. One session
+ * *holds its rung* — a single session is not yet the two consecutive ones the
+ * walk down needs. A mixed history holds its current rung rather than guessing at
+ * a trend.
+ *
+ * `past` is the walk's own record, and the caller must hand over only the
+ * sessions that had a planning door — `planningTimeSec > 0`. Every other session
+ * files 0 (an ordinary conversation, a 4/3/2 round, the ladder's rungs 2–4), and
+ * a 0 on the record is indistinguishable from a 0 the walk handed out. Counting
+ * them would pin every learner at 0 for good after their first exercise, since
+ * zero never walks back up. Once the walk has reached 0 its head stays `[30, 30,
+ * …]` — the answer is 0 and stays 0, which is the rung it walked to.
+ */
+export function nextPlanningSec(past: number[]): 0 | 30 | 60 {
+  if (past.length === 0) return 60; // no history — the most support, not the least
+  if (past.length === 1) return past[0] === 0 ? 0 : past[0] === 30 ? 30 : 60; // one session holds its rung
+  const latest = past[0];
+  const second = past[1];
+  if (latest === 0) return 0; // zero never walks back up on its own
+  if (latest === 60 && second === 60) return 30; // two sessions at 60 ⇒ 30
+  if (latest === 30 && second === 30) return 0; // two sessions at 30 ⇒ 0
+  return (latest === 0 ? 0 : latest === 30 ? 30 : 60); // a mixed history holds its current rung rather than guessing
+}
+
+/**
+ * §5.3's four rungs, as the contexts they are. The spec's table, as data — mode
+ * and `taskRepetition` are not in the table, so they take `FREE_CONTEXT`'s
+ * defaults (`free`, first pass): a ladder session is an ordinary conversation
+ * being measured under a condition, not a fluency *mode* session (the fluency
+ * mode is entered only through the contract, and this plan does not touch that
+ * door). The three fields the table does own — planning, topic familiarity,
+ * interlocutor pressure — are the rung.
+ *
+ * Rung 4 is the only `interrupting` one; rungs 1–3 are `none`. And rung 4 is the
+ * one a session is *allowed* to leave mid-way — see `leaveRung4`, and §4 of
+ * PLAN-044 for why rewriting this context on the way out would corrupt both sides
+ * of every comparison.
+ */
+export function rungContext(rung: 1 | 2 | 3 | 4): MonitorContext {
+  switch (rung) {
+    case 1:
+      return { ...FREE_CONTEXT, planningTimeSec: 60, topicFamiliarity: "prepared", interlocutorPressure: "none" };
+    case 2:
+      return { ...FREE_CONTEXT, planningTimeSec: 0, topicFamiliarity: "prepared", interlocutorPressure: "none" };
+    case 3:
+      return { ...FREE_CONTEXT, planningTimeSec: 0, topicFamiliarity: "novel", interlocutorPressure: "none" };
+    case 4:
+      return { ...FREE_CONTEXT, planningTimeSec: 0, topicFamiliarity: "novel", interlocutorPressure: "interrupting" };
+  }
+}
+
+/**
+ * One round of 4/3/2 (§5.2, PLAN-044 §2). Three consecutive sessions sharing a
+ * topic, with `taskRepetition` 1, 2, 3 — three `activityId`s the card groups out
+ * of `recentSignals`. Rounds 2 and 3 are `prepared` because the learner has now
+ * told this topic once (that is the whole point of the exercise; calling them
+ * `novel` would be filing a false condition), and `paced` is what the shrinking
+ * clock is — the third value of the pressure union, and this exercise is what it
+ * was for.
+ */
+export function fourThreeTwoContext(round: 1 | 2 | 3): MonitorContext {
+  switch (round) {
+    case 1:
+      return { ...FREE_CONTEXT, taskRepetition: 1, topicFamiliarity: "novel", interlocutorPressure: "none" };
+    case 2:
+      return { ...FREE_CONTEXT, taskRepetition: 2, topicFamiliarity: "prepared", interlocutorPressure: "paced" };
+    case 3:
+      return { ...FREE_CONTEXT, taskRepetition: 3, topicFamiliarity: "prepared", interlocutorPressure: "paced" };
+  }
+}
+
+/**
+ * Whether the coach names a structure out loud before the task (§5.4).
+ *
+ * Three `avoidance` signals for the same label, across at least three *different*
+ * sessions. The bar is higher than a measured signal's because every avoidance
+ * signal is `judged: true` — a model's opinion about something that did not
+ * happen, with nothing in the transcript behind it (PLAN-042 §4). One opinion
+ * repeated three times in one session is one opinion; three sessions is a pattern.
+ *
+ * Returns the label to name, or null. Null is the normal answer, and the coach
+ * says nothing at all — never a hedge, never "you may have been avoiding". When
+ * more than one label clears the bar, the most recent one to do so wins — the
+ * structure the learner is dodging *now*.
+ */
+export function goalToName(signals: Signal[]): string | null {
+  // The bar is three sessions, not three rows: a label's sessions are the distinct
+  // activities that filed an avoidance signal about it, so three repeats inside
+  // one session still count as one opinion.
+  const sessions = new Map<string, Set<string>>();
+  for (const s of signals) {
+    if (s.kind !== "avoidance") continue;
+    const label = signalLabel(s);
+    if (label === null) continue;
+    let set = sessions.get(label);
+    if (!set) {
+      set = new Set();
+      sessions.set(label, set);
+    }
+    set.add(s.activityId);
+  }
+  // The most recent label to reach three sessions wins. `recentSignals` returns
+  // recent-first, so the map's insertion order is "most recently mentioned
+  // first" — the *first* label that clears is the one being dodged now. Keeping
+  // the last one instead would name the stalest pattern on the record.
+  for (const [label, set] of sessions) {
+    if (set.size >= 3) return label;
+  }
+  return null;
 }

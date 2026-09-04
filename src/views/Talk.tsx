@@ -11,8 +11,13 @@ import { sessionGroups, sessionMessages, addVocab, type SessionDay, type Session
 import { PROVIDERS } from "../lib/models";
 import { when } from "../lib/fmt";
 import type { CorrectionCategory } from "../lib/prompts";
-import { accuracyContext, closingItems as computeClosingItems, FLUENCY_MINUTES } from "../lib/fluency";
+import { accuracyContext, closingItems as computeClosingItems, FLUENCY_MINUTES, fourThreeTwoContext, nextPlanningSec, roundTimingOf, rungContext, FREE_CONTEXT, FOUR_THREE_TWO_MINUTES, type MonitorContext } from "../lib/fluency";
+import type { RoundTiming } from "../lib/fluency";
+import { monitorContext } from "../lib/model";
+import { recentSignals } from "../lib/db";
 import Contract from "./talk/Contract";
+import Planning from "./talk/Planning";
+import Rounds from "./talk/Rounds";
 import {
   bandSplit,
   duplicateScenario,
@@ -112,12 +117,83 @@ export default function Talk({
   // on the learner's own tap. The label stays; the list appears behind the click.
   // Reset per conversation so a fresh session starts with the list closed.
   const [stuckOpen, setStuckOpen] = useState(false);
+  // The exercise the learner armed on the entry row (PLAN-044 §6). `"432"` arms
+  // the three-round 4/3/2 runner; `"ladder"` arms the four-button pressure
+  // ladder (the learner picks the rung; the system never pushes). `null` is the
+  // ordinary start.
+  const [pendingExercise, setPendingExercise] = useState<"432" | "ladder" | null>(null);
+  // The runner that is actually running (set once a scenario is picked): which
+  // round of 4/3/2 is next, the scenario the three rounds share, and the rounds
+  // already measured (`null` for a round with no timing — unmeasured renders
+  // empty, never zero). `null` when not in the multi-round exercise.
+  const [exercising, setExercising] = useState<{
+    sc: Scenario;
+    round: 0 | 1 | 2;
+    times: (RoundTiming | null)[];
+  } | null>(null);
+  // The ladder rung the learner chose, awaiting a scenario card (rung 4 carries
+  // its own confirm). Rung 1's context is the one with a planning time (§5.3),
+  // so on a rung-1 pick the planning screen runs first.
+  const [ladderRung, setLadderRung] = useState<1 | 2 | 3 | 4 | null>(null);
+  // Rung 4's own confirm — it is only offered when the learner asks for it in as
+  // many words (§5.3), so one tap on rung 4 asks, the second starts.
+  const [confirmRung4, setConfirmRung4] = useState(false);
+  // The planning screen (§5.1) waiting to begin a session: the scenario, the
+  // context it will start with, and whether it is a 4/3/2 repeat round (rounds 2
+  // and 3 carry the repetition rule). `null` is the closed panel.
+  const [planningFor, setPlanningFor] = useState<{ sc: Scenario; ctx: MonitorContext; repeat: boolean } | null>(null);
+  // PLAN-044 fixup §5.1: the planning time this learner gets next, derived from
+  // their past `sessionContext` signals by `nextPlanningSec` (60 → 30 → 0). The
+  // learner may override it on the entry row before a session starts; `null`
+  // until the signals have loaded.
+  const [planningSec, setPlanningSec] = useState<0 | 30 | 60 | null>(null);
+  // The learner's override of `planningSec` for the next session, or null to
+  // use the derived value. Cleared once a session begins.
+  const [planningOverride, setPlanningOverride] = useState<0 | 30 | 60 | null>(null);
+  // True when the finished 4/3/2 is showing its side-by-side card (§5.2), and
+  // the three rounds' measurements it shows (preserved past the exercise closing:
+  // `exercising` carries them only while the runner is alive).
+  const [roundCard, setRoundCard] = useState<{ rounds: (RoundTiming | null)[] } | null>(null);
   const [, bump] = useState(0); // scenarios live in localStorage — re-read after a change
 
   // The picker is also the archive — reload it whenever we come back to it.
   useEffect(() => {
     if (!talk.started) void sessionGroups().then(setPast).catch(() => {});
   }, [talk.started, talk.reflection]);
+
+  // PLAN-044 fixup §5.1: the planning time this learner gets next, from their
+  // past `sessionContext` signals (most recent first). `nextPlanningSec` walks
+  // 60 → 30 → 0 after two sessions at a rung; with no history it is 60 — the
+  // most support, not the least. Re-derived whenever the picker is shown.
+  //
+  // Only the sessions that actually had a planning door count (`> 0`). A 0 on
+  // the record is written by every session that never saw one — a 4/3/2 round,
+  // the ladder's rungs 2–4, an ordinary conversation the learner set to `none` —
+  // and it is indistinguishable from a 0 the walk itself handed out. Counting
+  // them pinned every learner at 0 for good after their first exercise, because
+  // zero never walks back up. Filtered, the walk's own record is what remains,
+  // and once it reaches 0 its head stays `[30, 30, …]`: the answer is 0 and
+  // stays 0, which is the rung it walked to.
+  useEffect(() => {
+    if (talk.started) return;
+    let live = true;
+    void recentSignals(settings.profile.targetLanguage)
+      .then((signals) => {
+        if (!live) return;
+        const past = signals
+          .map((s) => monitorContext(s))
+          .filter((c): c is NonNullable<typeof c> => c !== null)
+          .map((c) => c.planningTimeSec)
+          .filter((sec) => sec > 0);
+        setPlanningSec(nextPlanningSec(past));
+      })
+      .catch(() => {
+        if (live) setPlanningSec(60);
+      });
+    return () => {
+      live = false;
+    };
+  }, [talk.started, settings.profile.targetLanguage]);
 
   useEffect(() => {
     if (open) void sessionMessages(open.id).then(setTranscript).catch(() => setTranscript([]));
@@ -144,6 +220,16 @@ export default function Talk({
     setContractFor(null);
     setPendingMode(null);
     setStuckOpen(false);
+    // PLAN-044: a conversation opening (first or a 4/3/2's next round) clears
+    // the entry-armings — the planning screen, the ladder pick and rung 4's
+    // confirm all belong to the start moment. `exercising` is deliberately
+    // preserved: the multi-round runner owns the session and advances it. The
+    // round card is NOT cleared here — it stays visible over the picker until
+    // the learner dismisses it or arms a new 4/3/2 (see `beginScenario`).
+    setPlanningFor(null);
+    setLadderRung(null);
+    setConfirmRung4(false);
+    setPlanningOverride(null);
   }, [talk.started]);
 
   // The streaming bubble's reveal is keyed to -1. When the stream empties — the
@@ -193,6 +279,45 @@ export default function Talk({
     if (talk.reflection && closes && !day.isDone(closes))
       void day.complete(closes, closing ? talkSignals(closing.id, talk.reflection, getPack(settings.packId)?.speech.locale ?? "en", settings.packId) : []);
   }, [talk.reflection]);
+
+  // 4/3/2's runner (PLAN-044 §2): each finished round measures what the mic
+  // heard and advances to the next. The three rounds are three consecutive
+  // sessions sharing a topic, so round 3's end hands the collected timings to
+  // the side-by-side card. A round whose recording never landed — nothing
+  // spoken, no envelope — yields `null` and the card renders it empty, not zero:
+  // an unmeasured round did not score nothing, it was not measured.
+  const advancedRound = useRef(0);
+  useEffect(() => {
+    if (!exercising || !talk.reflection) return;
+    const round = exercising.round;
+    // Guard: `talk.start` on the previous round set reflection to null, and this
+    // effect re-runs as that new session lands — advance only the round that
+    // just finished, exactly once (a StrictMode double-effect must not skip a
+    // round or advance two).
+    if (advancedRound.current !== round) return;
+    advancedRound.current += 1;
+    // PLAN-044 fixup: a round's measurement is the whole round, not its last
+    // recording — every spoken turn in the round, aggregated (total words over
+    // total utterance time). `timingOf` is per-recording; the card's
+    // "words per minute" and "words per run" are the round's, so they are
+    // recomputed across all the round's recordings.
+    const roundTiming = roundTimingOf(talk.reflection.voice ?? []);
+    const times = [...exercising.times];
+    times[round] = roundTiming;
+    if (round >= 2) {
+      // Round 3 finished — show the side-by-side card. The three rounds exist
+      // already; the exercise closes.
+      setExercising(null);
+      setRoundCard({ rounds: times });
+      return;
+    }
+    const next = (round + 1) as 0 | 1;
+    setExercising(() => ({ sc: exercising.sc, round: next, times }));
+    // Advance to the next round: start the shared scenario over, with the
+    // repetition rule on rounds 2 and 3 (`repeat` true from round 1→2 onward)
+    // and the round's own clock (`FOUR_THREE_TWO_MINUTES[next]` minutes).
+    void talk.start(exercising.sc, "normal", undefined, undefined, undefined, fourThreeTwoContext((next + 1) as 1 | 2 | 3), next >= 1, FOUR_THREE_TWO_MINUTES[next]);
+  }, [exercising, talk.reflection, settings.packId, talk]);
 
   // What the plan hands them next. Computed by skipping `closes` rather than reading
   // `day.next`, so the button is right on the reflection's first paint — before the effect
@@ -265,11 +390,12 @@ export default function Talk({
     const byId = new Map(registry.map((r) => [r.scenario.id, r.origin]));
     const { main, easier } = bandSplit(talk.scenarios, levelOf(settings.profile));
 
-    // Begin a scenario in whatever mode the learner armed (PLAN-043 §6). With
-    // no mode it is the ordinary start. Accuracy opens immediately — the same
-    // coach, live corrections. Fluency opens the contract bound to *this*
-    // scenario: the mode is established by the armed button and entered by
-    // accepting the scenario-bound contract (the only path into the mode).
+    // Begin a scenario in whatever the learner armed (PLAN-043 §6, PLAN-044 §6).
+    // With no mode and no exercise it is the ordinary start. Accuracy opens
+    // immediately. Fluency opens the contract bound to *this* scenario. 4/3/2
+    // and the ladder enter through the planning screen (`planningFor`), which
+    // hands the session its one context on start — the learner may override the
+    // planning time on the entry row.
     const beginScenario = (sc: Scenario) => {
       if (pendingMode === "accuracy") {
         setPendingMode(null);
@@ -277,8 +403,45 @@ export default function Talk({
       } else if (pendingMode === "fluency") {
         setPendingMode(null);
         setContractFor(sc);
+      } else if (pendingExercise === "432") {
+        setPendingMode(null);
+        setPendingExercise(null);
+        // A new 4/3/2 dismisses any previous round card — the card belongs to
+        // the exercise that just finished, and a fresh one starts clean.
+        setRoundCard(null);
+        // Round 1: taskRepetition 1, novel topic, no pressure, no repetition
+        // rule; it starts at once (no planning — §5.2's table names none). The
+        // runner is armed with this scenario so each finished round advances.
+        advancedRound.current = 0; // a fresh exercise starts its round counter
+        setExercising({ sc, round: 0, times: [null, null, null] });
+        void talk.start(sc, "normal", undefined, undefined, undefined, fourThreeTwoContext(1), false, FOUR_THREE_TWO_MINUTES[0]);
+      } else if (ladderRung !== null) {
+        setPendingMode(null);
+        const ctx = rungContext(ladderRung);
+        setLadderRung(null);
+        setConfirmRung4(false);
+        // Rung 1 is the only rung with a planning time (§5.3) — enter through
+        // the planning screen with the rung's *own* 60 seconds. §5.3's table is
+        // the table: the walk does not set the ladder's conditions, or rung 1
+        // would silently become rung 2 the moment the walk reached 0.
+        if (ctx.planningTimeSec > 0) {
+          setPlanningFor({ sc, ctx, repeat: false });
+        } else {
+          void talk.start(sc, "normal", undefined, undefined, undefined, ctx);
+        }
       } else {
-        void talk.start(sc);
+        // §5.1: every ordinary conversation starts with a planning parameter —
+        // the walk's value, or the learner's override on the entry row. This is
+        // the path that both consumes the entry row and feeds the walk. At 0 the
+        // conversation opens at once: a planning screen with nothing to count is
+        // a screen the learner blinks past, and 0 is where the walk ends up.
+        const planningTimeSec = planningOverride ?? planningSec ?? 60;
+        const ctx = { ...FREE_CONTEXT, planningTimeSec };
+        if (planningTimeSec > 0) {
+          setPlanningFor({ sc, ctx, repeat: false });
+        } else {
+          void talk.start(sc, "normal", undefined, undefined, undefined, ctx);
+        }
       }
     };
 
@@ -335,6 +498,25 @@ export default function Talk({
       );
     }
 
+    // PLAN-044 fixup §7: while the planning screen is open it is the whole
+    // picker — the topic and the countdown, and nothing else. Returning early
+    // keeps the scenario grid and the entry row off the screen during planning,
+    // so the learner is not choosing a scenario while the clock runs.
+    if (planningFor) {
+      return (
+        <Planning
+          topic={`${planningFor.sc.emoji} ${planningFor.sc.title}`}
+          seconds={planningFor.ctx.planningTimeSec}
+          onCancel={() => setPlanningFor(null)}
+          onDone={() => {
+            const { sc, ctx, repeat } = planningFor;
+            setPlanningFor(null);
+            void talk.start(sc, "normal", undefined, undefined, undefined, ctx, repeat);
+          }}
+        />
+      );
+    }
+
     return (
       <div className="today fade">
         <div className="eyebrow">Talk · {settings.profile.targetLanguage}</div>
@@ -359,6 +541,14 @@ export default function Talk({
           />
         )}
 
+        {/* The 4/3/2 card (§5.2, PLAN-044 §2): shown after round 3, three rounds
+            side by side. Shown over the picker once every round is measured. It
+            stays until the learner dismisses it or arms a new 4/3/2 — a finished
+            exercise is not silently wiped by the next conversation opening. */}
+        {roundCard && (
+          <Rounds rounds={roundCard.rounds} onClose={() => setRoundCard(null)} />
+        )}
+
         {/* PLAN-043 §6: the two modes, beside the ordinary start. A mode is
             armed here and applied when the learner picks a scenario — accuracy
             starts it immediately; fluency opens the contract bound to the chosen
@@ -380,6 +570,72 @@ export default function Talk({
             Accuracy mode
           </button>
         </div>
+
+        {/* PLAN-044 §6: the two exercises, beside the modes. 4/3/2 arms the
+            three-round runner. The pressure ladder is four buttons for the four
+            rungs — the learner picks the rung, the system never pushes (§5.3).
+            Rung 4's confirm is in the learner's own words ("ask for it in as
+            many words"), not a warning: one tap asks, the second starts with it.
+            Picking an exercise clears a mode, and back. */}
+        <div className="mode-row" style={{ marginBottom: 20 }}>
+          <button
+            className={`btn sm ghost ${pendingExercise === "432" ? "armed" : ""}`}
+            onClick={() => { setPendingExercise((e) => (e === "432" ? null : "432")); setPendingMode(null); }}
+            disabled={talk.busy || talk.scenarios.length === 0}
+          >
+            4/3/2 · tell it three times
+          </button>
+          {([1, 2, 3, 4] as const).map((rung) => (
+            <button
+              key={rung}
+              className={`btn sm ghost ${ladderRung === rung ? "armed" : ""}`}
+              onClick={() => {
+                setPendingMode(null);
+                if (rung === 4) {
+                  // Rung 4 is only offered when the learner asks for it in as
+                  // many words — one tap asks, the second starts.
+                  if (!confirmRung4) { setConfirmRung4(true); setLadderRung(4); return; }
+                }
+                setLadderRung(rung);
+                setConfirmRung4(false);
+              }}
+              disabled={talk.busy || talk.scenarios.length === 0}
+            >
+              {rung === 4 && confirmRung4 ? "Rung 4 — really?" : `Ladder ${rung}`}
+            </button>
+          ))}
+        </div>
+        {ladderRung !== null && (
+          <p style={{ color: "var(--ink3)", fontStyle: "italic", margin: "0 0 20px", fontSize: 13 }}>
+            {ladderRung === 4
+              ? "Rung 4: the other side speaks fast and politely interrupts. Pick a scenario, and this starts it. One key leaves it whenever you like."
+              : `Ladder ${ladderRung}: ${ladderRung === 1 ? "prepared topic, planning time, patient interlocutor." : ladderRung === 2 ? "prepared topic, no planning." : "new topic, no planning."} Pick a scenario to start.`}
+          </p>
+        )}
+
+        {/* PLAN-044 fixup §5.1: the planning time this learner gets next, and the
+            override. `nextPlanningSec` walks 60 → 30 → 0 from their past
+            sessions; the learner may override it for the next session. The
+            override is cleared once a session begins. */}
+        <div className="mode-row" style={{ marginBottom: 20 }}>
+          <span className="model" style={{ color: "var(--ink3)", fontSize: 12, marginRight: 4 }}>
+            Planning time:
+          </span>
+          {([0, 30, 60] as const).map((sec) => (
+            <button
+              key={sec}
+              className={`btn sm ghost ${(planningOverride ?? planningSec) === sec ? "armed" : ""}`}
+              onClick={() => setPlanningOverride((o) => (o === sec ? null : sec))}
+              disabled={talk.busy || talk.scenarios.length === 0}
+            >
+              {sec === 0 ? "none" : `${sec}s`}
+            </button>
+          ))}
+        </div>
+        <p style={{ color: "var(--ink3)", fontStyle: "italic", margin: "-12px 0 20px", fontSize: 12 }}>
+          An ordinary conversation starts here: the topic and a countdown, and nothing else — no notes. The
+          exercises above carry the planning time their own table names.
+        </p>
         {talk.error && (
           /* surface talk: error */
           <Failed say={talk.error} retry={{ label: "Try again", onClick: () => talk.scenarios[0] && void talk.start(talk.scenarios[0]) }} />
@@ -856,6 +1112,16 @@ export default function Talk({
                 </div>
               )}
 
+              {/* PLAN-044 fixup §5.2: a 4/3/2 round runs a real clock, and the
+                  shrinking clock *is* the exercise — so the learner sees it. The
+                  same banner, the round's own wording: no "no corrections",
+                  because a round is an ordinary conversation being timed. */}
+              {talk.roundTimed && exercising && (
+                <div className={`fluency-banner ${talk.fluencyUp ? "up" : ""}`}>
+                  Round {exercising.round + 1} of 3 · {FOUR_THREE_TWO_MINUTES[exercising.round]} minutes · {mmss(talk.fluencyLeft)} left
+                </div>
+              )}
+
               {/* The brief, at the top of the session (PLAN-034): a learner
                   returning to a half-finished rehearsal knows what they were
                   preparing for. Shown once, above the conversation, never repeated
@@ -1087,11 +1353,16 @@ export default function Talk({
             <div className="composer">
               <div className="bar" style={{ justifyContent: "center" }}>
                 <button className="btn sm" onClick={() => void talk.end()} disabled={talk.busy}>
-                  Finish · see the three things
+                  {talk.roundTimed ? "Finish this round" : "Finish · see the three things"}
                 </button>
-                <button className="btn sm ghost" onClick={() => talk.extend()}>
-                  5 more minutes
-                </button>
+                {/* PLAN-044 fixup §5.2: a 4/3/2 round is never extended — its
+                    length is the exercise, and four minutes that ran nine is not
+                    a round the card can put beside the others. */}
+                {!talk.roundTimed && (
+                  <button className="btn sm ghost" onClick={() => talk.extend()}>
+                    5 more minutes
+                  </button>
+                )}
               </div>
             </div>
           ) : (
@@ -1304,6 +1575,21 @@ export default function Talk({
             <div className="lbl" style={{ marginTop: 30 }}>
               Listening.
             </div>
+          )}
+
+          {/* PLAN-044 §4: one key leaves rung 4 of the pressure ladder. The coach
+              stops interrupting immediately; `leaveRung4` marks the session's
+              conditions as broken, so `end()` writes no monitor signal at all
+              rather than filing a session under conditions it did not keep. */}
+          {talk.ladderRung4 && (
+            <button
+              className="btn sm ghost"
+              style={{ marginTop: 20, width: "100%", justifyContent: "center" }}
+              onClick={() => talk.leaveRung4()}
+              disabled={talk.busy}
+            >
+              Leave rung 4 — stop interrupting
+            </button>
           )}
 
           {/* PLAN-034: in role, the learner decides when it is over — one control,

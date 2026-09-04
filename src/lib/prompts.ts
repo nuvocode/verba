@@ -126,6 +126,36 @@ export const FLUENCY_RULE4 =
   "Never finish, complete or repair a sentence the learner left unfinished. If they stop mid-sentence, wait — say nothing and let the silence stand.";
 
 /**
+ * The 4/3/2 listener's rule (§5.2, PLAN-044 §2). The listener attends with the
+ * same interest each round and never says the learner "already told them". A
+ * constant, so a check can assert it is present in rounds 2 and 3's prompt and
+ * *absent* from round 1's — a rule about repetition in a prompt with nothing to
+ * repeat is noise.
+ */
+export const REPETITION_RULE =
+  "The learner is telling you this topic again, on purpose, to tell it better. Listen as if for the first time. Never say that they already told you, never say it is shorter or faster, and never compare this telling to the last one.";
+
+/**
+ * The rung-4 listener's rule (§5.3, PLAN-044 fixup). Rung 4 is the one where the
+ * other side speaks fast and politely interrupts — the pressure is the point, so
+ * the coach is told to keep it up. A constant, so a check can assert it is folded
+ * into the prompt exactly when `interlocutorPressure === "interrupting"` and
+ * absent otherwise — the same offer-line treatment `FLUENCY_RULE4` gets.
+ */
+export const INTERRUPTING_RULE =
+  "The learner chose the hardest rung: you speak at a brisk pace and may politely interrupt to keep the conversation moving. Do not apologise for it and do not slow down.";
+
+/**
+ * The §5.4 naming sentence, with §6.3's shape rules on it (PLAN-044 §5): it names
+ * the structure, says getting it wrong is fine, and never characterises the
+ * learner. No adjectives, no "you tend to", no comparison. A caller that has a
+ * structure to name (reached the three-session bar in `goalToName`) uses this —
+ * a caller with nothing to name says nothing at all, never a hedge.
+ */
+export const NAME_STRUCTURE_PROMPT = (structure: string) =>
+  `I picked a topic this time where you'll need to use the structure "${structure}". Getting it wrong is fine — not building it is the problem.`;
+
+/**
  * Ceiling on one conversational turn.
  *
  * A turn measures around 280 tokens — a two-sentence reply, a correction or two,

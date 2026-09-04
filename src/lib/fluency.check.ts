@@ -9,9 +9,9 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, timingSignal, FILLERS, verifySelfRepairs, selfRepairSignal, saidAt, saidInOrder, verifyAbandoned, verifyL1Fallback, verifyAvoidance, abandonedUtteranceSignal, l1FallbackSignal, avoidanceSignal, showInline, closingItems, fluencyContext, accuracyContext, FLUENCY_MINUTES, CONTRACT_TEXT } from "./fluency.ts";
+import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, roundTimingOf, timingSignal, FILLERS, verifySelfRepairs, selfRepairSignal, saidAt, saidInOrder, verifyAbandoned, verifyL1Fallback, verifyAvoidance, abandonedUtteranceSignal, l1FallbackSignal, avoidanceSignal, showInline, closingItems, fluencyContext, accuracyContext, FLUENCY_MINUTES, CONTRACT_TEXT, nextPlanningSec, rungContext, fourThreeTwoContext, goalToName, FALSE_ALARM_ON_SCREEN, FOUR_THREE_TWO_MINUTES } from "./fluency.ts";
 import { scriptOf, languageScript } from "./langs.ts";
-import { shouldShowInline, parseProduction, FLUENCY_RULE4 } from "./prompts.ts";
+import { shouldShowInline, parseProduction, FLUENCY_RULE4, REPETITION_RULE, INTERRUPTING_RULE, NAME_STRUCTURE_PROMPT } from "./prompts.ts";
 import { monitorContext, signalMiss, type Signal, type SignalKind } from "./model.ts";
 import { talkSignals } from "./signals.ts";
 import type { Correction, CorrectionCategory, Severity } from "./prompts.ts";
@@ -887,6 +887,478 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
     /const extend = useCallback/.test(src),
     "rule 7: extend() exists — the learner's own extension",
   );
+}
+
+// --- 22. nextPlanningSec (§5.1's walk) and the planning screen (PLAN-044) -----
+// fluency ledger 7 — §5.1's progression is arithmetic, not a promise: no history
+// ⇒ 60 (the most support, not the least), one session holds its rung, two at 60
+// ⇒ 30, two at 30 ⇒ 0, zero never walks back up on its own, and a mixed history
+// holds rather than guessing. And the planning screen contains no `<input`, no
+// `<textarea` and no `contentEditable` — the §5.1 absence of a notes field is
+// checked, not promised, the same treaty the contract's "no persisted key" got.
+{
+  // 1. No history ⇒ 60.
+  assert.equal(nextPlanningSec([]), 60, "no history ⇒ 60 — the most support, not the least");
+  // 2. A single session holds its rung at every rung.
+  assert.equal(nextPlanningSec([60]), 60, "one session at 60 holds the rung");
+  assert.equal(nextPlanningSec([30]), 30, "one session at 30 holds the rung");
+  assert.equal(nextPlanningSec([0]), 0, "one session at 0 holds the rung");
+  // 3. Two consecutive sessions walk the rung down.
+  assert.equal(nextPlanningSec([60, 60]), 30, "two sessions at 60 ⇒ 30");
+  assert.equal(nextPlanningSec([30, 30]), 0, "two sessions at 30 ⇒ 0");
+  // 4. Zero never walks back up on its own, however long it was held.
+  assert.equal(nextPlanningSec([0, 0]), 0, "zero stays zero");
+  assert.equal(nextPlanningSec([0, 60]), 0, "a recent zero still answers 0 — the walk down is one-way");
+  // 5. A mixed history holds its current rung rather than guessing a trend.
+  assert.equal(nextPlanningSec([60, 30]), 60, "60 after a 30 holds at 60 — no bounce");
+  assert.equal(nextPlanningSec([60, 60, 30]), 30, "after the walk to 30, one session at 30 holds there");
+  assert.equal(nextPlanningSec([30, 60, 60]), 30, "the most recent 30 holds — history is recent-first");
+  assert.equal(nextPlanningSec([60, 30, 30]), 60, "a most recent 60 holds at 60 — the walk down needs two *consecutive* 30s most recent");
+
+  // 6. The planning screen (§5.1) contains no notes field — and that absence is
+  //    checked, not promised. Each of the three ways a writing surface could leak
+  //    in is asserted separately. The scan is scoped to the component's returned
+  //    JSX (the `return (` onwards), so the component's own header comment and
+  //    the check's messages cannot satisfy the assertion: no `<input`, no
+  //    `<textarea`, no `contentEditable`.
+  const planningSrc = readFileSync(join(ROOT, "src/views/talk/Planning.tsx"), "utf8");
+  const planningJsx = planningSrc.slice(planningSrc.indexOf("return ("));
+  assert(!/<input[\s/>]/.test(planningJsx), "the planning screen has no <input element — no notes field");
+  assert(!/<textarea[\s/>]/.test(planningJsx), "the planning screen has no <textarea element — no notes field");
+  assert(!/contentEditable/.test(planningJsx), "the planning screen has no contentEditable — no notes field");
+  // The countdown it does use is a `setTimeout` chain, not an interval (PLAN-043 §3):
+  // an interval left running would hold a live handle for the whole session.
+  assert(/setTimeout/.test(planningSrc), "the planning countdown is a setTimeout chain, not an interval");
+  assert(!/setInterval/.test(planningSrc), "the planning countdown must never be an interval");
+  // The countdown is deadline-based and the hand-off is outside the state
+  // updater — the "Start speaking" button goes through the same `fired` guard.
+  assert(/const deadline = Date\.now\(\) \+ seconds \* 1000/.test(planningSrc), "the planning countdown is deadline-based");
+  assert(/onClick=\{fire\}/.test(planningSrc), "the Start speaking button goes through the fired guard");
+
+  // 7. PLAN-044 fixup §3: `nextPlanningSec` reaches the screen — the picker
+  //    derives the planning time from the learner's past `sessionContext`
+  //    signals and offers an override. Asserted at the lever: the view calls
+  //    `nextPlanningSec` and renders the override buttons.
+  const talkView = readFileSync(join(ROOT, "src/views/Talk.tsx"), "utf8");
+  assert(
+    /nextPlanningSec\(past\)/.test(talkView),
+    "the picker derives the planning time from past sessionContext signals",
+  );
+  assert(
+    /planningOverride \?\? planningSec/.test(talkView),
+    "the picker offers a planning-time override beside the derived value",
+  );
+  // The walk reads only the sessions that had a planning door. Every other
+  // session files 0, and a 0 on the record cannot be told apart from a 0 the
+  // walk handed out — counting them pins the learner at 0 for good after their
+  // first exercise, since zero never walks back up.
+  assert(
+    /\.filter\(\(sec\) => sec > 0\)/.test(talkView),
+    "the walk counts only the sessions that had a planning door (planningTimeSec > 0)",
+  );
+  // And the entry row is *consumed*: an ordinary conversation enters through the
+  // planning screen with the walk's value (or the learner's override). A control
+  // on screen that no start path reads is not a control.
+  assert(
+    /const ctx = \{ \.\.\.FREE_CONTEXT, planningTimeSec \};/.test(talkView) && /setPlanningFor\(\{ sc, ctx, repeat: false \}\)/.test(talkView),
+    "an ordinary conversation starts through the planning screen — the entry row is consumed",
+  );
+  // 8. The ladder's own planning time is §5.3's table, never the walk's. Rung 1
+  //    is 60 because the table says 60; letting the walk set it would turn rung 1
+  //    into rung 2 the moment the walk reached 0, silently, with the ledger green.
+  assert(
+    /setPlanningFor\(\{ sc, ctx, repeat: false \}\)/.test(talkView),
+    "the ladder starts with rungContext's own context — the walk does not set the ladder's conditions",
+  );
+  assert(
+    !/planningTimeSec: planningOverride/.test(talkView),
+    "no caller overrides a rung's planning time",
+  );
+}
+
+// --- 23. rungContext is §5.3's table (PLAN-044) -------------------------------
+// fluency ledger 8 — §5.3's four rungs, asserted field by field against the
+// spec's four rows. Rung 4 is the only `interrupting` one; rungs 1–3 are `none`.
+// Rung 1 is the only one with a planning time; rungs 2–4 have none. Mode stays
+// `free` (a ladder session is an ordinary measured conversation, not a fluency
+// *mode*), and taskRepetition stays 1 (first pass) — the fields the table
+// doesn't own take FREE_CONTEXT's values, so the ladder measures the three
+// conditions the table names and none it doesn't.
+{
+  // Rung 1: prepared topic, planning time, patient interlocutor.
+  const r1 = rungContext(1);
+  assert.equal(r1.mode, "free");
+  assert.equal(r1.planningTimeSec, 60);
+  assert.equal(r1.topicFamiliarity, "prepared");
+  assert.equal(r1.interlocutorPressure, "none");
+  assert.equal(r1.taskRepetition, 1);
+  // Rung 2: prepared topic, no planning.
+  const r2 = rungContext(2);
+  assert.equal(r2.planningTimeSec, 0);
+  assert.equal(r2.topicFamiliarity, "prepared");
+  assert.equal(r2.interlocutorPressure, "none");
+  // Rung 3: new topic, no planning.
+  const r3 = rungContext(3);
+  assert.equal(r3.planningTimeSec, 0);
+  assert.equal(r3.topicFamiliarity, "novel");
+  assert.equal(r3.interlocutorPressure, "none");
+  // Rung 4: new topic, the other side speaks fast and politely interrupts. The
+  // only interrupting rung.
+  const r4 = rungContext(4);
+  assert.equal(r4.planningTimeSec, 0);
+  assert.equal(r4.topicFamiliarity, "novel");
+  assert.equal(r4.interlocutorPressure, "interrupting");
+  // Cross-check: rung 4 is the only interrupting one; rungs 1–3 are none.
+  for (const rung of [1, 2, 3] as const) {
+    assert.equal(rungContext(rung).interlocutorPressure, "none", `rung ${rung} interlocutor is none`);
+  }
+  assert.equal(rungContext(4).interlocutorPressure, "interrupting", "rung 4 is the only interrupting one");
+  // Planning time: rung 1 is the only planned rung.
+  assert.equal(rungContext(1).planningTimeSec, 60);
+  for (const rung of [2, 3, 4] as const) {
+    assert.equal(rungContext(rung).planningTimeSec, 0, `rung ${rung} has no planning`);
+  }
+}
+
+// --- 24. the 4/3/2 rounds (PLAN-044) ------------------------------------------
+// fluency ledger 7 — three contexts, `taskRepetition` 1/2/3, rounds 2 and 3
+// `prepared` and `paced`, round 1 `novel` and `none`. `REPETITION_RULE` is in
+// rounds 2 and 3's prompt and NOT in round 1's — a rule about repetition in a
+// prompt with nothing to repeat is noise. A round with no timing signal renders
+// empty, not zero (the Rounds view's "—"). And `FALSE_ALARM_ON_SCREEN === false`
+// — pinned with the reason, so flipping it is a deliberate act tied to PLAN-041's
+// hand sample, which is still blank.
+{
+  // 1. The three rounds' contexts — the table from §5.2 / PLAN-044 §2.
+  const r1 = fourThreeTwoContext(1);
+  assert.equal(r1.taskRepetition, 1, "round 1 is repetition 1");
+  assert.equal(r1.topicFamiliarity, "novel", "round 1 is a novel topic");
+  assert.equal(r1.interlocutorPressure, "none", "round 1 has no pressure");
+  const r2 = fourThreeTwoContext(2);
+  assert.equal(r2.taskRepetition, 2, "round 2 is repetition 2");
+  assert.equal(r2.topicFamiliarity, "prepared", "round 2 is prepared — they've told it once");
+  assert.equal(r2.interlocutorPressure, "paced", "round 2's shrinking clock is the pressure");
+  const r3 = fourThreeTwoContext(3);
+  assert.equal(r3.taskRepetition, 3, "round 3 is repetition 3");
+  assert.equal(r3.topicFamiliarity, "prepared", "round 3 is prepared — they've told it twice");
+  assert.equal(r3.interlocutorPressure, "paced", "round 3's shrinking clock is the pressure");
+  // Mode is free — 4/3/2 measures an ordinary conversation under a condition, not
+  // a fluency-mode session.
+  assert.equal(r1.mode, "free");
+  // 2. The repetition rule rides the prompt: rounds 2 and 3 carry it, round 1 does
+  //    not. Asserted at the lever where it is set (the `start` call reads `repeat`),
+  //    and that the source folds it in the same offer-line way FLUENCY_RULE4 does.
+  const src = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
+  assert(
+    /repeat \? `\\n\$\{REPETITION_RULE\}` : ""/.test(src),
+    "the repetition rule is folded in only when a round is a repeat (rounds 2 and 3)",
+  );
+  assert(
+    /REPETITION_RULE/.test(src),
+    "REPETITION_RULE is imported into useTalk",
+  );
+  assert(REPETITION_RULE.length > 0, "REPETITION_RULE is not empty");
+  assert(
+    REPETITION_RULE.includes("never") && REPETITION_RULE.includes("already told"),
+    "REPETITION_RULE is the listener's rule — it never says the learner already told them",
+  );
+  // 3. The 4/3/2 lengths are exactly [4, 3, 2] — the one constant that would
+  //    change a 3/2/1 variant, and the view's rows read from it.
+  assert.deepEqual([...FOUR_THREE_TWO_MINUTES], [4, 3, 2], "the 4/3/2 lengths are 4, 3, 2");
+  // 4. FALSE_ALARM_ON_SCREEN is false, pinned with the reason: PLAN-041's hand
+  //    sample is still blank, and a metric does not reach a screen until a human
+  //    has sat with a real sample. Flipping it is a deliberate act, not a drive-by.
+  assert.equal(FALSE_ALARM_ON_SCREEN, false, "the accuracy column is withheld until PLAN-041's hand sample is filled in");
+  const fluSrc = readFileSync(join(ROOT, "src/lib/fluency.ts"), "utf8");
+  // PLAN-041 §10's bar for the hand sample: a metric does not reach a screen
+  // until a human has sat with twenty real turns and disagreed with no more than
+  // a fifth of the surviving falseAlarms. The sample is still unfilled, so
+  // `FALSE_ALARM_ON_SCREEN === false` is the only honest value. The flip is a
+  // decision tied to a filled-in table; the assertion reads the count cell of
+  // "Surviving `falseAlarm`, human disagrees" — a real value there is the
+  // recorded outcome the flip should follow.
+  const handBlank = readFileSync(join(ROOT, "docs/plans/PLAN-041-self-repair-and-false-alarm.md"), "utf8");
+  const sample = handBlank.slice(handBlank.indexOf("## Hand sample"));
+  const disagreeRow = sample.split("\n").find((l: string) => l.trim().startsWith("| Surviving") && l.includes("human disagrees")) ?? "";
+  assert(
+    !/\|\s*\d/.test(disagreeRow),
+    "PLAN-041's hand sample is still unfilled — this is why FALSE_ALARM_ON_SCREEN stays false",
+  );
+  const talkView = readFileSync(join(ROOT, "src/views/Talk.tsx"), "utf8");
+  // 5. `useTalk` reads the repetition rule's flag from `start`'s seventh parameter.
+  assert(
+    /,\s*repeat = false, roundMin\?: number \| null\)/.test(src),
+    "start defaults repeat to false — an ordinary session never repeats",
+  );
+  // 6. PLAN-044 fixup §5: each 4/3/2 round runs a real clock — `start`'s eighth
+  //    parameter (`roundMin`) arms the same `fluencyUntil` countdown the fluency
+  //    mode uses, so `paced` (the shrinking clock) is honest. Asserted at the
+  //    lever: the round's minutes reach `start`, and `start` arms the countdown
+  //    from them.
+  assert(
+    /roundMin\?: number \| null/.test(src),
+    "start accepts a round's minutes — the 4/3/2 clock reaches the session",
+  );
+  assert(
+    /roundMinutes\.current = roundMin \?\? null/.test(src),
+    "start records the round's minutes on the ref",
+  );
+  assert(
+    /fluencyUntil\.current = context\.mode === "fluency" \|\| roundMs !== null \? Date\.now\(\) \+ \(roundMs \?\? FLUENCY_MINUTES \* 60_000\) : null/.test(src),
+    "a round's minutes arm the same fluencyUntil countdown — the clock is real",
+  );
+  // 7. PLAN-044 fixup §5: `paced` is only filed when a real clock ran — and a
+  //    `paced` context with no clock is *withheld*, not relabelled. Rewriting the
+  //    context on the way out is the option §4 rejected: it files a session under
+  //    conditions it did not keep.
+  assert(
+    /const pacedWithoutClock = sessionContext\.current\.interlocutorPressure === "paced" && roundMinutes\.current === null/.test(src),
+    "a paced context with no round clock is recognised",
+  );
+  assert(
+    /context: settings\.monitorLoad && !conditionsBroken\.current && !pacedWithoutClock \? sessionContext\.current : null/.test(src),
+    "a paced context with no clock goes through the same null door §4 gives rung 4 — withheld, never relabelled",
+  );
+  assert(
+    !/interlocutorPressure: "none" \}/.test(src),
+    "end() never rewrites the session's pressure on the way out",
+  );
+  // 7b. The clock actually ticks for a round. Arming `fluencyUntil` is not a
+  //     clock: the countdown effect used to bail unless the *mode* was fluency,
+  //     so a round armed a deadline that was never counted down and `paced` was
+  //     filed with no tempo behind it. The gate admits a round, the composer
+  //     closes when a round's time is up, and the round is never extended.
+  assert(
+    /const timed = sessionContext\.current\.mode === "fluency" \|\| roundMinutes\.current !== null;/.test(src),
+    "the countdown effect runs for a 4/3/2 round as well as for fluency mode",
+  );
+  assert(
+    /if \(!scenario \|\| !timed \|\| fluencyUntil\.current === null\)/.test(src),
+    "the countdown's gate is the timed flag, not the mode",
+  );
+  assert(
+    /if \(\(sessionContext\.current\.mode === "fluency" \|\| roundMinutes\.current !== null\) && fluencyUp\) return;/.test(src),
+    "a round's clock closes the composer — no turn is accepted past the round's length",
+  );
+  assert(
+    /const extend = useCallback\(\(\) => \{\s*if \(sessionContext\.current\.mode !== "fluency"\) return;/.test(src),
+    "a 4/3/2 round is never extended — its length is the exercise",
+  );
+  // 7c. And the learner *sees* the clock: §5.2's shrinking clock is the exercise,
+  //     so a round's banner shows the round, its minutes and the time left, and
+  //     "5 more minutes" is not offered on a round's screen.
+  assert(
+    /talk\.roundTimed && exercising && \(/.test(talkView),
+    "a round's banner shows the round's own clock",
+  );
+  assert(
+    /\{!talk\.roundTimed && \(\s*<button className="btn sm ghost" onClick=\{\(\) => talk\.extend\(\)\}>/.test(talkView),
+    "the extension is not offered on a round's screen",
+  );
+  // 7d. A round's numbers are the round's, not its last recording's:
+  //     `roundTimingOf` aggregates every qualifying recording, and articulation
+  //     rate is the speaking time only — a round that reused `speechRate` there
+  //     would be claiming its pauses took no time at all.
+  const oneRun = Array(60).fill(0.4); // 3 s of unbroken speech at 20 frames/s
+  const half = [...Array(30).fill(0.4), ...Array(30).fill(0)]; // 3 s, half of it silence
+  const r = roundTimingOf([
+    { text: "one two three four", ms: 3000, levels: oneRun, locale: "en", initiationMs: null },
+    { text: "five six seven eight", ms: 3000, levels: oneRun, locale: "en", initiationMs: null },
+  ]);
+  assert(r !== null, "a round with two spoken recordings measures something");
+  assert.equal(Math.round(r!.speechRate), 80, "8 words over 6 s of utterance is 80 wpm — the round's, not one recording's");
+  const paused = roundTimingOf([{ text: "one two three four", ms: 3000, levels: half, locale: "en", initiationMs: null }]);
+  assert(paused !== null, "a recording with a pause still measures");
+  assert(
+    paused!.articulationRate > paused!.speechRate,
+    "articulation rate strips the pauses — it is never just a copy of the speech rate",
+  );
+  assert.equal(
+    roundTimingOf([{ text: "yes", ms: 900, levels: oneRun, locale: "en", initiationMs: null }]),
+    null,
+    "a round whose only recording is under 1.5 s measured nothing — null, never zero",
+  );
+  assert.equal(roundTimingOf([]), null, "a round with nothing spoken measured nothing");
+  // 8. PLAN-044 fixup §2: the round card is visible and stays until dismissed.
+  //    `setRoundCard(null)` is NOT in the `[talk.started]` effect — a finished
+  //    exercise is not wiped by the next conversation opening. It is cleared
+  //    only when a new 4/3/2 is armed, and the card has a close button.
+  const startedEffect = talkView.slice(talkView.indexOf("setContractFor(null);"), talkView.indexOf("setPlanningOverride(null);"));
+  assert(
+    !/setRoundCard\(null\)/.test(startedEffect),
+    "the round card is not cleared by a conversation opening — it stays until dismissed",
+  );
+  assert(
+    /setRoundCard\(null\)/.test(talkView),
+    "the round card is cleared somewhere (a new 4/3/2 or its close button)",
+  );
+  assert(
+    /<Rounds rounds=\{roundCard\.rounds\} onClose=\{\(\) => setRoundCard\(null\)\}/.test(talkView),
+    "the round card renders with a close button that dismisses it",
+  );
+}
+
+// --- 25. leaving rung 4 — one key, no rewrite, no measurement (PLAN-044) ------
+// fluency ledger 8 — `leaveRung4()` sets a `conditionsBroken` ref; `end()` then
+// passes `context: null` (the same door the kill switch uses, so `talkSignals`
+// writes no monitor kind), and `sessionContext.current` is left untouched. The
+// two-writer scan (section 19) still finds exactly two writers — row 6's one-mode
+// invariant holds with no exception carved in.
+{
+  const src = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
+  // 1. conditionsBroken exists, and leaveRung4 sets it.
+  assert(/conditionsBroken\s*=\s*useRef\(false\)/.test(src), "conditionsBroken is a ref, initialised false");
+  assert(/const leaveRung4 = useCallback\(\(\) => \{\s*conditionsBroken\.current = true;/.test(src), "leaveRung4 sets conditionsBroken");
+  assert(/leaveRung4/.test(src), "leaveRung4 exists");
+  // 2. end() passes context: null when conditions broke — the kill switch's door.
+  assert(
+    /context: settings\.monitorLoad && !conditionsBroken\.current && !pacedWithoutClock \? sessionContext\.current : null/.test(src),
+    "end() routes conditionsBroken through the same null door the kill switch uses",
+  );
+  // 3. leaveRung4 does NOT rewrite sessionContext.current (row 6). The two-writer
+  //    scan in section 19 already asserts only start + resume write it; re-pin
+  //    that leaveRung4's whole body has no assignment to it.
+  const leaveBody = src.slice(src.indexOf("const leaveRung4"), src.indexOf("const send = useCallback"));
+  assert(
+    !/sessionContext\.current\s*=/.test(leaveBody),
+    "leaving rung 4 must not rewrite sessionContext.current — row 6 holds, no exception",
+  );
+  // 4. talkSignals with context null writes no monitor kind — the same assertion
+  //    section 4 makes for the kill switch, here re-asserted through the same
+  //    reflection shape a broken-rung-4 session would produce.
+  const broken = talkSignals("talk-1", { ...base, context: null }, "es", "es");
+  assert(
+    !broken.some((d) => MONITOR_KINDS.includes(d.kind)),
+    "fluency ledger 8: context null (rung 4 left) writes no monitor signal",
+  );
+  // 5. PLAN-044 fixup §1: the coach stops interrupting *now* — `leaveRung4`
+  //    pushes a line into the model's history telling it to stop, and drops
+  //    `rung4Active` so the one-key exit leaves the screen.
+  assert(
+    /history\.current\.push\(\{\s*role: "system",\s*content: "The learner left rung 4\. Stop interrupting/.test(src),
+    "leaveRung4 pushes a stop-interrupting line into the model's history",
+  );
+  // It is a `system` line, not a `user` one. `history.current` is also what the
+  // summary, vocab and memory prompts read, and a `user` line there is a
+  // sentence the learner never said, attributed to them.
+  assert(
+    !/role: "user",\s*content: "\(The learner left rung 4/.test(src),
+    "the rung-4 line is never filed as something the learner said",
+  );
+  assert(
+    /setRung4Active\(false\)/.test(leaveBody),
+    "leaveRung4 drops rung4Active — the one-key exit leaves the screen",
+  );
+  // 6. PLAN-044 fixup §1: the rung-4 pressure rule reaches the prompt exactly
+  //    when the context says `interrupting` — the offer-line treatment.
+  assert(
+    /sessionContext\.current\.interlocutorPressure === "interrupting" \? `\\n\$\{INTERRUPTING_RULE\}` : ""/.test(src),
+    "INTERRUPTING_RULE is folded in exactly when the context is interrupting",
+  );
+  assert(INTERRUPTING_RULE.length > 0, "INTERRUPTING_RULE is not empty");
+  assert(
+    /interrupt/.test(INTERRUPTING_RULE) && /polite/.test(INTERRUPTING_RULE),
+    "INTERRUPTING_RULE is the rung-4 pressure rule — brisk, polite, no apology",
+  );
+  // 7. PLAN-044 fixup §1: `ladderRung4` is driven by the `rung4Active` state, not
+  //    by re-reading the context — so leaving rung 4 removes the button without
+  //    rewriting `sessionContext.current`.
+  assert(
+    /ladderRung4: rung4Active/.test(src),
+    "the view reads rung4Active, not the context — leaving rung 4 drops the button",
+  );
+}
+
+// --- 26. goalToName — three sessions, not three rows (PLAN-044) ---------------
+// fluency ledger 7 — §5.4's gate. The bar is three avoidance signals for the
+// same label across at least three *different* sessions; three in one session is
+// one opinion. A different label each time, fewer sessions, or nothing at all all
+// answer null — and null is the normal answer, the coach saying nothing. When
+// more than one label clears the bar, the most recent one to do so wins.
+{
+  const s = (kind: string, activityId: string, label: string): Signal => ({
+    id: `${kind}-${activityId}-${label}`,
+    activityId,
+    kind: kind as Signal["kind"],
+    observedAt: 0,
+    payload: { label, judged: true },
+  });
+
+  // 1. Three avoidance signals, same label, three sessions ⇒ the label.
+  const three = [s("avoidance", "a1", "past simple"), s("avoidance", "a2", "past simple"), s("avoidance", "a3", "past simple")];
+  assert.equal(goalToName(three), "past simple", "three sessions of the same label name it");
+
+  // 2. Three signals, same label, all in ONE session ⇒ null — three rows are not
+  //    three sessions; one opinion repeated is one opinion.
+  const oneSession = [s("avoidance", "a1", "past simple"), s("avoidance", "a1", "past simple"), s("avoidance", "a1", "past simple")];
+  assert.equal(goalToName(oneSession), null, "three in one session is one session, not a pattern");
+
+  // 3. Two sessions ⇒ null.
+  const two = [s("avoidance", "a1", "past simple"), s("avoidance", "a2", "past simple")];
+  assert.equal(goalToName(two), null, "two sessions is not three");
+
+  // 4. A different label each time ⇒ null.
+  const mixed = [s("avoidance", "a1", "past simple"), s("avoidance", "a2", "past tense"), s("avoidance", "a3", "subjunctive")];
+  assert.equal(goalToName(mixed), null, "a different label each time is not a pattern");
+
+  // 5. No signals ⇒ null.
+  assert.equal(goalToName([]), null, "no signals ⇒ null");
+
+  // 6. Non-avoidance signals and wrong labels are ignored — the gate reads only
+  //    avoidance signals with the exact label.
+  const withNoise = [
+    s("avoidance", "a1", "past simple"),
+    s("avoidance", "a2", "past simple"),
+    s("avoidance", "a3", "past simple"),
+    s("correction", "a9", "past simple"),
+    s("avoidance", "a4", "past tense"),
+  ];
+  assert.equal(goalToName(withNoise), "past simple", "only avoidance signals with the exact label count");
+
+  // 7. When two labels both clear the bar, the most recent one to do so wins —
+  //    the structure the learner is dodging *now*. The input is in the order the
+  //    real caller passes: `recentSignals` is `ORDER BY observed_at DESC`, so the
+  //    most recent signal comes first. Hand-building the other order here would
+  //    pin the answer to a sequence production never produces — and it did: the
+  //    gate named the stalest pattern on the record and the check agreed with it.
+  const recentFirst = [
+    s("avoidance", "a6", "past simple"), // now
+    s("avoidance", "a5", "past simple"),
+    s("avoidance", "a4", "past simple"),
+    s("avoidance", "a3", "subjunctive"), // and long before that
+    s("avoidance", "a2", "subjunctive"),
+    s("avoidance", "a1", "subjunctive"),
+  ];
+  assert.equal(goalToName(recentFirst), "past simple", "the label being dodged *now* wins, not the stalest one that cleared");
+  // The same six, oldest-first: the answer follows the order, which is why the
+  // order the caller passes is part of the contract.
+  assert.equal(goalToName([...recentFirst].reverse()), "subjunctive", "the head of the list is the recent end — the caller passes recent-first");
+
+  // 8. PLAN-044 fixup §4: the named structure reaches the prompt — `start` calls
+  //    `goalToName` over the loaded signals and folds `NAME_STRUCTURE_PROMPT` in
+  //    only when a label cleared the bar. A caller with nothing to name says
+  //    nothing at all — never a hedge.
+  const src = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
+  assert(
+    /goalToName\(known\)/.test(src),
+    "start calls goalToName over the loaded signals",
+  );
+  assert(
+    /nameStructure \? `\\n\$\{NAME_STRUCTURE_PROMPT\(nameStructure\)\}` : ""/.test(src),
+    "the named structure reaches the prompt only when the bar was cleared",
+  );
+}
+
+// --- §5.4's naming sentence obeys §6.3's shape (PLAN-044) ---------------------
+// The sentence itself: names the structure, says getting it wrong is fine, and
+// never characterises the learner. No adjectives, no "you tend to", no comparison.
+{
+  const sentence = NAME_STRUCTURE_PROMPT("the past tense");
+  assert(sentence.length > 0, "the §5.4 naming frame is not empty");
+  assert(/past tense/.test(sentence), "the structure is folded into the sentence verbatim");
+  assert(/wrong is fine/.test(sentence), "it says getting it wrong is fine");
+  assert(!/you tend to|you are|you're/.test(sentence), "it never characterises the learner");
+  assert(!/(compared|average|better|worse)/.test(sentence), "it makes no comparison");
 }
 
 console.log("fluency.check OK");

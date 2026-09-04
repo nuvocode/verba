@@ -371,12 +371,12 @@ const FLUENCY_LEDGER: FluencyRow[] = [
   {
     id: 7,
     claim: "4/3/2 shows the three rounds side by side",
-    pending: "#74 — PLAN-044",
+    assertedIn: [{ file: "src/lib/fluency.check.ts", marker: "fluency ledger 7" }],
   },
   {
     id: 8,
     claim: "The ladder's fourth rung is left with one key",
-    pending: "#74 — PLAN-044",
+    assertedIn: [{ file: "src/lib/fluency.check.ts", marker: "fluency ledger 8" }],
   },
   {
     id: 9,

@@ -24,6 +24,9 @@ import {
   productionPrompt,
   parseProduction,
   FLUENCY_RULE4,
+  REPETITION_RULE,
+  INTERRUPTING_RULE,
+  NAME_STRUCTURE_PROMPT,
   type UnpackResult,
   type Correction,
   type SessionSummary,
@@ -97,7 +100,7 @@ import {
   clearWait as clearWaitState,
   type WaitState,
 } from "./patience";
-import { FREE_CONTEXT, type MonitorContext, verifySelfRepairs, verifyAbandoned, verifyL1Fallback, verifyAvoidance, showInline, FLUENCY_MINUTES } from "./fluency";
+import { FREE_CONTEXT, type MonitorContext, verifySelfRepairs, verifyAbandoned, verifyL1Fallback, verifyAvoidance, showInline, FLUENCY_MINUTES, goalToName } from "./fluency";
 import { languageScript } from "./langs";
 import {
   addMessage,
@@ -454,6 +457,22 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   // the resume path, so a mode can never be changed mid-session — a contract
   // that can be broken mid-session is not a contract.
   const sessionContext = useRef<MonitorContext>(FREE_CONTEXT);
+  // PLAN-044 §4: whether leaving rung 4 ended this session's conditions being
+  // what its context says. Set by `leaveRung4`, never reset by `end`. When set,
+  // `end()` passes `context: null` — the same door the kill switch uses — so no
+  // monitor signal is written for a session whose conditions changed under it,
+  // and `sessionContext.current` is *not* rewritten: row 6's two-writer scan
+  // stays true byte for byte, with no exception carved into it.
+  const conditionsBroken = useRef(false);
+  // PLAN-044 fixup: whether this session is a 4/3/2 round running a real clock.
+  // When set, the round's minutes drive the same `fluencyUntil` countdown the
+  // fluency mode uses, and `paced` (the shrinking clock) is only honest while
+  // this is non-null — a `paced` context with no round timer has no tempo.
+  const roundMinutes = useRef<number | null>(null);
+  // PLAN-044 fixup: whether rung 4 is *currently* active on screen. `leaveRung4`
+  // drops it (removing the one-key exit button) without rewriting
+  // `sessionContext.current` — row 6's two-writer scan stays true.
+  const [rung4Active, setRung4Active] = useState(false);
   // The fluency timer (PLAN-043 §3 rule 7): the epoch ms the mode ends at, or
   // null when the mode is off or the timer has fired. A 1 s tick publishes
   // `fluencyLeftMs` for the banner and stops when the ref is null.
@@ -492,7 +511,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
   // The fluency countdown (PLAN-043 rule 7). The one new machine. It runs only
   // while a fluency timer is armed — a self-clearing `setTimeout` chain that
-  // stops scheduling the moment the timer is null (a non-fluency session, or a
+  // stops scheduling the moment the timer is null (an untimed session, or a
   // session whose time already ran out). It is *not* an interval left running
   // for the whole session, because that would hold a live handle on every
   // conversation (a check file that drives a real session would never exit).
@@ -501,7 +520,11 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   // closing does **not** turn corrections back on — a fluency session stays a
   // fluency session to its end.
   useEffect(() => {
-    if (!scenario || sessionContext.current.mode !== "fluency" || fluencyUntil.current === null) {
+    // PLAN-044 fixup: a 4/3/2 round is timed too — its own minutes, the same
+    // machine. Gating this on the *mode* alone armed `fluencyUntil` for a round
+    // and then never ticked it, so `paced` was filed with no tempo behind it.
+    const timed = sessionContext.current.mode === "fluency" || roundMinutes.current !== null;
+    if (!scenario || !timed || fluencyUntil.current === null) {
       setFluencyLeftMs(0);
       setFluencyUp(false);
       return;
@@ -796,7 +819,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
   /** Open a scenario and let the coach speak first. */
   const start = useCallback(
-    async (sc: Scenario, mode: "normal" | "rehearsal" | "brought" = "normal", brief?: RehearsalBrief, goal?: string, broughtText?: BroughtText, context: MonitorContext = FREE_CONTEXT) => {
+    async (sc: Scenario, mode: "normal" | "rehearsal" | "brought" = "normal", brief?: RehearsalBrief, goal?: string, broughtText?: BroughtText, context: MonitorContext = FREE_CONTEXT, repeat = false, roundMin?: number | null) => {
       // PLAN-034: the mode is decided from the *parameters*, not from the
       // `rehearsal` state — `setRehearsal` only lands on the next render, so
       // reading it here would make the first call of a rehearsal behave like an
@@ -820,13 +843,20 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // first turn of a mode behave like an ordinary session).
       sessionContext.current = context;
       // PLAN-043 rule 7: a fluency session runs a timer from its first word.
-      // Non-fluency modes carry no timer — `fluencyUntil` stays null and the
-      // countdown (gated on `scenario` + `fluencyArm`) does not schedule. The
-      // arm bump re-runs the effect so a fluency start actually arms a countdown.
-      fluencyUntil.current = context.mode === "fluency" ? Date.now() + FLUENCY_MINUTES * 60_000 : null;
-      setFluencyLeftMs(context.mode === "fluency" ? FLUENCY_MINUTES * 60_000 : 0);
+      // PLAN-044 fixup: a 4/3/2 round runs the same countdown for its own
+      // minutes (`roundMinutes`), so `paced` — the shrinking clock — is real.
+      // Non-fluency, non-round sessions carry no timer: `fluencyUntil` stays
+      // null and the countdown (gated on `scenario` + `fluencyArm`) does not
+      // schedule. The arm bump re-runs the effect so a start actually arms it.
+      roundMinutes.current = roundMin ?? null;
+      const roundMs = roundMin ? roundMin * 60_000 : null;
+      fluencyUntil.current = context.mode === "fluency" || roundMs !== null ? Date.now() + (roundMs ?? FLUENCY_MINUTES * 60_000) : null;
+      setFluencyLeftMs(context.mode === "fluency" || roundMs !== null ? (roundMs ?? FLUENCY_MINUTES * 60_000) : 0);
       setFluencyUp(false);
       setFluencyArm((n) => n + 1);
+      // PLAN-044 fixup: rung 4 is active exactly while the session's context
+      // says it is — the one-key exit is on screen until `leaveRung4` drops it.
+      setRung4Active(context.interlocutorPressure === "interrupting");
       // Rehearsal mode (PLAN-034): the role starts now, and any previous
       // session's debrief is gone with the rest of it. This is for the next
       // render — the decisions above and below run off `inRole`. The ref is
@@ -851,6 +881,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // parameter so the reflection's completion report can judge avoidance
       // against it, and cleared with the rest of the session state.
       completionGoal.current = goal ?? null;
+      // PLAN-044 §4: a fresh session's conditions are intact until the learner
+      // leaves rung 4 — the flag belongs to the session, cleared with it.
+      conditionsBroken.current = false;
       spokeMs.current = 0;
       spokeUnknown.current = false;
       // A fresh session is a fresh floor: nothing queued from the old one may
@@ -936,6 +969,11 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // prompt would spend the opening for nothing.
       const opening = !inRole && !inBrought ? openingDetail(memories, Date.now()) : null;
       if (opening) void stampMemoryAsked(opening.id).catch(() => {});
+      // PLAN-044 fixup §5.4: the structure to name, if any. `goalToName` reads
+      // the avoidance signals already loaded (`known`) — three sessions of the
+      // same label — and the coach names it out loud before the task. Null is
+      // the normal answer: the coach says nothing at all, never a hedge.
+      const nameStructure = !inRole && !inBrought ? goalToName(known) : null;
       const system = inRole
         ? rehearsalSystem(settings, brief!, sc, pack)
         : inBrought
@@ -951,7 +989,21 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
           // would be wrong for an ordinary one, where the coach may help. The
           // line is a constant, so a check asserts it is present in the prompt
           // the mode actually sends (the offer-line treatment).
-          (sessionContext.current.mode === "fluency" ? `\n${FLUENCY_RULE4}` : "");
+          (sessionContext.current.mode === "fluency" ? `\n${FLUENCY_RULE4}` : "") +
+          // §5.2 (PLAN-044): rounds 2 and 3 of 4/3/2 carry the repetition rule —
+          // the listener never says the learner "already told them", because the
+          // point of the exercise is to tell the same topic better. Round 1 has
+          // nothing to repeat, so `repeat` is false there and the rule is absent
+          // — a rule about repetition in a prompt with nothing to repeat is noise.
+          (repeat ? `\n${REPETITION_RULE}` : "") +
+          // §5.3 (PLAN-044 fixup): rung 4's pressure is the point — the coach is
+          // told to keep it up, folded in exactly when the context says
+          // `interrupting` and absent otherwise (the offer-line treatment).
+          (sessionContext.current.interlocutorPressure === "interrupting" ? `\n${INTERRUPTING_RULE}` : "") +
+          // §5.4 (PLAN-044 fixup): the structure to name, out loud, before the
+          // task. Only when `goalToName` cleared its three-session bar — a caller
+          // with nothing to name says nothing at all, never a hedge.
+          (nameStructure ? `\n${NAME_STRUCTURE_PROMPT(nameStructure)}` : "");
       history.current = [{ role: "system", content: system }];
       try {
         try {
@@ -1138,6 +1190,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         // A resume is not a fresh opening (PLAN-042): it carries no plan goal,
         // so no avoidance is judged against it.
         completionGoal.current = null;
+        // PLAN-044 §4: a resumed conversation's conditions are whatever the
+        // resume says they are (`FREE_CONTEXT`) — not a broken-rung-4 session.
+        conditionsBroken.current = false;
         // A resumed conversation is not a mode (PLAN-043 §2): the mode belongs
         // to the session it was started in, and `resume` opens the conversation
         // for what it is — ordinary, free, unplanned — `FREE_CONTEXT`, the same
@@ -1146,6 +1201,8 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         // session that carried them.
         sessionContext.current = FREE_CONTEXT;
         fluencyUntil.current = null;
+        roundMinutes.current = null;
+        setRung4Active(false);
         setFluencyLeftMs(0);
         setFluencyUp(false);
         // Re-run the countdown effect (see start/extend): it sees until null
@@ -1374,7 +1431,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
   /**
    * "5 more minutes" (PLAN-043 rule 7): the learner's own extension of a fluency
-   * session whose time ran out. Pushes `fluencyUntil` out by five more minutes,
+   * session whose time ran out. A 4/3/2 round is never extended — its length is
+   * the exercise, and the guard here is the same one the view reads to leave the
+   * button off a round's screen. Pushes `fluencyUntil` out by five more minutes,
    * drops the time-up flags, and reopens the composer. The extension is never
    * automatic — the mode closes itself when the time is up, and only this press
    * (or finishing, see `end`) reopens it.
@@ -1389,6 +1448,32 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     setFluencyArm((n) => n + 1);
   }, []);
 
+  /**
+   * Leave rung 4 of the pressure ladder with one key (§5.3, PLAN-044 §4). The
+   * coach stops interrupting *immediately* — a line is pushed to the model's
+   * history telling it to stop, and `rung4Active` drops so the one-key exit
+   * leaves the screen. `end()` then passes `context: null` — the same door the
+   * kill switch uses — so no monitor signal is written for a session whose
+   * conditions changed under it. `sessionContext.current` is deliberately **not**
+   * rewritten: row 6's "one mode, one writer, written once" stays true, and a
+   * session filed as "interrupting" that spent half its length not being
+   * interrupted would corrupt both sides of every comparison PLAN-045 makes.
+   */
+  const leaveRung4 = useCallback(() => {
+    conditionsBroken.current = true;
+    setRung4Active(false);
+    // The coach must stop interrupting *now*, not on the next session. A line in
+    // the model's own history is the one lever that reaches the live turn — and
+    // it is a `system` line, not a `user` one: the learner did not say this, and
+    // `history.current` is also what the summary, vocab and memory prompts read.
+    // Every provider hoists system messages into the system prompt, so the rule
+    // lands as a standing instruction rather than as something the learner said.
+    history.current.push({
+      role: "system",
+      content: "The learner left rung 4. Stop interrupting and slow down — speak at a normal, patient pace from here on.",
+    });
+  }, []);
+
   const send = useCallback(
     async (text: string, fromSuggestion = false) => {
       const msg = text.trim();
@@ -1397,7 +1482,11 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // until the learner presses "5 more minutes" or "Finish". The guard is
       // data (the ref already went null), not a preference — the session is
       // over and the composer is closed; a Send must not sneak a turn past it.
-      if (sessionContext.current.mode === "fluency" && fluencyUp) return;
+      // PLAN-044 fixup: a 4/3/2 round's clock closes it the same way. Without
+      // this the round's minutes would end the countdown and nothing else — the
+      // learner could keep talking past a length the card then reports as 4, 3
+      // or 2 minutes.
+      if ((sessionContext.current.mode === "fluency" || roundMinutes.current !== null) && fluencyUp) return;
       // PLAN-039: whether this turn was spoken. Read *before* `setInput("")`
       // below — the wrapped setter clears the flag on an empty write, so reading
       // after it would always see false. A picked suggestion is by definition
@@ -1961,6 +2050,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     // Whatever is still pending when the session closes was never met — it is
     // missed, and the reflection's scorecard reads it that way.
     setGoalState((gs) => gs.map((g) => (g === "pending" ? "missed" : g)));
+    // PLAN-044 fixup: `paced` is the shrinking clock. A round that never armed
+    // one measured no tempo, and a measurement of a condition that did not
+    // happen is withheld (§4), not relabelled.
+    const pacedWithoutClock = sessionContext.current.interlocutorPressure === "paced" && roundMinutes.current === null;
     setReflection({
       ...(summary ?? { summary: "", strengths: [], focus: [] }),
       turns: userTexts.length,
@@ -1986,7 +2079,16 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // the single source of truth written once in `start`. Accuracy mode and
       // fluency mode are both produced here; a resumed session is `FREE_CONTEXT`
       // because a resume is not a mode.
-      context: settings.monitorLoad ? sessionContext.current : null,
+      // PLAN-044 §4: a session whose conditions changed under it measured
+      // neither condition — `conditionsBroken` (leaving rung 4) routes through
+      // the same `null` door the kill switch uses, so no monitor signal is
+      // written, while `sessionContext.current` is left untouched (row 6).
+      // PLAN-044 fixup: `paced` is only honest while a real clock ran. A `paced`
+      // context whose round never armed a countdown measured no tempo, and §4's
+      // answer to that is the one it gives rung 4 — *withhold the measurement*,
+      // never relabel it. Rewriting the context on the way out was the option §4
+      // rejected: it files a session under conditions it did not keep.
+      context: settings.monitorLoad && !conditionsBroken.current && !pacedWithoutClock ? sessionContext.current : null,
       // §2.2's self-repairs, verified against the mic's transcripts. Empty when
       // the measurement is off, when nothing was spoken, or when the transcript
       // carried no restart to find — never a zero.
@@ -2265,12 +2367,34 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
      * ordinary conversation (or a resume).
      */
     mode: sessionContext.current.mode,
-    /** Milliseconds left in a fluency session, for the banner; 0 when off or up. */
+    /**
+     * Whether rung 4 is *currently* active on screen (§5.3, PLAN-044 §4). Set
+     * when a rung-4 session starts, dropped by `leaveRung4` — so the one-key
+     * exit leaves the screen the moment it is pressed, without rewriting
+     * `sessionContext.current` (row 6's two-writer scan stays true).
+     */
+    ladderRung4: rung4Active,
+    /** Milliseconds left in a timed session (fluency, or a 4/3/2 round), for the banner; 0 when off or up. */
     fluencyLeft: fluencyLeftMs,
+    /**
+     * Whether the running clock is a 4/3/2 round's rather than a fluency
+     * session's (PLAN-044 fixup §5). Derived, not stored: only those two arm a
+     * countdown, so a clock on a session that is not in fluency mode is a
+     * round's. The view reads it for the banner's wording and to leave "5 more
+     * minutes" off a round — a round's length is the exercise.
+     */
+    roundTimed: sessionContext.current.mode !== "fluency" && (fluencyLeftMs > 0 || fluencyUp),
     /** True when a fluency session's time is up and the composer is closed. */
     fluencyUp,
     /** "5 more minutes" — the learner's extension of a lapsed fluency session. */
     extend,
+    /**
+     * Leave rung 4 of the pressure ladder with one key (PLAN-044 §4). The coach
+     * stops interrupting immediately; the session's context is treated as broken
+     * from here on, so `end()` writes no monitor signal at all rather than
+     * filing a session under conditions it did not keep.
+     */
+    leaveRung4,
     /**
      * The turns whose verdict was not `clear` (PLAN-037) — the moments that
      * broke, for the end-of-session review. Each carries the coach's line, the
