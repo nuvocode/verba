@@ -99,6 +99,31 @@ export default function Listening({
           level signal.
           {assisted && " You had the transcript open for part of it."}
         </p>
+        {/* PLAN-037: the chapters a walk-back happened in, at the end of the
+            session. A short list, not a report — the condition that was eased,
+            replayable at the grade it was finally understood at. Neutral framing:
+            these are the parts worth another listen, not the parts you got wrong.
+            A session with none of them shows nothing at all rather than an empty
+            heading. */}
+        {walkBacks.length > 0 && (
+          <>
+            <div className="eyebrow" style={{ margin: "28px 0 12px" }}>
+              Worth another listen
+            </div>
+            <div style={{ marginBottom: 24 }}>
+              {walkBacks.map((w, i) => (
+                <div key={i} style={{ marginBottom: 10, fontSize: 14 }}>
+                  <span style={{ color: "var(--ink2)" }}>
+                    {CONDITIONS[w.variable][w.from]} — the chapter was eased to help it land.
+                  </span>
+                  <button className="linky" style={{ fontSize: 13, marginLeft: 10 }} onClick={() => listening.replayRange(0)}>
+                    ⟲ Hear it again
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
         <button
           className="btn"
           onClick={() =>

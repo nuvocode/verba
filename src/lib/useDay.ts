@@ -15,6 +15,7 @@ import type { ActivityId, ActivityKind, DailyPlan, LevelEstimate, SignalDraft, W
 import { signalLabel } from "./model";
 import { levelEstimateFrom } from "./metrics";
 import { weaknessesFrom } from "./weakness";
+import { inventoryFrom, nextTarget, type RepairCategory } from "./repair";
 import { getPack } from "./packs";
 import {
   getDailySession,
@@ -55,6 +56,11 @@ export interface Day {
    * load, never stored — the evidence is the signals table (see lib/weakness).
    */
   weaknesses: Weakness[];
+  /**
+   * The day's repair target (PLAN-037) — what Today's card names, and what the
+   * session is built around. null when the signals have nothing to work on.
+   */
+  repairTarget: RepairCategory | null;
   done: ActivityKind[];
   recap: DayRecap | null;
   /** The session before this one, for Today's closing line. null on day one. */
@@ -120,6 +126,9 @@ export function useDay(settings: Settings): Day {
   // resume they are re-derived from the latest recap and held here for wrapUp.
   const [focus, setFocus] = useState<string[]>([]);
   const [weaknesses, setWeaknesses] = useState<Weakness[]>([]);
+  // PLAN-037: the day's repair target, derived from the signals and held so a
+  // regenerated plan (changeTopic) keeps the same target rather than losing it.
+  const [repairTarget, setRepairTarget] = useState<RepairCategory | null>(null);
   const [trace, setTrace] = useState<Trace | null>(null);
   // The cards due when the day was built. Held so a regenerated plan is the same
   // day on a different topic, rather than one that quietly forgot the review.
@@ -144,7 +153,12 @@ export function useDay(settings: Settings): Day {
         const nextFocus = prev?.nextFocus ?? [];
         // The plan's drills and Coach's "what I'll do about it" have to agree, so both
         // read the same derivation. A store with no signals in it yet yields none.
-        const declared = weaknessesFrom(await recentSignals(settings.profile.targetLanguage).catch(() => []));
+        const signals = await recentSignals(settings.profile.targetLanguage).catch(() => []);
+        const declared = weaknessesFrom(signals);
+        // PLAN-037: the day's repair target, derived from the same signals the
+        // weakness derivation reads — `nextTarget` over the repair inventory. It
+        // rides PlanContext, never computed inside learn.ts (which stays pure).
+        const repairTarget = nextTarget(inventoryFrom(signals, Date.now()));
         if (row && row.lang === settings.profile.targetLanguage) {
           const stored = JSON.parse(row.plan);
           // A row saved before the shared model ({blocks:[...]}) is treated as absent:
@@ -158,6 +172,10 @@ export function useDay(settings: Settings): Day {
             setRecap(row.recap ? JSON.parse(row.recap) : null);
             setFocus(nextFocus);
             setWeaknesses(declared);
+            // PLAN-037: a resumed day keeps its repair target — `changeTopic`
+            // rebuilds from this state, and a target that only the fresh branch
+            // set would drop on the first topic change after a reload.
+            setRepairTarget(repairTarget);
             setTrace(await previousDay(settings.profile.targetLanguage, date));
             const { today, due: backlog } = await vocabCounts(settings.profile.targetLanguage);
             setDue(today);
@@ -174,7 +192,7 @@ export function useDay(settings: Settings): Day {
           previousDay(settings.profile.targetLanguage, date),
         ]);
         const levelEstimate = levelEstimateFrom(scores);
-        const fresh = buildDailyPlan(settings, { date, dayIndex, dueVocab: today, focus: nextFocus, weaknesses: declared });
+        const fresh = buildDailyPlan(settings, { date, dayIndex, dueVocab: today, focus: nextFocus, weaknesses: declared, repairTarget });
         if (!live) return;
         setLevelEstimate(levelEstimate);
         setPlan(fresh);
@@ -182,6 +200,7 @@ export function useDay(settings: Settings): Day {
         setRecap(null);
         setFocus(nextFocus);
         setWeaknesses(declared);
+        setRepairTarget(repairTarget);
         setTrace(before);
         setDue(today);
         setBacklog(backlog);
@@ -321,13 +340,14 @@ export function useDay(settings: Settings): Day {
       dueVocab: due,
       focus,
       weaknesses,
+      repairTarget,
       theme: anotherTheme(plan.theme, settings.profile.interests),
     });
     setPlan(fresh);
     setDone(keep);
     setRecap(null);
     await persist(keep, null, fresh);
-  }, [plan, done, due, focus, weaknesses, settings, date, persist]);
+  }, [plan, done, due, focus, weaknesses, repairTarget, settings, date, persist]);
 
   return {
     date,
@@ -335,6 +355,9 @@ export function useDay(settings: Settings): Day {
     levelEstimate,
     focus,
     weaknesses,
+    /** The day's repair target (PLAN-037) — what Today's card names, and what the
+     *  session is built around. null when the signals have nothing to work on. */
+    repairTarget,
     done,
     recap,
     trace,

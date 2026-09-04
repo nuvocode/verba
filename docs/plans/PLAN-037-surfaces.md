@@ -183,6 +183,22 @@ being one `turnVerdict` answers for. It renders the empty state: §10's last row
 function returns the union above and nothing numeric, so a later edit cannot casually
 print one.
 
+"same" is a threshold, not exact equality. With 20 turns to a window, one extra
+bluff moves a share by 5 points, so a direction read off `r === p` would swing
+better/worse on a single turn's noise and never hold "same" across two windows —
+a sentence the learner can watch flip is a number in words. The windows read as
+one behaviour while the gap is no wider than **one turn's movement in the smaller
+window** — a difference one turn could have made is not a trend.
+
+That band is compared in integers (`withinOneTurn`, beside `direction`), because
+it cannot be written as a constant. A fixed 0.05 splits one-turn gaps by binary
+rounding alone: at 20 turns 2→3 computes as 0.049999999999999996 and reads
+"same", 3→4 as 0.05000000000000002 and reads "worse", and both are one turn. The
+integer form also scales the way the claim should — with 200 turns behind it,
+five points is signal rather than noise. The check pins every one-turn pair
+across the window as "same", a two-turn gap as the direction the sign says, and
+both halves of the scaling.
+
 **The next target.** One sentence, from `targetSentence(nextTarget(inventory))`. When
 every category is at `uses` or better it says that instead, and names nothing.
 

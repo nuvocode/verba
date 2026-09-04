@@ -284,22 +284,22 @@ const REPAIR_LEDGER: RepairRow[] = [
   {
     id: 21,
     claim: "Coach shows the inventory in the learner's own phrases",
-    pending: "#69 — PLAN-037",
+    assertedIn: [{ file: "src/lib/repair.check.ts", marker: "repair ledger 21" }],
   },
   {
     id: 22,
     claim: "Bluff rate is never shown as a raw number",
-    pending: "#69 — PLAN-037",
+    assertedIn: [{ file: "src/lib/repair.check.ts", marker: "repair ledger 22" }],
   },
   {
     id: 23,
     claim: "Thin data shows an empty state, never an invented metric",
-    pending: "#69 — PLAN-037",
+    assertedIn: [{ file: "src/lib/repair.check.ts", marker: "repair ledger 23" }],
   },
   {
     id: 24,
     claim: "The layer works over text when there is no audio input",
-    pending: "#69 — PLAN-037",
+    assertedIn: [{ file: "src/lib/repair.check.ts", marker: "repair ledger 24" }],
   },
 ];
 

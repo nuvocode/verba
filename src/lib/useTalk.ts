@@ -185,6 +185,12 @@ export interface ProducedTurn {
    * sees.
    */
   verdict: "clear" | "suspect" | "bluff";
+  /**
+   * The coach's line this turn was answering (PLAN-037). Captured at send time
+   * so the end-of-session review can replay the moment that broke — the coach's
+   * line, the learner's reply, and the turn index.
+   */
+  coachLine?: string;
 }
 
 /**
@@ -703,7 +709,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // A new session is a new budget (PLAN-029): the rewind cap and the learner's
       // "don't interrupt" ask belong to the session, not to the app. `handicap` is
       // forgotten here too — a sharp day is not a fact about the learner (§3.3).
-      budget.current = { used: 0, handicap: 0, off: false };
+      // PLAN-037: the standing `settings.rewinds` preference feeds the same `off`
+      // gate PLAN-031's `ease()` sets — one door, not two. Measurement continues;
+      // only the interruption stops.
+      budget.current = { used: 0, handicap: 0, off: !settings.rewinds };
       // A new session is a fresh difficulty watch (PLAN-031): the axis, the
       // drowning counts, the ease ask and the drop flag all belong to the session.
       axis.current = null;
@@ -972,8 +981,11 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         speakGeneration.current += 1;
         // A resumed conversation starts a fresh budget (PLAN-029) — the rewind
         // cap and handicap were never persisted, so they cannot be recovered here
-        // and are begun anew with the conversation.
-        budget.current = { used: 0, handicap: 0, off: false };
+        // and are begun anew with the conversation. PLAN-037: the standing
+        // `settings.rewinds` preference holds across a resume too — the learner
+        // who said rewinds bother them is not re-interrupted because they came
+        // back to an old conversation. It feeds the same `off` gate `start` sets.
+        budget.current = { used: 0, handicap: 0, off: !settings.rewinds };
         // A resumed conversation carries no manufactured difficulty (PLAN-031):
         // the axis is picked at *start*, and a resume is not a start — the old
         // session's axis (or none) is forgotten, and nothing new is chosen here.
@@ -1222,6 +1234,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         keyWord: "",
         breakdown: [],
         verdict: "clear",
+        // PLAN-037: the coach's line this turn answers, captured at send time so
+        // the end-of-session review can replay the moment that broke.
+        coachLine: prevCoachLine.current,
       });
       // The floor is read and drained: this turn owns everything accumulated so
       // far and the counter resets for the next send. The generation is *not*
@@ -1826,6 +1841,32 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     budget.current.off = true;
   }, [settings.difficultyStep]);
 
+  // PLAN-037: the turns whose verdict was not `clear` — the moments that broke,
+  // for the end-of-session review. Each carries the coach's line, the learner's
+  // reply, and its turn index. Derived from `produced` (a ref) so it re-renders
+  // with the reflection; a session with none of them is an empty list, and the
+  // view renders nothing rather than an empty heading.
+  const brokenTurns = useMemo(
+    () =>
+      produced.current
+        .map((t, i) => ({ ...t, index: i }))
+        .filter((t) => t.verdict !== "clear"),
+    [producedVersion],
+  );
+
+  /**
+   * Replay a broken moment at the slow rate (PLAN-037): the coach's line, spoken
+   * again through the existing `say(line, SLOW_RATE)` path — PLAN-030's rate,
+   * one key, no new speech path. The learner's own reply is shown, not spoken.
+   */
+  const replaySlow = useCallback(
+    (line: string) => {
+      if (!line) return;
+      say(line, SLOW_RATE);
+    },
+    [say],
+  );
+
   return {
     scenario,
     scenarios: listScenarios(),
@@ -1906,6 +1947,14 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     rewindExchange,
     /** "No, I understood" — clear the mark, raise the handicap, carry on. */
     denyRewind,
+    /**
+     * The turns whose verdict was not `clear` (PLAN-037) — the moments that
+     * broke, for the end-of-session review. Each carries the coach's line, the
+     * learner's reply, and its turn index. Empty when nothing broke.
+     */
+    brokenTurns,
+    /** Replay a broken moment's coach line at the slow rate (PLAN-037). */
+    replaySlow,
     /** Remove one of the wrap-up's captured words from the deck again. */
     dropWord,
     /** Commit the wrap-up's candidates to the deck — "Keep these N". */

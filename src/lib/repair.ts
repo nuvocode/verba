@@ -9,7 +9,7 @@
 // is a pure function over those signals. There is exactly one door into the
 // payload (model.ts's `repairMoveInfo`) and one door into an entry — the literal
 // is built here and nowhere else.
-import { repairMoveInfo, type Signal, type SignalDraft, type ActivityId } from "./model.ts";
+import { repairMoveInfo, turnVerdict, type Signal, type SignalDraft, type ActivityId } from "./model.ts";
 
 // --- the six codes ------------------------------------------------------------
 
@@ -228,6 +228,152 @@ export function nextTarget(inventory: RepairEntry[]): RepairCategory | null {
     if (entry && (entry.state === "unknown" || entry.state === "recognises")) return category;
   }
   return null;
+}
+
+// --- the surfaces: what Today and Coach say -----------------------------------
+
+/**
+ * The practice goal for a category — the phrase folded into the activity's `goal`
+ * field, which rides the seam `App.tsx` → `talk.start(…, goal)` → `buildSystem`'s
+ * "Quietly give the learner practice with: …". This is the half that makes Today's
+ * sentence true: a card that says the session will work on a move, over a session
+ * the coach runs identically, is the invented metric with a friendlier face.
+ */
+const TARGET_GOAL: Record<RepairCategory, string> = {
+  HOLD: "pausing to ask for a moment before answering",
+  REPEAT: "asking for the exact words to be said again",
+  SLOW: "asking for slower speech",
+  CLARIFY: "asking what a word or phrase meant",
+  CONFIRM: "checking that you understood",
+  PARAPHRASE: "restating what you heard in your own words",
+};
+
+/** The practice goal for a category, as a phrase the coach gives practice with. */
+export function targetGoal(category: RepairCategory): string {
+  return TARGET_GOAL[category];
+}
+
+/**
+ * The card's rationale for a repair target — an outcome, in the second person,
+ * about the coach. Never a mechanism, never a code, never a number. This is what
+ * Today writes on the one activity that carries the day's repair target.
+ */
+const TODAY_LINE: Record<RepairCategory, string> = {
+  HOLD: "Today we'll work on stopping me when I go too fast.",
+  REPEAT: "Today we'll work on asking me to say things again.",
+  SLOW: "Today we'll work on asking me to slow down.",
+  CLARIFY: "Today we'll work on asking me what a word means.",
+  CONFIRM: "Today we'll work on checking that you understood me.",
+  PARAPHRASE: "Today we'll work on putting what I said in your own words.",
+};
+
+/** The sentence Today writes on the card that carries the day's repair target. */
+export function todayLine(category: RepairCategory): string {
+  return TODAY_LINE[category];
+}
+
+/**
+ * The readable title for a category — what Coach's inventory panel puts in its
+ * heading instead of the code. Same register as `todayLine`/`targetGoal`: an
+ * outcome the learner recognises, never the mechanism, never the code. The code
+ * is the engine's vocabulary; the title is the learner's.
+ */
+const CATEGORY_TITLE: Record<RepairCategory, string> = {
+  HOLD: "Buying a moment",
+  REPEAT: "Asking to hear it again",
+  SLOW: "Asking for slower speech",
+  CLARIFY: "Asking what a word meant",
+  CONFIRM: "Checking you understood",
+  PARAPHRASE: "Saying it back in your own words",
+};
+
+/** The heading a category shows under on Coach — never the code itself. */
+export function categoryTitle(category: RepairCategory): string {
+  return CATEGORY_TITLE[category];
+}
+
+/**
+ * The one sentence Coach writes about what is next. `null` — every category at
+ * `uses` or better — says so and names nothing.
+ */
+export function targetSentence(target: RepairCategory | null): string {
+  if (!target) return "Every repair move is in your hands now — nothing new to work on.";
+  return `Next we'll work on ${TARGET_GOAL[target]}.`;
+}
+
+// --- the direction: a verdict distribution, in words --------------------------
+
+/**
+ * How the learner's asking is changing, as a direction — never a figure. The
+ * verdict distribution becomes a sentence about behaviour, and nothing numeric
+ * leaves this function, so a later edit cannot casually print a percentage.
+ */
+export type Direction = "better" | "same" | "worse" | "tooEarly";
+
+const DIRECTION_WINDOW = 14 * DAY_MS;
+/** A window needs this many judged turns before it says anything at all. */
+const MIN_JUDGED_TURNS = 20;
+
+/**
+ * Whether the two windows' bluff shares are close enough to be one story.
+ *
+ * A direction read off exact equality would flip on one turn: with 20 turns a
+ * window, a single extra bluff moves the share by 5 points, so "same" would
+ * almost never survive two consecutive windows and the sentence would swing
+ * better/worse on noise the learner can feel is not a trend. So the gap has to
+ * be bigger than one turn's worth of movement in the smaller window.
+ *
+ * Compared as integers, because that sentence cannot be written as a constant.
+ * A 0.05 threshold splits one-turn gaps by binary rounding alone: at 20 turns
+ * 2→3 computes as 0.049999999999999996 and reads "same", 3→4 as
+ * 0.05000000000000002 and reads "worse". Both are one turn. Cross-multiplying
+ * the counts settles it exactly, and it scales the right way: with 200 turns
+ * behind it, five points is signal rather than noise, and the window says so.
+ */
+function withinOneTurn(rb: number, rn: number, pb: number, pn: number): boolean {
+  return Math.abs(rb * pn - pb * rn) * Math.min(rn, pn) <= rn * pn;
+}
+
+/**
+ * The direction of the learner's asking: the bluff share of the last 14 days
+ * against the 14 before it. `tooEarly` whenever either window holds fewer than
+ * 20 judged turns — a judged turn being one `turnVerdict` answers for. Reads the
+ * verdict through `turnVerdict` (model.ts) and through nothing else.
+ */
+export function direction(signals: Signal[], now: number): Direction {
+  const judged: { at: number; verdict: "clear" | "suspect" | "bluff" }[] = [];
+  for (const s of signals) {
+    const v = turnVerdict(s);
+    if (v !== null) judged.push({ at: s.observedAt, verdict: v });
+  }
+  const recent = judged.filter((t) => t.at > now - DIRECTION_WINDOW);
+  const prior = judged.filter((t) => t.at <= now - DIRECTION_WINDOW && t.at > now - 2 * DIRECTION_WINDOW);
+  if (recent.length < MIN_JUDGED_TURNS || prior.length < MIN_JUDGED_TURNS) return "tooEarly";
+  const bluffs = (ts: { verdict: string }[]): number => ts.filter((t) => t.verdict === "bluff").length;
+  const rb = bluffs(recent);
+  const pb = bluffs(prior);
+  // Within one turn's movement the two windows are one behaviour, not two:
+  // "same" is the honest answer for a gap one turn's noise could have made.
+  if (withinOneTurn(rb, recent.length, pb, prior.length)) return "same";
+  // rb/recent < pb/prior, cross-multiplied — a falling bluff share is better.
+  return rb * prior.length < pb * recent.length ? "better" : "worse";
+}
+
+/**
+ * The direction as a sentence about behaviour. `tooEarly` is the empty state's
+ * line — the panel renders `Nothing` for it, never a number.
+ */
+export function directionSentence(d: Direction): string {
+  switch (d) {
+    case "better":
+      return "When you don't catch something, you ask more often than you used to.";
+    case "same":
+      return "When you don't catch something, you ask about as often as you used to.";
+    case "worse":
+      return "When you don't catch something, you ask less often than you used to.";
+    case "tooEarly":
+      return "Not enough sessions yet to say how your asking is changing.";
+  }
 }
 
 // --- the surface door: one signal per observation ------------------------------

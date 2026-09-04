@@ -167,6 +167,14 @@ export interface Settings {
    * unpinned by settingsIndex.check, exactly like `difficultyStep`.
    */
   listeningGrades: Partial<Record<Variable, number>>;
+  /**
+   * Whether the coach may interrupt with a rewind (PLAN-037, §10 row 5). A
+   * standing preference — the learner says rewinds bother them, so the
+   * interruption stops. It feeds `SessionBudget.off`, the same gate PLAN-031's
+   * `ease()` sets, so there is one door, not two. Measurement continues: only
+   * the interruption stops, and an in-session `ease` still persists nothing.
+   */
+  rewinds: boolean;
 }
 
 /** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
@@ -274,6 +282,10 @@ export const defaultSettings: Settings = {
   // session must still be there in the next; never surfaced — §8's walk-back
   // and hardening are the only controls.
   listeningGrades: {},
+  // Rewinds on by default (PLAN-037): the coach may interrupt with a rewind
+  // until the learner says they bother them. A standing preference, distinct
+  // from "don't push me today" — it feeds the same SessionBudget.off gate.
+  rewinds: true,
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>

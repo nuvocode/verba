@@ -235,6 +235,22 @@ export function repairMoveInfo(
   return { category: label, by, variant: typeof variant === "string" ? variant : "" };
 }
 
+/**
+ * The eighth — and last — structural payload reader: the verdict a produced turn
+ * carried (PLAN-029). `null` for a signal that is not a measured turn — a
+ * correction, a card, a repair move. `repair.ts`'s `direction` reads the verdict
+ * distribution through this door and through nothing else, so a later edit cannot
+ * reach into `payload` to print a percentage.
+ */
+export function turnVerdict(s: Signal): "clear" | "suspect" | "bluff" | null {
+  if (s.kind !== "unpromptedTurn" && s.kind !== "suggestionUsed") return null;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { verdict } = p as { verdict?: unknown };
+  if (verdict === "clear" || verdict === "suspect" || verdict === "bluff") return verdict;
+  return null;
+}
+
 // --- §1.4 VocabItem ------------------------------------------------------------
 
 export type VocabItem = {

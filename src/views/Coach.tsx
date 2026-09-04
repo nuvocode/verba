@@ -10,6 +10,7 @@ import { addressed, weaknessCard } from "../lib/weakness";
 import { coachPanel, measured, wins, daySeries, type Metric, type MetricPair } from "../lib/coachmetrics";
 import { recentMemories, recentMetricScores, weekStats, signalsSince } from "../lib/db";
 import { absolute, humanError } from "../lib/fmt";
+import { inventoryFrom, direction, directionSentence, targetSentence, nextTarget, categoryTitle, REPAIR_CATEGORIES } from "../lib/repair";
 import { Generating, Nothing, Failed, Unusable } from "./States";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -132,6 +133,14 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
   // Titles come from tomorrow's plan through the day, so a card names the activity
   // the learner will actually see rather than an id from the model.
   const titles = Object.fromEntries((day.plan?.activities ?? []).map((a) => [a.id, a.title]));
+
+  // PLAN-037: the repair inventory panel. Derived from the same signals the metric
+  // grid reads — the six categories, each with the learner's own phrasings, the
+  // direction in words, and the next target in one sentence. `tooEarly` (thin
+  // data) renders the empty state, never a number.
+  const inventory = inventoryFrom(signals, Date.now());
+  const dir = direction(signals, Date.now());
+  const next = nextTarget(inventory);
 
   return (
     <div className="coach fade">
@@ -329,6 +338,51 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
             {trend[trend.length - 1] >= trend[0]
               ? "Building. Longer unprompted answers, fewer suggestion pickups."
               : "Dipping — a lighter week. The plan will ease back accordingly."}
+          </div>
+        </>
+      )}
+
+      {/* PLAN-037: the repair inventory — the six categories in the learner's own
+          words, the direction in words, and the next target in one sentence. It
+          does not get a row in SURFACES: the four states it needs are the coach
+          surface's own, already pinned. `tooEarly` (thin data) renders Nothing —
+          no invented percentage, no chart. */}
+      <div className="eyebrow" style={{ marginBottom: 18 }}>
+        When understanding breaks
+      </div>
+      {dir === "tooEarly" ? (
+        <div className="empty fade" style={{ textAlign: "left", padding: "24px 0 44px" }}>
+          <Nothing why="Not enough sessions yet to say how your asking is changing. Keep talking — the six ways to ask for help take shape here." />
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 20, maxWidth: 560 }}>
+            {directionSentence(dir)}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+            {REPAIR_CATEGORIES.map((c) => {
+              const e = inventory.find((x) => x.category === c)!;
+              return (
+                <div className="weak" key={c}>
+                  <h3>
+                    {categoryTitle(c)}{" "}
+                    <span style={{ color: "var(--ink3)", fontSize: 12, fontWeight: 400 }}>· {e.state}</span>
+                  </h3>
+                  {e.variants.length > 0 ? (
+                    <p className="ev" style={{ fontStyle: "italic" }}>
+                      {e.variants.map((v) => `“${v}”`).join(" · ")}
+                    </p>
+                  ) : (
+                    <p className="ev" style={{ color: "var(--ink3)" }}>
+                      Not seen yet — nothing to show.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 48, maxWidth: 560 }}>
+            {targetSentence(next)}
           </div>
         </>
       )}

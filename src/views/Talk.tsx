@@ -630,6 +630,50 @@ export default function Talk({
                 </div>
               </>
             )}
+
+            {/* PLAN-037: the moments that broke, at the end of the session. A short
+                list, not a report — the coach's line, the learner's reply, and a
+                replay at the slow rate. Neutral framing: these are the parts worth
+                another listen, not the parts you got wrong. No count, no colour
+                beyond the neutral ramp, and a session with none of them shows
+                nothing at all rather than an empty heading. */}
+            {talk.brokenTurns.length > 0 && (
+              <>
+                <div className="eyebrow" style={{ marginBottom: 16 }}>
+                  Worth another listen
+                </div>
+                <div style={{ marginBottom: 40 }}>
+                  {talk.brokenTurns.map((t) => (
+                    <div key={t.index} style={{ marginBottom: 18 }}>
+                      <div className="meta" style={{ fontSize: 12, color: "var(--ink3)", margin: "0 0 6px" }}>
+                        turn {t.index + 1}
+                      </div>
+                      {t.coachLine && (
+                        <div className="fix-row">
+                          <span className="d" />
+                          <div style={{ flex: 1 }}>
+                            <div className="l" dir={talk.dir}>
+                              {t.coachLine}
+                            </div>
+                            <button className="linky" style={{ fontSize: 13 }} onClick={() => talk.replaySlow(t.coachLine!)}>
+                              ⟲ Hear it again, slower
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      <div className="fix-row">
+                        <span className="d" />
+                        <div style={{ flex: 1 }}>
+                          <div className="l" dir={talk.dir}>
+                            {t.text}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
 

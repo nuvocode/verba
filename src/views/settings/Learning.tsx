@@ -416,6 +416,20 @@ export default function Learning({
         ))}
       </div>
 
+      {/* PLAN-037, §10 row 5: the learner says rewinds bother them. A standing
+          preference — it stops the interruption, never the measurement. It feeds
+          the same SessionBudget.off gate PLAN-031's ease() sets, so there is one
+          door, not two. */}
+      <div className="sec" style={{ marginTop: 44 }}>Rewinds</div>
+      <div data-setting="rewinds">
+        <ToggleRow
+          title="Let the coach rewind"
+          desc="When you miss something, the coach stops, owns the pace, and says the same line again, slower. Turn this off if the interruption bothers you — you'll still be measured, just never interrupted."
+          on={settings.rewinds}
+          onClick={() => onChange({ rewinds: !settings.rewinds })}
+        />
+      </div>
+
       <div className="sec" style={{ marginTop: 44 }}>Interface</div>
       <div data-setting="keyboard-hints">
         <ToggleRow
