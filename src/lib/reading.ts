@@ -1,7 +1,7 @@
 import type { Settings } from "./settings.ts";
 import { levelOf } from "./model.ts";
 import type { LanguagePack } from "./packs/schema";
-import { memoryBrief, memoryStance, packGuidance, type Memory } from "./prompts.ts";
+import { memoryBrief, memoryStance, packGuidance, styleGuidance, type Memory } from "./prompts.ts";
 import { questionInstructions, questionsShape, parseQuestions, type Question } from "./questions.ts";
 
 // Reading immersion: story mode + flow reading share one shape — a title plus
@@ -237,6 +237,7 @@ export function explainWordPrompt(s: Settings, word: string, sentence: string): 
   return [
     `The learner is reading ${s.profile.targetLanguage} and tapped the word "${word}".`,
     `In this sentence: "${sentence}".`,
+    styleGuidance(s.coachStyle),
     `Answer with ONLY a JSON object: { "word": "${word}", "meaning": "its meaning in ${s.profile.nativeLanguage}", "lemma": "dictionary form in ${s.profile.targetLanguage}", "note": "one short usage note in ${s.profile.nativeLanguage}" }.`,
   ].join("\n");
 }
@@ -279,6 +280,7 @@ export function notesPrompt(s: Settings, text: ReadingText, level: string, nativ
   const passage = text.sentences.map((x, i) => `${i + 1}. ${x.target}`).join("\n");
   return [
     `You are annotating a passage a ${s.profile.targetLanguage} learner at ${level} has just read. Their native language is ${nativeLanguage}.`,
+    styleGuidance(s.coachStyle),
     `The passage, with sentence numbers:`,
     passage,
     `Write at most ${want} coach notes. A note names something in the passage and explains it — it never proposes a replacement.`,

@@ -171,6 +171,161 @@ const LEDGER: Row[] = [
   },
 ];
 
+// --- REPAIR_LEDGER: spec 4 §12's claims, audited by the same machinery ---------
+//
+// M6 introduces a second spec (docs/plans/4-verba-repair-katmani-spec.md §12) with
+// its own list of claims. One ledger file, two specs. Rows are `assertedIn` a
+// *.check.ts marker, or `pending` until the plan that builds them lands.
+type RepairRow =
+  | { id: number; claim: string; assertedIn: { file: string; marker: string }[] }
+  | { id: number; claim: string; pending: string }; // "#<issue> — <what builds it>"
+
+const REPAIR_LEDGER: RepairRow[] = [
+  {
+    id: 1,
+    claim: "Six repair categories defined, states tracked",
+    assertedIn: [{ file: "src/lib/repair.check.ts", marker: "repair ledger 1" }],
+  },
+  {
+    id: 2,
+    claim: "Inventory fills only by observation; a claim changes nothing",
+    assertedIn: [{ file: "src/lib/repair.check.ts", marker: "repair ledger 2" }],
+  },
+  {
+    id: 3,
+    claim: "A per-learner response baseline exists and signals normalise against it",
+    assertedIn: [{ file: "src/lib/breakdown.check.ts", marker: "breakdown ledger 3" }],
+  },
+  {
+    id: 4,
+    claim: "Model latency is separated from learner latency",
+    assertedIn: [{ file: "src/lib/breakdown.check.ts", marker: "breakdown ledger 4" }],
+  },
+  {
+    id: 5,
+    claim: "Bluff needs ≥2 signals; one signal only records",
+    assertedIn: [{ file: "src/lib/breakdown.check.ts", marker: "breakdown ledger 5" }],
+  },
+  {
+    id: 6,
+    claim: "Rewinds per session are capped",
+    assertedIn: [{ file: "src/lib/breakdown.check.ts", marker: "breakdown ledger 6" }],
+  },
+  {
+    id: 7,
+    claim: "The first repetition is always the same sentence, slowed",
+    assertedIn: [{ file: "src/lib/rewind.check.ts", marker: "rewind ledger 7" }],
+  },
+  {
+    id: 8,
+    claim: "Rewind language blames the coach; no text points at the learner",
+    assertedIn: [{ file: "src/lib/rewind.check.ts", marker: "rewind ledger 8" }],
+  },
+  {
+    id: 9,
+    claim: "A learner-initiated repair request is actually obeyed",
+    assertedIn: [{ file: "src/lib/rewind.check.ts", marker: "rewind ledger 9" }],
+  },
+  {
+    id: 10,
+    claim: "Patience derives from the learner's own average and is settable",
+    assertedIn: [{ file: "src/lib/patience.check.ts", marker: "patience ledger 10" }],
+  },
+  {
+    id: 11,
+    claim: "Nothing is shown while waiting",
+    assertedIn: [{ file: "src/lib/patience.check.ts", marker: "patience ledger 11" }],
+  },
+  {
+    id: 12,
+    claim: "Praise cites a profile record, and is capped per session",
+    assertedIn: [{ file: "src/lib/patience.check.ts", marker: "patience ledger 12" }],
+  },
+  {
+    id: 13,
+    claim: "At most one personal detail per opening, never re-asked",
+    assertedIn: [{ file: "src/lib/prompts.check.ts", marker: "memory ledger 13" }],
+  },
+  {
+    id: 14,
+    claim: "Coach personality is consistent; style applies on every surface",
+    assertedIn: [{ file: "src/lib/prompts.check.ts", marker: "memory ledger 14" }],
+  },
+  {
+    id: 15,
+    claim: "At most one difficulty axis is active",
+    assertedIn: [{ file: "src/lib/difficulty.check.ts", marker: "difficulty ledger 15" }],
+  },
+  {
+    id: 16,
+    claim: "Difficulty rises without breakdowns, drops instantly on drowning",
+    assertedIn: [{ file: "src/lib/difficulty.check.ts", marker: "difficulty ledger 16" }],
+  },
+  {
+    id: 17,
+    claim: '"Do not push me today" is obeyed unconditionally',
+    assertedIn: [{ file: "src/lib/difficulty.check.ts", marker: "difficulty ledger 17" }],
+  },
+  {
+    id: 18,
+    claim: "Rehearsal works; role-play and feedback are separated",
+    assertedIn: [{ file: "src/lib/rehearsal.check.ts", marker: "rehearsal ledger 18" }],
+  },
+  {
+    id: 19,
+    claim: "Brought content stays local and reaches Memory",
+    assertedIn: [{ file: "src/lib/brought.check.ts", marker: "brought ledger 19" }],
+  },
+  {
+    id: 20,
+    claim: "Listening variables are graded; an unsupported grade is not shown",
+    assertedIn: [{ file: "src/lib/conditions.check.ts", marker: "conditions ledger 20" }],
+  },
+  {
+    id: 21,
+    claim: "Coach shows the inventory in the learner's own phrases",
+    assertedIn: [{ file: "src/lib/repair.check.ts", marker: "repair ledger 21" }],
+  },
+  {
+    id: 22,
+    claim: "Bluff rate is never shown as a raw number",
+    assertedIn: [{ file: "src/lib/repair.check.ts", marker: "repair ledger 22" }],
+  },
+  {
+    id: 23,
+    claim: "Thin data shows an empty state, never an invented metric",
+    assertedIn: [{ file: "src/lib/repair.check.ts", marker: "repair ledger 23" }],
+  },
+  {
+    id: 24,
+    claim: "The layer works over text when there is no audio input",
+    assertedIn: [{ file: "src/lib/repair.check.ts", marker: "repair ledger 24" }],
+  },
+];
+
+// Repair assertedIn targets are audited like the main ledger's: a repair claim
+// must point at a real file that really carries its marker.
+const repairUnverified: string[] = [];
+for (const row of REPAIR_LEDGER)
+  if ("assertedIn" in row) repairUnverified.push(...verifyAssertedIn(row.assertedIn));
+assert(
+  repairUnverified.length === 0,
+  "invariants.check: unverified REPAIR_LEDGER targets:\n" + repairUnverified.join("\n"),
+);
+
+// Every pending repair row names the issue and plan that builds it. A pending row
+// without one is a claim that has quietly left the spec.
+for (const row of REPAIR_LEDGER)
+  if ("pending" in row)
+    assert.match(row.pending, /^#\d+ — PLAN-\d+$/, `repair ledger ${row.id} must name the issue and plan that build it`);
+
+// The repair ledger is complete: 24 rows, ids 1..24, no gaps, no duplicates.
+assert.deepEqual(
+  REPAIR_LEDGER.map((r) => r.id),
+  Array.from({ length: 24 }, (_, i) => i + 1),
+  "the repair ledger must carry spec 4 §12's 24 claims, in order, exactly once each",
+);
+
 // --- assertedIn verification --------------------------------------------------
 
 function verifyAssertedIn(entries: { file: string; marker: string }[]): string[] {
@@ -303,4 +458,10 @@ const issueRefs = pendingIssues.map((r) => r.pending.match(/^#\d+/)?.[0] ?? "").
 const pending = issueRefs ? `${pendingIssues.length} pending (${issueRefs})` : `${pendingIssues.length} pending`;
 
 console.log(`invariants: ${asserted} asserted, ${pending}, ${future} out of scope (M1+)`);
+
+// The repair ledger's bill — computed, never hardcoded. Only PLAN-027's rows (1-2)
+// are asserted today; every later M6 plan moves its rows from pending to asserted.
+const repairAsserted = REPAIR_LEDGER.filter((r) => "assertedIn" in r).length;
+const repairPending = REPAIR_LEDGER.filter((r): r is Extract<RepairRow, { pending: string }> => "pending" in r).length;
+console.log(`repair ledger: ${repairAsserted} asserted, ${repairPending} pending`);
 console.log("invariants.check OK");

@@ -1,8 +1,10 @@
-import type { Settings } from "./settings.ts";
+import type { CoachStyle, Settings } from "./settings.ts";
 import { levelOf } from "./model.ts";
 import type { Persona, Scenario } from "./scenarios";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
 import { worthLearning } from "./vocab.ts";
+import { BREAKDOWN_MEANING_SIGNALS } from "./breakdown.ts";
+import { axisGuidance, DIFFICULTY_NO_ANNOUNCE, type Axis } from "./difficulty.ts";
 
 /**
  * The most cards one conversation may offer.
@@ -15,6 +17,17 @@ export const MAX_VOCAB_PER_SESSION = 5;
 export type { Scenario } from "./scenarios";
 export { packGuidance } from "./packs/schema.ts";
 
+/**
+ * The difficulty a session was picked with (PLAN-031). `axis` is null for a
+ * session that deliberately manufactures none (a fresh learner, a recovered
+ * learner, or one who asked for ease); when it is set, `buildSystem` folds the
+ * axis guidance and the no-announce rule into the system prompt.
+ */
+export interface SystemDifficulty {
+  axis: Axis | null;
+  step: number;
+}
+
 /** System prompt for a normal conversational turn. Model must return the turn JSON. */
 export function buildSystem(
   s: Settings,
@@ -22,27 +35,65 @@ export function buildSystem(
   persona: Persona,
   pack?: LanguagePack,
   memories: Memory[] = [],
+  difficulty: SystemDifficulty = { axis: null, step: 0 },
+  corrections: string[] = [],
+  opening: Memory | null = null,
 ): string {
   return [
     `You are Verba, a warm and encouraging ${s.profile.targetLanguage} conversation tutor.`,
     `For this session you are ${persona.name}, ${persona.role}. This persona is fixed for the whole session — stay in it throughout.`,
+    styleGuidance(s.coachStyle),
     `The learner's native language is ${s.profile.nativeLanguage}. Their self-reported level is ${levelOf(s.profile)}.`,
     `Scenario: ${scenario.setup}`,
     scenario.goals?.length ? `Help the learner practise these goals: ${scenario.goals.join("; ")}.` : "",
     packGuidance(pack),
     memoryBrief(memories),
     memories.length
-      ? `${memoryStance} The scenario is what you talk about. Never read the list back, and never tell the learner you keep notes on them.`
+      ? `${memoryStance} The scenario is what you talk about. Never read the list back, and never volunteer that you keep notes on them.`
+      : "",
+    // PLAN-033: the one exception to the stance, and only when a detail was
+    // supplied. The stance forbids reaching into the list; this hands the model
+    // one fact, already chosen and checked, and permits one question about it.
+    // The fact is named inline — a general "you may open on something you
+    // remember" would re-open the door the stance closes. No detail → no sentence.
+    opening
+      ? `You may open by asking after this one thing the learner told you: "${opening.fact}". Ask about it once, and only if it fits the moment — do not reach for anything else on the list.`
+      : "",
+    // PLAN-033: the honesty clause. If the learner asks how the coach knows
+    // something, the answer is the truth — Verba keeps notes, and they can read
+    // and delete all of them. Never deny, deflect, or claim to have guessed.
+    memories.length
+      ? `If the learner asks how you know something, answer honestly: Verba keeps notes of what they have said, and they can read and delete all of them on the Memory screen. Never deny it, deflect, or claim to have guessed.`
       : "",
     ``,
     `Hold a natural conversation in ${s.profile.targetLanguage}. Match your vocabulary and sentence length to a ${levelOf(s.profile)} learner. Always keep the conversation going by ending your reply with a question or prompt.`,
     ``,
+    // PLAN-031: when a session has a difficulty axis, the model is told how to
+    // apply it and, beside it, that it must never announce the difficulty — §5.2's
+    // last line, at the prompt level where it can hold.
+    difficulty.axis ? axisGuidance(difficulty.axis, difficulty.step) : "",
+    difficulty.axis ? DIFFICULTY_NO_ANNOUNCE : "",
+    // PLAN-032: the praise rule, in the same register as the "do NOT correct the
+    // learner inside reply" rule. Praise without a cited record is a fabrication,
+    // and the record it may cite is the list of things this learner has been
+    // corrected on before — the only things they could have "just got right".
+    // The praise sentence goes in the "praise" object's "text", never in "reply":
+    // "reply" must stand on its own without it, so a dropped praise really drops.
+    `Do not praise the learner's language. Do not write "great", "well done", "excellent", "perfect", "nice job", or any equivalent. When the learner produces a correct sentence, the correct response is to answer what they said and keep the conversation moving. Praise is allowed **only** when you can point at something specific in the record below that they used to get wrong and just got right, and you must say what that thing was. When you do praise, put the praise sentence in "praise"."text" — never inside "reply". "reply" must read naturally and completely without the praise, because the praise may be dropped.`,
+    corrections.length
+      ? `Things this learner has been corrected on before (the record you may cite): ${corrections.join("; ")}.`
+      : `This learner has no correction record yet — so there is nothing to cite, and no praise is allowed.`,
     `You MUST answer with ONLY a valid JSON object, no prose outside it, in this exact shape:`,
     `{`,
     `  "reply": "your natural conversational reply in ${s.profile.targetLanguage} (1-3 sentences)",`,
     `  "corrections": [ { "original": "the learner's exact wording that was wrong", "fixed": "the corrected version", "note": "a short explanation written in ${s.profile.nativeLanguage}", "severity": "minor or severe", "category": "grammar | vocabulary | wordOrder | register | pronunciation" } ],`,
     `  "suggestions": [ "a short example reply the learner could send next, in ${s.profile.targetLanguage}", "another option" ],`,
-    `  "goalsMet": [0, 2]`,
+    `  "goalsMet": [0, 2],`,
+    `  "repair": { "category": "HOLD | REPEAT | SLOW | CLARIFY | CONFIRM | PARAPHRASE", "variant": "the learner's exact words" },`,
+    `  "missed": ["keyWordMissing", "topicChange"],`,
+    `  "keyWord": "the one word in YOUR OWN last line that carried the meaning",`,
+    `  "praise": { "for": "the exact record referred to", "text": "the praise sentence, in ${s.profile.targetLanguage}" },`,
+    `  "ease": false`,
     `}`,
     ``,
     `Rules:`,
@@ -52,6 +103,10 @@ export function buildSystem(
     `- "category" is which kind of mistake it is: grammar, vocabulary, wordOrder, register, or pronunciation. Pick the one that fits best.`,
     `- Give 2-3 "suggestions". Keep them natural and at the learner's level.`,
     `- "goalsMet" lists the index of every scenario goal the learner has JUST satisfied with their last message. An empty list is the normal answer. Never re-list a goal already met, and never credit a goal the learner only asked about.`,
+    `- "repair" is filled ONLY when the learner's last message actually performed one of the six repair moves (HOLD, REPEAT, SLOW, CLARIFY, CONFIRM, PARAPHRASE). Set "variant" to the learner's own wording, copied verbatim, never rephrased. Omit the field otherwise — that is the normal answer. Never report a category with a variant the learner did not literally write.`,
+    `- "missed" lists which of these were observably true of the learner's LAST message: disconnected (did not answer what was asked), overGeneral ("yes", "maybe", "sure" and nothing else), apologyThenOn (said "sorry"/"pardon" and carried on regardless), keyWordMissing (the key word in YOUR last line appears nowhere in the reply), topicChange (the reply starts a different subject). An empty list is the normal answer. Never guess at what the learner was thinking.`,
+    `- "keyWord" is the one word in your OWN last line that carried the meaning — the word "keyWordMissing" is verified against.`,
+    `- "ease" is true when in ANY wording the learner asked for an easier session — for example, "make it a bit easier", "let's take it slow", "this is too hard today", "I'm not in the mood for a challenge". It is false (the normal answer) otherwise. Report it even if the learner only hinted; the request is honoured unconditionally.`,
     `- Never mention that you are returning JSON.`,
   ].join("\n");
 }
@@ -112,6 +167,42 @@ export interface TurnResult {
   suggestions: string[];
   /** Indices into the scenario's goals that this turn just satisfied. */
   goalsMet: number[];
+  /**
+   * A reported repair move, shape-checked only. `parseTurn` has no access to the
+   * learner's message, so it cannot verify the variant — `verifyRepair` (repair.ts)
+   * does that in `useTalk.send`, and nothing is recorded if the variant was never
+   * actually written. `null` when the model reported nothing (the normal answer)
+   * or the shape is wrong.
+   */
+  repair: { category: string; variant: string } | null;
+  /**
+   * Model-reported breakdown signals (PLAN-028), shape-checked only. Only the five
+   * meaning judgements (`disconnected`, `overGeneral`, `apologyThenOn`,
+   * `keyWordMissing`, `topicChange`) survive; `breakdown.ts` verifies the observable
+   * ones on its own side before any turn is believed.
+   */
+  missed: string[];
+  /**
+   * The one word in the coach's own last line that carries the meaning — the key
+   * `keyWordMissing` is checked against (PLAN-028). Empty when the model did not
+   * name one.
+   */
+  keyWord: string;
+  /**
+   * Whether the learner asked for an easier session in any wording (PLAN-031).
+   * `false` is the normal answer. The request is honoured unconditionally and
+   * never announced.
+   */
+  ease: boolean;
+  /**
+   * A model-reported praise, shape-checked only. `for` is the record the praise
+   * claims to cite; `text` is the praise sentence, kept **outside** `reply` so a
+   * dropped praise really drops. `praiseGate` (patience.ts) decides whether it
+   * is believed — `for` must match a real correction record exactly, and the
+   * session cap is enforced there too. `null` when the model reported nothing
+   * (the normal answer) or the shape is wrong.
+   */
+  praise: { for: string; text: string } | null;
 }
 
 /** The JSON escapes worth decoding mid-stream; `\uXXXX` is handled separately. */
@@ -196,6 +287,120 @@ export function parseTurn(raw: string): TurnResult {
           .map((x: any) => Number(x))
           .filter((n: number) => Number.isInteger(n) && n >= 0)
       : [],
+    // A reported repair move, shape-checked only. `category` must be a string and
+    // `variant` a non-empty string for the field to survive — anything else is
+    // dropped, because `parseTurn` is not the gate that decides whether the move
+    // is believable. That gate lives in `verifyRepair` (repair.ts), which holds
+    // the learner's message.
+    repair:
+      obj?.repair &&
+      typeof obj.repair === "object" &&
+      typeof obj.repair.category === "string" &&
+      typeof obj.repair.variant === "string" &&
+      obj.repair.variant.trim() !== ""
+        ? { category: obj.repair.category, variant: obj.repair.variant }
+        : null,
+    // A model-reported breakdown (PLAN-028), shape-checked only. Only the five
+    // meaning judgements known to breakdown.ts survive; an unknown string is
+    // dropped here so nothing invented travels further. Deduplicated, order
+    // preserved: one observation is one signal, and a label reported twice must
+    // not satisfy PLAN-029's two-signal condition on a single observation.
+    missed: (() => {
+      if (!Array.isArray(obj?.missed)) return [];
+      const kept: string[] = [];
+      for (const x of obj.missed) {
+        const s = String(x);
+        if (!BREAKDOWN_MEANING_SIGNALS.includes(s as any)) continue;
+        if (kept.includes(s)) continue; // one observation is one signal
+        kept.push(s);
+      }
+      return kept;
+    })(),
+    // The key word the coach's last line carried — empty when the model named none.
+    keyWord: typeof obj?.keyWord === "string" ? obj.keyWord : "",
+    // Whether the learner asked for an easier session (PLAN-031). Any truthy
+    // reading counts — the model reports it in wording, not in a literal.
+    ease: obj?.ease === true,
+    // A model-reported praise (PLAN-032), shape-checked only. `for` must be a
+    // non-empty string and `text` a non-empty string for the field to survive —
+    // the belief gate lives in `praiseGate` (patience.ts), which holds the
+    // correction record and the session cap.
+    praise:
+      obj?.praise &&
+      typeof obj.praise === "object" &&
+      typeof obj.praise.for === "string" &&
+      obj.praise.for.trim() !== "" &&
+      typeof obj.praise.text === "string" &&
+      obj.praise.text.trim() !== ""
+        ? { for: obj.praise.for, text: obj.praise.text }
+        : null,
+  };
+}
+
+// ---- the rewind (PLAN-030) ----------------------------------------------------
+
+/**
+ * The "own" step's prompt: one short line from the coach, taking the blame for
+ * pace. It must not attribute the failure to the learner in any language — the
+ * produced line is gated on our side by `bannedShape` (rewind.ts), and a line
+ * that matches is replaced by the pack's fixed fallback rather than shown.
+ */
+export function rewindOwnPrompt(s: Settings, pack?: LanguagePack): string {
+  return [
+    `You spoke too fast. Own it, in one short line, in ${s.profile.targetLanguage}, in the coach's voice.`,
+    `Take the blame for the pace yourself — say you went too fast, or that you will say it again more slowly.`,
+    `Never say or imply that the learner did not understand, missed anything, or got anything wrong.`,
+    `Do not ask a question and do not add anything else.`,
+    packGuidance(pack),
+    styleGuidance(s.coachStyle),
+    `Answer with ONLY a JSON object: { "line": "your one short line in ${s.profile.targetLanguage}" }.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** The "own" line, or "" when the model gave nothing usable. */
+export function parseOwnLine(raw: string): string {
+  const obj = extractJson(raw);
+  const line = typeof obj?.line === "string" ? obj.line.trim() : "";
+  return line;
+}
+
+/**
+ * The "unpack" step's prompt: break the coach's previous line into parts, isolate
+ * the one word carrying the meaning, and give that word in the learner's native
+ * language. Reached only after a second miss — the same sentence was already
+ * repeated slower, so now the meaning is handed over.
+ */
+export function rewindUnpackPrompt(s: Settings, line: string, keyWord: string, pack?: LanguagePack): string {
+  return [
+    `The learner still did not follow. Break your last line into parts and give the one word that carried the meaning.`,
+    `Your last line was: "${line}"`,
+    keyWord ? `The word that carried the meaning is "${keyWord}".` : `Name the one word in that line that carried the meaning.`,
+    `Do not say the learner did not understand. Do not correct them.`,
+    packGuidance(pack),
+    styleGuidance(s.coachStyle),
+    `Answer with ONLY a JSON object: { "parts": ["a short chunk of the line", "another"], "keyWord": "the one word", "gloss": "that word's meaning in ${s.profile.nativeLanguage}" }.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** The unpack result: the line broken up, the key word, and its native gloss. */
+export interface UnpackResult {
+  parts: string[];
+  keyWord: string;
+  gloss: string;
+}
+
+/** Parse the unpack step's JSON. Empty parts and an empty gloss are dropped. */
+export function parseUnpack(raw: string): UnpackResult {
+  const obj = extractJson(raw);
+  const parts = Array.isArray(obj?.parts) ? obj.parts.map((x: any) => String(x)).filter(Boolean) : [];
+  return {
+    parts,
+    keyWord: typeof obj?.keyWord === "string" ? obj.keyWord : "",
+    gloss: typeof obj?.gloss === "string" ? obj.gloss : "",
   };
 }
 
@@ -253,6 +458,7 @@ export function summaryPrompt(s: Settings, pack?: LanguagePack): string {
   return [
     `Summarise this ${s.profile.targetLanguage} practice session for the learner.`,
     packGuidance(pack),
+    styleGuidance(s.coachStyle),
     `Answer with ONLY a JSON object: { "summary": "2-3 sentences on what was practised, written in ${s.profile.nativeLanguage}", "strengths": ["short point", ...], "focus": ["short thing to work on next", ...] }.`,
     `Base "strengths" and "focus" on the learner's actual messages. Keep each point under 12 words.`,
     // One voice, across all history (PLAN-020 §2.2): the summary is a constraint,
@@ -337,12 +543,124 @@ export function parseTitle(raw: string): string {
  * One durable fact, in the learner's own language, with the day it was learned.
  * The date is part of the record: it is what lets the coach say "you mentioned a
  * few weeks ago…", and what lets a fact that has gone stale be spotted.
+ *
+ * `kind` is the classification made once at write time (PLAN-033): `"state"` is a
+ * closed attribute ("has two cats"), `"event"` is something that can be asked
+ * about again ("interviewing next week"). `null` means unclassified — every fact
+ * recorded before this plan — and an unclassified fact is **not** an opening.
+ *
+ * `asked_at` is stamped when a session opens with this fact as its one detail, so
+ * the same question is never asked twice.
  */
 export interface Memory {
   id: number;
   fact: string;
   created_at: number;
+  kind: "state" | "event" | null;
+  asked_at: number | null;
 }
+
+/**
+ * How old a fact may be and still open a session. Older than this is an archive,
+ * not an opening — a coach that opens on something from two months ago is
+ * performing recall, which is exactly what the stance forbids.
+ */
+export const OPENING_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * The one detail a session may open with, or `null` when there is none.
+ *
+ * Four rules, in order: recent (not older than 30 days), open-ended (`kind ===
+ * "event"`), unasked (`asked_at` is null), and told not derived (it takes
+ * `Memory[]` and nothing else, so no statistic can reach it). Returns `null`
+ * freely — a learner with only stale, stative, already-asked or unclassified
+ * facts gets an opening with no personal detail, which is fine. It is one detail
+ * **at most**, never a requirement, and never the least-bad candidate.
+ */
+export function openingDetail(memories: Memory[], now: number): Memory | null {
+  for (const m of memories) {
+    if (now - m.created_at > OPENING_MAX_AGE_MS) continue; // stale — an archive, not an opening
+    if (m.kind !== "event") continue; // stative or unclassified — not open-ended
+    if (m.asked_at !== null) continue; // already asked once
+    return m;
+  }
+  return null;
+}
+
+/**
+ * The paragraph that pins the coach's voice to a style (PLAN-033 §6.4). Appended
+ * to the prompts the learner hears the coach through — Talk, the weekly report,
+ * the Read notes. `direct` means fewer softeners, not harder content; difficulty
+ * is owned by PLAN-031 and nothing here touches it.
+ */
+export function styleGuidance(style: CoachStyle): string {
+  switch (style) {
+    case "direct":
+      return `Speak directly: fewer softeners, no padding, no "maybe you could". Say what you mean plainly.`;
+    case "neutral":
+      return `Keep a steady, plain tone: neither effusive nor clipped. Say what you mean without flourish.`;
+    case "warm":
+    default:
+      return `Keep a warm, encouraging tone: friendly, supportive, and unhurried.`;
+  }
+}
+
+/**
+ * The prompts the learner hears the coach through — really, the ones that carry
+ * the **coach's style**. Every `export function …Prompt(` in `src/lib`, plus
+ * `buildSystem`, appears in exactly one of this list or `STRUCTURED_PROMPTS`;
+ * `prompts.check.ts` asserts the completeness.
+ *
+ * `rehearsalSystem` (PLAN-034) is the one prompt that is spoken by the coach's
+ * voice but must **not** carry `styleGuidance`: in role there is no coach — the
+ * register is the brief's — so it lives in the other list, with the reason
+ * written beside its entry.
+ *
+ * Each entry is a `file:name` key, so two prompts that share a name in different
+ * files (e.g. `listening.ts:outlinePrompt` and `reading.ts:outlinePrompt`) are
+ * distinct rows and are classified independently.
+ */
+export const SPOKEN_PROMPTS = [
+  "prompts.ts:buildSystem",
+  "prompts.ts:rewindOwnPrompt",
+  "prompts.ts:rewindUnpackPrompt",
+  "prompts.ts:summaryPrompt",
+  "coach.ts:weeklyReportPrompt",
+  "coach.ts:drillPrompt",
+  "learn.ts:recapPrompt",
+  "reading.ts:notesPrompt",
+  "reading.ts:explainWordPrompt",
+  // PLAN-034: the debrief is the coach, out of role, talking to the learner —
+  // the coach's voice applies here, and nowhere in the role.
+  "rehearsal.ts:debriefPrompt",
+  // PLAN-035: the brought discussion is the coach reading the learner's own
+  // text with them — the coach is the coach, so the style applies. The opposite
+  // call from `rehearsalSystem`, for the opposite reason.
+  "brought.ts:discussionSystem",
+] as const;
+
+/**
+ * The prompts that extract structured data or speak **without the coach's
+ * voice** — a JSON schema has no voice to be consistent in, and a tone paragraph
+ * there is noise the learner never reads. Must **not** carry `styleGuidance`.
+ */
+export const STRUCTURED_PROMPTS = [
+  "prompts.ts:vocabPrompt",
+  "prompts.ts:titlePrompt",
+  "prompts.ts:memoryPrompt",
+  "placement.ts:placementPrompt",
+  "listening.ts:outlinePrompt",
+  "listening.ts:chapterPrompt",
+  "reading.ts:outlinePrompt",
+  "reading.ts:storyPrompt",
+  "reading.ts:continueReadingPrompt",
+  "reading.ts:draftPrompt",
+  "reading.ts:rewritePrompt",
+  "reading.ts:comprehensionPrompt",
+  // PLAN-034: in role there is no coach — the register is the brief's formality
+  // and the other party's own voice. Spoken, but deliberately not styled.
+  "rehearsal.ts:rehearsalSystem",
+] as const;
 
 /** The date as the record carries it, and as Settings shows it: "14 Jul 2026". */
 export const memoryDate = (ts: number): string =>
@@ -397,12 +715,13 @@ export function memoryPrompt(s: Settings, known: Memory[]): string {
     `From this conversation, record only what is durable: who they are, what they do, why they are learning ${s.profile.targetLanguage}, the people and places that recur in their life, what they have said they like and dislike.`,
     `Not what happened today, not what they practised, not how well they did — that is measured elsewhere.`,
     ``,
-    `Answer with ONLY a JSON object: { "facts": [ { "fact": "one short fact, written in ${s.profile.nativeLanguage}", "replaces": null } ] }.`,
+    `Answer with ONLY a JSON object: { "facts": [ { "fact": "one short fact, written in ${s.profile.nativeLanguage}", "replaces": null, "kind": "state | event" } ] }.`,
     `Rules:`,
     `- Never say the same thing twice. If a fact is already recorded above, leave it out entirely.`,
     `- If this conversation changed a recorded fact — they moved city, changed job, took up something new — write the fact as it now stands and set "replaces" to that fact's number. The old one is dropped, not kept beside it.`,
     `- "replaces" is null for anything genuinely new.`,
     `- A fact is a short third-person phrase, under 12 words: "Works as a backend developer", "Cooks most evenings, eats out at weekends".`,
+    `- "kind" is "event" when the fact is something that can be asked about again — an upcoming interview, a move, a trip, a new job. It is "state" when it is a closed attribute — a job title, a pet, a preference.`,
     `- Record nothing you are not sure of. { "facts": [] } is the right answer for a conversation that revealed nothing durable.`,
   ].join("\n");
 }
@@ -412,6 +731,12 @@ export interface MemoryWrite {
   fact: string;
   /** The id of the recorded fact this one replaces, or null when it is new. */
   replaces: number | null;
+  /**
+   * The classification made once at write time (PLAN-033): `"event"` is
+   * open-ended, `"state"` is a closed attribute. Anything else — a missing or
+   * unrecognised value — parses to `null`, and a `null` kind is never an opening.
+   */
+  kind: "state" | "event" | null;
 }
 
 export function parseMemory(raw: string): MemoryWrite[] {
@@ -423,9 +748,14 @@ export function parseMemory(raw: string): MemoryWrite[] {
       // Models hand back "3" as often as 3, and null / undefined / "" as often as
       // neither. Anything that is not a positive whole number means "this is new".
       const r = Number(f.replaces);
+      // `kind` is gated to the two values; anything else becomes null — an
+      // unclassified fact has not been shown to be open-ended, and a coach that
+      // opens on "has two cats" is the failure §6.3 describes.
+      const k = f.kind;
       return {
         fact: String(f.fact).replace(/\s+/g, " ").trim().slice(0, 120),
         replaces: Number.isInteger(r) && r > 0 ? r : null,
+        kind: k === "event" || k === "state" ? k : null,
       };
     });
 }
@@ -458,7 +788,12 @@ export function planMemory(known: Memory[], incoming: MemoryWrite[]): MemoryWrit
     if (out.length >= MEMORY_PER_SESSION) break;
     const key = factKey(w.fact);
     if (!key || seen.has(key)) continue; // …and `seen` grows as we go, so not twice within one batch either
-    out.push({ fact: w.fact, replaces: w.replaces != null && ids.has(w.replaces) ? w.replaces : null });
+    out.push({
+      fact: w.fact,
+      replaces: w.replaces != null && ids.has(w.replaces) ? w.replaces : null,
+      // The classification rides through unchanged — it was gated at parse.
+      kind: w.kind,
+    });
     seen.add(key);
   }
   return out;

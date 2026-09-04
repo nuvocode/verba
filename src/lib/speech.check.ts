@@ -7,6 +7,7 @@ import assert from "node:assert";
 import {
   bundledStt,
   bundledTts,
+  byteTier,
   deepgram,
   deepgramHelp,
   elevenLabs,
@@ -524,6 +525,45 @@ assert.equal(getSpeech({}).seekable, false, "the OS voice → the composite is n
     () => (clipped = true),
   );
   assert.equal(clipped, true, "clip() rejects on blank text");
+}
+
+// ---- PLAN-030: a cancelled clip still ends, and the next one can play ----
+// `cancel()` pauses the element, which fires neither `ended` nor `error`. Before
+// this, the awaited speak() never settled — and useTalk's speech queue waits on
+// it before starting the next clip, so one cancel (push-to-talk while the coach
+// is speaking) left the coach silent for the rest of the session and every turn
+// after it marked `speakUnknown`. The clip must settle with the floor it held.
+{
+  const fakeEl = () => {
+    const el: Record<string, unknown> = { playbackRate: 1, onended: null, onerror: null };
+    el.play = () => Promise.resolve();
+    el.pause = () => {}; // as the real element does: no event of any kind
+    return el as unknown as HTMLAudioElement;
+  };
+  let released = 0;
+  const tier = byteTier(async () => ({ el: fakeEl(), duration: 0, release: () => void released++ }));
+
+  // A regression here does not fail, it *hangs* — so every wait is raced against
+  // a deadline and the check reports "hung" instead of stalling the run.
+  const HUNG = Symbol("hung");
+  const settles = <T,>(p: Promise<T>) =>
+    Promise.race([p, new Promise<typeof HUNG>((r) => setTimeout(() => r(HUNG), 500))]);
+
+  // Cancel mid-clip: speak() must resolve rather than hang.
+  const first = tier.speak("the coach is mid-sentence");
+  await new Promise((r) => setTimeout(r, 10));
+  tier.cancel();
+  const ms = await settles(first);
+  assert.notEqual(ms, HUNG, "a cancelled clip settles — nothing awaits it forever");
+  assert(typeof ms === "number" && ms >= 0, "…with the floor it actually held, never a hang");
+  assert.equal(released, 1, "…and its object URL is released exactly once");
+
+  // The queue survives it: the tier still speaks afterwards. This is the part
+  // that broke the session — a hung promise meant playNext never ran again.
+  const second = tier.speak("and the next line still plays");
+  await new Promise((r) => setTimeout(r, 10));
+  tier.cancel();
+  assert.notEqual(await settles(second), HUNG, "the tier still speaks after a cancel");
 }
 
 console.log("speech.check: ok");

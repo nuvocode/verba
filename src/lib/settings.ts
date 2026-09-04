@@ -4,6 +4,7 @@ import { migrateSpeech, type Tier } from "./speech.ts";
 import { DEFAULT_WPM } from "./prompter.ts";
 import { snapTime } from "./choices.ts";
 import { CEFR_LEVELS, type CEFRLevel, type LearnerProfile } from "./model.ts";
+import type { Variable } from "./conditions.ts";
 
 /** What the documented Docker one-liners listen on — the placeholder, and the value
  *  "Local server" seeds itself with when it has nothing yet. */
@@ -16,6 +17,18 @@ export const DEFAULT_TARGET_LANGUAGE = "Spanish";
 export type ProviderId = "ollama" | "openai" | "anthropic" | "gemini" | "openrouter" | "lmstudio";
 /** When a correction is shown inline: as it happens, only when severe, or only at reflection. */
 export type CorrectionTiming = "adaptive" | "live" | "delayed";
+/**
+ * How long the coach waits before offering (PLAN-032). A multiple of the
+ * learner's own median latency, so it is "noticeably longer than their own
+ * average" for every learner rather than for the average one.
+ */
+export type Patience = "quick" | "normal" | "patient";
+/**
+ * The coach's voice (PLAN-033 §6.4). `warm` is the default; `direct` means fewer
+ * softeners, not harder content — difficulty is owned by PLAN-031. Applied
+ * identically on every surface the learner hears the coach through.
+ */
+export type CoachStyle = "warm" | "neutral" | "direct";
 /**
  * The two ways to work a passage. `passage` is close reading — focus a sentence, tap a
  * word, read the coach's note. `prompter` is the same text moving up the screen at a
@@ -125,6 +138,43 @@ export interface Settings {
    * hidden. Asking for the text back is recorded and costs nothing.
    */
   subtitles: boolean;
+  /**
+   * The active difficulty step, an integer `0..4` (PLAN-031). It is a fact about
+   * the learner, so it is persisted — but it appears in **no settings screen**:
+   * §5.2's calibration is the control, and a row in the index would invite the
+   * learner to read it as a level. Deliberately unpinned by settingsIndex.check.
+   */
+  difficultyStep: number;
+  /**
+   * How long the coach waits before offering (PLAN-032). A multiple of the
+   * learner's own median latency, so it is "noticeably longer than their own
+   * average" for every learner rather than for the average one. `normal` is the
+   * default; `quick` barely outruns their average, `patient` gives a long beat.
+   */
+  patience: "quick" | "normal" | "patient";
+  /**
+   * The coach's voice (PLAN-033 §6.4): `warm` (default), `neutral`, or `direct`.
+   * `direct` means fewer softeners, not harder content — difficulty is owned by
+   * PLAN-031. Applied identically on every surface the learner hears the coach
+   * through.
+   */
+  coachStyle: CoachStyle;
+  /**
+   * The learner's listening conditions, one grade per variable (PLAN-036). A
+   * fact about the learner, so it is persisted — but it appears in **no settings
+   * screen**: §8's walk-back and hardening are the only controls, and a row in
+   * the index would invite the learner to read it as a level. Deliberately
+   * unpinned by settingsIndex.check, exactly like `difficultyStep`.
+   */
+  listeningGrades: Partial<Record<Variable, number>>;
+  /**
+   * Whether the coach may interrupt with a rewind (PLAN-037, §10 row 5). A
+   * standing preference — the learner says rewinds bother them, so the
+   * interruption stops. It feeds `SessionBudget.off`, the same gate PLAN-031's
+   * `ease()` sets, so there is one door, not two. Measurement continues: only
+   * the interruption stops, and an in-session `ease` still persists nothing.
+   */
+  rewinds: boolean;
 }
 
 /** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
@@ -216,6 +266,26 @@ export const defaultSettings: Settings = {
   prompterWpm: DEFAULT_WPM,
   memoryPaused: false,
   subtitles: true,
+  // Step 0: no manufactured difficulty. It is persisted because a learner who
+  // has outgrown the level stays there across sessions (PLAN-031), and it is
+  // never surfaced — §5.2's calibration is the only thing that moves it.
+  difficultyStep: 0,
+  // Normal patience: the coach waits a multiple of the learner's own median
+  // latency before offering (PLAN-032). A first session, with no baseline yet,
+  // produces no offer at all.
+  patience: "normal",
+  // Warm by default: the coach's voice is encouraging until the learner says
+  // otherwise (PLAN-033 §6.4).
+  coachStyle: "warm",
+  // No hardened listening conditions: grade 0 of every variable is today's
+  // Listen, byte for byte (PLAN-036). Persisted because a grade earned in one
+  // session must still be there in the next; never surfaced — §8's walk-back
+  // and hardening are the only controls.
+  listeningGrades: {},
+  // Rewinds on by default (PLAN-037): the coach may interrupt with a rewind
+  // until the learner says they bother them. A standing preference, distinct
+  // from "don't push me today" — it feeds the same SessionBudget.off gate.
+  rewinds: true,
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>

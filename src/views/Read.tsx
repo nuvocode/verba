@@ -5,12 +5,17 @@ import type { Day } from "../lib/useDay";
 import type { Ask, Read as ReadState } from "../lib/useRead";
 import { CEFR_LEVELS } from "../lib/level";
 import { levelOf } from "../lib/model";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import { ingest, BROUGHT_MAX_CHARS, type BroughtText } from "../lib/brought";
+import { saveBrought, listBrought, getBrought, deleteBrought, type BroughtRow } from "../lib/db";
 import AskSheet from "./read/AskSheet";
 import Passage from "./read/Passage";
 import Prompter from "./read/Prompter";
 import ReadingCheck from "./read/ReadingCheck";
 import { readSignals, voiceSignals } from "../lib/signals";
 import { dependencyMet, dependencyNote } from "../lib/learn";
+import { humanError } from "../lib/fmt";
 import { Generating, Nothing, Failed, Unusable } from "./States";
 
 /**
@@ -32,6 +37,7 @@ export default function Read({
   onCaptureKeys,
   onChange,
   onSettings,
+  onBrought,
 }: {
   settings: Settings;
   read: ReadState;
@@ -44,11 +50,18 @@ export default function Read({
   onChange: (patch: Partial<Settings>) => void;
   /** Leave for Settings — the one action that changes the mic state. */
   onSettings: () => void;
+  /** Hand a brought text to Talk for discussion (PLAN-035). */
+  onBrought: (text: BroughtText) => void;
 }) {
   const block = day.plan?.activities.find((b) => b.kind === "read");
   const [asking, setAsking] = useState(false);
   // null = show every level. Only levels actually present in the library get a chip.
   const [levelFilter, setLevelFilter] = useState<string | null>(null);
+  // Brought content (PLAN-035): the learner's own text, pasted or opened.
+  const [broughtList, setBroughtList] = useState<BroughtRow[]>([]);
+  const [broughtDraft, setBroughtDraft] = useState("");
+  const [broughtTitle, setBroughtTitle] = useState("");
+  const [broughtErr, setBroughtErr] = useState("");
 
   useEffect(() => {
     onCaptureKeys(asking);
@@ -59,6 +72,57 @@ export default function Read({
   useEffect(() => {
     if (!read.text) void read.loadLibrary();
   }, [read.text, read.loadLibrary]);
+
+  // The brought list shows in the empty state too — reload it there.
+  useEffect(() => {
+    if (!read.text) void listBrought(settings.profile.targetLanguage).then(setBroughtList).catch(() => setBroughtList([]));
+  }, [read.text, settings.profile.targetLanguage]);
+
+  /** Paste a brought text: validate it, save it, and hand it to Talk. */
+  const submitBrought = async () => {
+    setBroughtErr("");
+    let t: BroughtText;
+    try {
+      t = ingest(broughtDraft, settings.profile.targetLanguage, broughtTitle);
+    } catch (e) {
+      setBroughtErr(humanError(e).say);
+      return;
+    }
+    const id = await saveBrought(settings.profile.targetLanguage, t.title, t.body).catch(() => 0);
+    setBroughtDraft("");
+    setBroughtTitle("");
+    void listBrought(settings.profile.targetLanguage).then(setBroughtList).catch(() => {});
+    onBrought({ ...t, id });
+  };
+
+  /** Open a .txt / .md file and hand it to Talk. */
+  const openBrought = async () => {
+    setBroughtErr("");
+    const path = await open({ filters: [{ name: "Text", extensions: ["txt", "md"] }], multiple: false });
+    if (!path) return;
+    try {
+      const contents = await invoke<string>("file_read", { path });
+      const t = ingest(contents, settings.profile.targetLanguage);
+      const id = await saveBrought(settings.profile.targetLanguage, t.title, t.body).catch(() => 0);
+      void listBrought(settings.profile.targetLanguage).then(setBroughtList).catch(() => {});
+      onBrought({ ...t, id });
+    } catch (e) {
+      setBroughtErr(humanError(e).say);
+    }
+  };
+
+  /** Reopen a saved brought text for discussion. */
+  const discussBrought = async (id: number) => {
+    const row = await getBrought(id).catch(() => null);
+    if (!row) return;
+    onBrought({ id, lang: settings.profile.targetLanguage, title: row.title, body: row.body, createdAt: row.created_at, sentTo: row.sent_to });
+  };
+
+  /** Delete one brought text. */
+  const removeBrought = async (id: number) => {
+    await deleteBrought(id).catch(() => {});
+    void listBrought(settings.profile.targetLanguage).then(setBroughtList).catch(() => {});
+  };
 
   // Whatever the sheet is asked for, the day's plan is still underneath it: an empty
   // topic falls back to the theme, and the day's weak area is folded in either way.
@@ -212,6 +276,53 @@ export default function Read({
             </div>
             );
           })()}
+
+          {/* Brought content (PLAN-035): the learner's own text, pasted or opened.
+              It stays local, and it is conversation material — handed to Talk,
+              never graded here. */}
+          {!read.busy && (
+            <div className="readlib" style={{ marginTop: 24 }}>
+              <div className="eyebrow">Your own text · {broughtList.length}</div>
+              <div className="row2">
+                <div className="k">Title (optional)</div>
+                <input
+                  value={broughtTitle}
+                  onChange={(e) => setBroughtTitle(e.target.value)}
+                  placeholder="the first line, if you leave this blank"
+                />
+              </div>
+              <textarea
+                value={broughtDraft}
+                onChange={(e) => setBroughtDraft(e.target.value)}
+                placeholder={`Paste an email, an article, a transcript — up to ${BROUGHT_MAX_CHARS} characters. It stays on this machine, and the coach talks about it with you.`}
+                rows={5}
+                style={{ width: "100%", marginTop: 8 }}
+              />
+              {broughtErr && <div className="meta" style={{ color: "var(--err)" }}>{broughtErr}</div>}
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button className="btn sm" disabled={!broughtDraft.trim()} onClick={() => void submitBrought()}>
+                  Talk about it →
+                </button>
+                <button className="btn sm ghost" onClick={() => void openBrought()}>
+                  Open a .txt or .md file
+                </button>
+              </div>
+              {broughtList.length > 0 && (
+                <ul style={{ marginTop: 12 }}>
+                  {broughtList.map((r) => (
+                    <li key={r.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <button className="readlib-item" style={{ flex: 1 }} onClick={() => void discussBrought(r.id)}>
+                        <span className="t">{r.title}</span>
+                      </button>
+                      <button className="model" style={{ color: "var(--ink3)" }} onClick={() => void removeBrought(r.id)}>
+                        Delete
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
         {sheet}
       </>

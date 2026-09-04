@@ -1,8 +1,9 @@
 import type { Settings } from "../lib/settings";
 import type { ActivityKind, SignalDraft } from "../lib/model";
 import type { Day } from "../lib/useDay";
-import { listenSignals } from "../lib/signals";
+import { listenSignals, listenWalkBackSignals } from "../lib/signals";
 import type { Listening as ListeningState } from "../lib/useListening";
+import { CONDITIONS, type Variable } from "../lib/conditions";
 import { shuffledOptions, type ListenQuestion } from "../lib/listening";
 import QuestionCard from "./QuestionCard";
 import Hints from "./Hints";
@@ -86,6 +87,10 @@ export default function Listening({
     // The end-of-session line reports accuracy and, where any chapter was assisted,
     // says so as a plain fact beside it — no warning, no colour, no count.
     const assisted = listening.graded.some((g) => g.assisted);
+    // PLAN-036: the walk-backs this session recorded ride the same advance as the
+    // comprehension signals — the record of what defeated the learner survives
+    // without moving the comprehension number (they are their own kind).
+    const walkBacks = listening.walkBacks;
     return (
       <div className="empty fade">
         <h2>Session complete.</h2>
@@ -94,9 +99,44 @@ export default function Listening({
           level signal.
           {assisted && " You had the transcript open for part of it."}
         </p>
+        {/* PLAN-037: the chapters a walk-back happened in, at the end of the
+            session. A short list, not a report — the condition that was eased,
+            replayable at the grade it was finally understood at. Neutral framing:
+            these are the parts worth another listen, not the parts you got wrong.
+            A session with none of them shows nothing at all rather than an empty
+            heading. */}
+        {walkBacks.length > 0 && (
+          <>
+            <div className="eyebrow" style={{ margin: "28px 0 12px" }}>
+              Worth another listen
+            </div>
+            <div style={{ marginBottom: 24 }}>
+              {walkBacks.map((w, i) => (
+                <div key={i} style={{ marginBottom: 10, fontSize: 14 }}>
+                  <span style={{ color: "var(--ink2)" }}>
+                    {CONDITIONS[w.variable][w.from]} — the chapter was eased to help it land.
+                  </span>
+                  <button className="linky" style={{ fontSize: 13, marginLeft: 10 }} onClick={() => listening.replayRange(0)}>
+                    ⟲ Hear it again
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
         <button
           className="btn"
-          onClick={() => onAdvance("listen", block ? listenSignals(block.id, listening.graded) : [])}
+          onClick={() =>
+            onAdvance(
+              "listen",
+              block
+                ? [
+                    ...listenSignals(block.id, listening.graded),
+                    ...listenWalkBackSignals(block.id, walkBacks),
+                  ]
+                : [],
+            )
+          }
         >
           Back to today →
         </button>
@@ -227,6 +267,22 @@ export default function Listening({
         )}
       </div>
 
+      {/* conditions — the grades that exist (PLAN-036). Only the grades this tier
+          can honestly produce are on screen; an unsupported grade is not there.
+          The active ones are named as a plain fact — never announced as a change. */}
+      <div className="listen-conditions">
+        {(Object.keys(CONDITIONS) as Variable[]).map((v) => {
+          const max = listening.maxGrades[v];
+          const cur = listening.active.find((a) => a.variable === v)?.grade ?? 0;
+          if (max <= 0) return null; // this tier cannot produce any grade above 0
+          return (
+            <span key={v} className={`listen-condition ${cur > 0 ? "active" : ""}`}>
+              {v}: {CONDITIONS[v][cur]}
+            </span>
+          );
+        })}
+      </div>
+
       {/* work — the question block, growing into the space rather than the page
           ending halfway down. The transcript, when open, sits here too. */}
       <div className="listen-work">
@@ -299,6 +355,11 @@ export default function Listening({
                 <button className="btn ghost sm" onClick={() => listening.replayRange(q.lineIdx)}>
                   ⟲ Replay that part
                 </button>
+                {listening.active.length > 0 && (
+                  <button className="btn ghost sm" onClick={listening.walkBackAndReplay}>
+                    ⟲ Make it easier and replay
+                  </button>
+                )}
                 {progress.revealed && q.line && (
                   <div className="listen-line" dir={dir}>
                     “{q.line}”

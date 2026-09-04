@@ -6,7 +6,9 @@ import type { Day } from "../lib/useDay";
 import type { Talk as TalkState } from "../lib/useTalk";
 import { talkSignals } from "../lib/signals";
 import { getPack } from "../lib/packs";
-import { sessionGroups, sessionMessages, type SessionDay, type SessionRow } from "../lib/db";
+import type { RehearsalBrief } from "../lib/rehearsal";
+import { sessionGroups, sessionMessages, addVocab, type SessionDay, type SessionRow } from "../lib/db";
+import { PROVIDERS } from "../lib/models";
 import { when } from "../lib/fmt";
 import type { CorrectionCategory } from "../lib/prompts";
 import {
@@ -50,6 +52,8 @@ export default function Talk({
   day,
   onAdvance,
   onChange,
+  rehearsalDraft = false,
+  onCloseRehearsalDraft,
 }: {
   settings: Settings;
   talk: TalkState;
@@ -58,6 +62,10 @@ export default function Talk({
   onAdvance: (kind: ActivityKind) => void;
   /** The one door settings are written through — the subtitles toggle uses it. */
   onChange: (patch: Partial<Settings>) => void;
+  /** PLAN-034: the rehearsal brief form is open (⌘K / Today's overflow asked for it). */
+  rehearsalDraft?: boolean;
+  /** Close the brief form without starting. */
+  onCloseRehearsalDraft?: () => void;
 }) {
   const scroll = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -65,6 +73,10 @@ export default function Talk({
   const [open, setOpen] = useState<SessionRow | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [transcript, setTranscript] = useState<{ role: string; content: string }[]>([]);
+  // The rehearsal brief (PLAN-034): three short questions, one screen. Free text,
+  // no list of scenarios to pick from — the conversation the learner needs is not
+  // in our catalogue. Held here, and handed to `startRehearsal` in one go.
+  const [brief, setBrief] = useState<RehearsalBrief>({ who: "", about: "", formality: "neutral" });
   // Which coach lines the learner has revealed while subtitles are off (PLAN-021).
   // A revealed line shows its text; the rest show the "Coach spoke · Show this
   // line" bar. Reset when a new conversation starts.
@@ -151,6 +163,32 @@ export default function Talk({
   // above has landed in state — and after it.
   const upNext = (day.plan?.activities ?? []).find((b) => b.kind !== closes && !day.isDone(b.kind))?.kind ?? null;
 
+  // ---- a brought text awaiting approval to send to a cloud provider ----
+  // PLAN-035: with a cloud provider selected, the learner's private text does
+  // not leave the machine until they have been told who will read it. The
+  // confirmation names the provider — an approval for Ollama is not an approval
+  // for Anthropic.
+  if (talk.pendingBrought) {
+    const provider = PROVIDERS.find((p) => p.id === settings.provider);
+    return (
+      <div className="today fade">
+        <div className="eyebrow">Your own text · {settings.profile.targetLanguage}</div>
+        <Nothing
+          title="Who reads this?"
+          why={`"${talk.pendingBrought.title}" is yours, and it stays on this machine. To talk about it, the coach sends it to ${provider?.name ?? settings.provider}, which runs online. Nothing is sent until you say so.`}
+        />
+        <div style={{ display: "flex", gap: 12, marginTop: 30 }}>
+          <button className="btn sm" onClick={() => void talk.confirmBrought(talk.pendingBrought!)}>
+            Send it to {provider?.name ?? settings.provider} →
+          </button>
+          <button className="btn sm ghost" onClick={talk.cancelBrought}>
+            Keep it on this machine
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ---- replaying an old conversation ----
   if (!talk.started && open)
     return (
@@ -190,6 +228,59 @@ export default function Talk({
     const registry = scenarioRegistry();
     const byId = new Map(registry.map((r) => [r.scenario.id, r.origin]));
     const { main, easier } = bandSplit(talk.scenarios, levelOf(settings.profile));
+
+    // The rehearsal brief (PLAN-034): one screen, three questions. `who` is the
+    // only one that is required — "a customer at work" is enough to build a
+    // person; the rest refine.
+    if (rehearsalDraft) {
+      const canStart = brief.who.trim().length > 0;
+      return (
+        <div className="today fade">
+          <div className="eyebrow">Rehearsal · {settings.profile.targetLanguage}</div>
+          <Nothing
+            title="What do you have to walk into?"
+            why="The coach plays the other side — in role, no corrections — and then steps out to talk it through. Name the person and the moment."
+          />
+          <div style={{ maxWidth: 640 }}>
+            <div className="row2">
+              <div className="k">Who are you talking to?</div>
+              <input
+                autoFocus
+                value={brief.who}
+                onChange={(e) => setBrief((b) => ({ ...b, who: e.target.value }))}
+                placeholder="my landlord"
+              />
+            </div>
+            <div className="row2">
+              <div className="k">About what?</div>
+              <input
+                value={brief.about}
+                onChange={(e) => setBrief((b) => ({ ...b, about: e.target.value }))}
+                placeholder="the boiler that has not been fixed"
+              />
+            </div>
+            <div className="row2">
+              <div className="k">How will you speak?</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {(["casual", "neutral", "formal"] as const).map((f) => (
+                  <button key={f} className={`chip ${brief.formality === f ? "" : "ghost"}`} onClick={() => setBrief((b) => ({ ...b, formality: f }))}>
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 12, marginTop: 30 }}>
+            <button className="btn sm" disabled={!canStart || talk.busy} onClick={() => { onCloseRehearsalDraft?.(); void talk.startRehearsal(brief); }}>
+              Begin the rehearsal →
+            </button>
+            <button className="btn sm ghost" onClick={onCloseRehearsalDraft}>
+              Back to scenarios
+            </button>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="today fade">
@@ -539,6 +630,50 @@ export default function Talk({
                 </div>
               </>
             )}
+
+            {/* PLAN-037: the moments that broke, at the end of the session. A short
+                list, not a report — the coach's line, the learner's reply, and a
+                replay at the slow rate. Neutral framing: these are the parts worth
+                another listen, not the parts you got wrong. No count, no colour
+                beyond the neutral ramp, and a session with none of them shows
+                nothing at all rather than an empty heading. */}
+            {talk.brokenTurns.length > 0 && (
+              <>
+                <div className="eyebrow" style={{ marginBottom: 16 }}>
+                  Worth another listen
+                </div>
+                <div style={{ marginBottom: 40 }}>
+                  {talk.brokenTurns.map((t) => (
+                    <div key={t.index} style={{ marginBottom: 18 }}>
+                      <div className="meta" style={{ fontSize: 12, color: "var(--ink3)", margin: "0 0 6px" }}>
+                        turn {t.index + 1}
+                      </div>
+                      {t.coachLine && (
+                        <div className="fix-row">
+                          <span className="d" />
+                          <div style={{ flex: 1 }}>
+                            <div className="l" dir={talk.dir}>
+                              {t.coachLine}
+                            </div>
+                            <button className="linky" style={{ fontSize: 13 }} onClick={() => talk.replaySlow(t.coachLine!)}>
+                              ⟲ Hear it again, slower
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      <div className="fix-row">
+                        <span className="d" />
+                        <div style={{ flex: 1 }}>
+                          <div className="l" dir={talk.dir}>
+                            {t.text}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
 
@@ -574,11 +709,82 @@ export default function Talk({
           <div className="stream-scroll" ref={scroll}>
             <div className="stream-inner">
               <div className="eyebrow" style={{ marginBottom: 6 }}>
-                Scenario · {levelOf(settings.profile)}
+                {talk.rehearsal ? "Rehearsal" : "Scenario"} · {levelOf(settings.profile)}
               </div>
               <div style={{ fontFamily: "var(--serif)", fontSize: 30, fontWeight: 500, marginBottom: 34 }}>
                 {talk.scenario?.title}
               </div>
+
+              {/* The brief, at the top of the session (PLAN-034): a learner
+                  returning to a half-finished rehearsal knows what they were
+                  preparing for. Shown once, above the conversation, never repeated
+                  per turn. */}
+              {talk.rehearsal && (
+                <div style={{ marginBottom: 30, fontSize: 13, color: "var(--ink3)" }}>
+                  Rehearsing with <b style={{ color: "var(--ink)" }}>{talk.rehearsal.brief.who}</b>
+                  {talk.rehearsal.brief.about.trim() ? <> about {talk.rehearsal.brief.about}</> : null} · {talk.rehearsal.brief.formality}
+                </div>
+              )}
+
+              {/* The debrief (PLAN-034): its own block, after the coach steps out.
+                  "stuck" names real turns; the phrases are offered to Memory
+                  through the existing vocab save path — the learner chooses,
+                  nothing is auto-saved. */}
+              {talk.rehearsal && talk.outOfRole && (
+                <div className="debrief fade" style={{ borderLeft: "2px solid var(--line)", paddingLeft: 18, marginBottom: 30 }}>
+                  <div className="eyebrow" style={{ marginBottom: 10 }}>
+                    Out of role · how it went
+                  </div>
+                  {talk.debrief?.stuck.map((st) => (
+                    <div key={st.turn} style={{ marginBottom: 10, fontSize: 15 }}>
+                      <div className="meta" style={{ color: "var(--ink3)", fontSize: 12 }}>
+                        turn {st.turn + 1}
+                      </div>
+                      <div>{st.moment}</div>
+                      {st.why && <div style={{ fontSize: 13, color: "var(--ink3)" }}>{st.why}</div>}
+                    </div>
+                  ))}
+                  {talk.debrief && talk.debrief.stuck.length === 0 && (
+                    <div style={{ fontSize: 13, color: "var(--ink3)", marginBottom: 10 }}>
+                      No moment where you ran aground — the rehearsal went through.
+                    </div>
+                  )}
+                  {talk.debrief && talk.debrief.phrases.length > 0 && (
+                    <>
+                      <div className="meta" style={{ color: "var(--ink3)", fontSize: 12, margin: "16px 0 8px" }}>
+                        Phrases that would have helped · tap to keep the ones you want
+                      </div>
+                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                        {talk.debrief.phrases.map((p) => (
+                          <div className="wchip" key={p}>
+                            {p}
+                            <button
+                              className="x add"
+                              title="Keep in Memory"
+                              onClick={() => {
+                                // The existing vocab save path — the learner chooses;
+                                // nothing is auto-saved. The debrief's own "why" for the
+                                // turn it came from is the closest meaning on file; a
+                                // phrase without one carries itself.
+                                const from = talk.debrief?.stuck.find((st) => st.moment.includes(p));
+                                void addVocab(
+                                  settings.profile.targetLanguage,
+                                  { term: p, translation: from?.why || p, example: "", type: "phrase", levelBand: null },
+                                  { capturedBy: "learner", surface: "talk", learnerLevel: levelOf(settings.profile) },
+                                  "kept",
+                                ).catch(() => {});
+                              }}
+                            >
+                              +
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {talk.busy && !talk.debrief && <div className="typing">…</div>}
+                </div>
+              )}
 
               {talk.msgs.map((m, i) => (
                 <div className={`msg ${m.role}`} key={i}>
@@ -620,8 +826,53 @@ export default function Talk({
                       noted — we'll revisit after the session
                     </div>
                   )}
+                  {/* Praise (PLAN-032): the sentence that survived praiseGate,
+                      rendered beside the reply. A dropped praise never reaches
+                      the screen — the field is absent, and the reply stands on
+                      its own without it. It is the coach's own text in the target
+                      language, so it sits inside PLAN-021's curtain: with
+                      subtitles off it stays hidden until the line is revealed,
+                      and it is spoken either way. */}
+                  {m.praise && (settings.subtitles || revealed.has(i)) && (
+                    <div className="praise" dir={talk.dir}>
+                      {m.praise}
+                    </div>
+                  )}
                 </div>
               ))}
+
+              {/* The rewind (PLAN-030): a distinguishable pause, not a warning.
+                  One grouped block with a quiet left rule and more vertical space
+                  than a normal turn. No colour outside the neutral ramp, no
+                  number, no text that blames the learner. */}
+              {talk.rewindExchange && (
+                <div className="rewind">
+                  <div className="rewind-own">{talk.rewindExchange.own}</div>
+                  <div className="rewind-repeat" dir={talk.dir}>
+                    {talk.rewindExchange.repeat}
+                  </div>
+                  {talk.rewindExchange.unpack && (
+                    <div className="rewind-unpack">
+                      {talk.rewindExchange.unpack.parts.length > 0 && (
+                        <div className="rewind-parts">
+                          {talk.rewindExchange.unpack.parts.map((p, i) => (
+                            <span key={i}>{p}</span>
+                          ))}
+                        </div>
+                      )}
+                      {talk.rewindExchange.unpack.keyWord && talk.rewindExchange.unpack.gloss && (
+                        <div className="rewind-gloss">
+                          <b>{talk.rewindExchange.unpack.keyWord}</b> — {talk.rewindExchange.unpack.gloss}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {talk.rewindExchange.gift && <div className="rewind-gift">{talk.rewindExchange.gift}</div>}
+                  <button className="rewind-deny" onClick={talk.denyRewind}>
+                    No, I understood
+                  </button>
+                </div>
+              )}
 
               {/* The reply as it lands. It carries no corrections yet — those
                   arrive with the rest of the turn, and this bubble is replaced
@@ -766,7 +1017,9 @@ export default function Talk({
                 settings={settings}
                 surface="talk"
                 // 1–3 are announced only while there is something to pick with them.
-                has={talk.suggestions.length > 0 && !talk.reflecting ? ["suggestions"] : []}
+                // While the coach is waiting (PLAN-032) nothing is announced — the
+                // screen is exactly what it was when the coach finished speaking.
+                has={talk.suggestions.length > 0 && !talk.reflecting && !talk.waiting ? ["suggestions"] : []}
               />
               {settings.showHints && (
                 <span style={{ marginLeft: 22 }}>
@@ -822,7 +1075,13 @@ export default function Talk({
             </>
           )}
 
-          {talk.suggestions.length > 0 && (
+          {/* Suggestions (PLAN-032): while the coach is waiting, nothing renders —
+              the screen is exactly what it was when the coach finished speaking.
+              The array stays as it is (it is data, and PLAN-021's reveal machinery
+              reads it); only the render is gated on `waiting`. Suggestions appear
+              when the wait expires, or at once when the learner has already started
+              typing or holding the mic (input ends the wait). */}
+          {talk.suggestions.length > 0 && !talk.waiting && (
             <>
               <div className="lbl">If you're stuck</div>
               <div style={{ marginBottom: 30 }}>
@@ -860,14 +1119,28 @@ export default function Talk({
             </>
           )}
 
-          <button
-            className="btn sm ghost"
-            style={{ marginTop: 30, width: "100%", justifyContent: "center" }}
-            onClick={() => void talk.end()}
-            disabled={talk.busy}
-          >
-            End session → reflection
-          </button>
+          {/* PLAN-034: in role, the learner decides when it is over — one control,
+              and the rail's own button says exactly what it does. Once out of role
+              the session still ends as any other, straight into the reflection. */}
+          {talk.rehearsal && !talk.outOfRole ? (
+            <button
+              className="btn sm ghost"
+              style={{ marginTop: 30, width: "100%", justifyContent: "center" }}
+              onClick={() => void talk.endRole()}
+              disabled={talk.busy || talk.msgs.filter((m) => m.role === "user" && !m.isAsk).length === 0}
+            >
+              Okay, out of role — debrief
+            </button>
+          ) : (
+            <button
+              className="btn sm ghost"
+              style={{ marginTop: 30, width: "100%", justifyContent: "center" }}
+              onClick={() => void talk.end()}
+              disabled={talk.busy}
+            >
+              End session → reflection
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -2,6 +2,8 @@ import type { Settings } from "./settings.ts";
 import { makePlan, planActivity, levelOf } from "./model.ts";
 import type { ActivityKind, DailyPlan, PlannedActivity, Weakness } from "./model.ts";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
+import { styleGuidance } from "./prompts.ts";
+import { todayLine, targetGoal, type RepairCategory } from "./repair.ts";
 
 // Learning engine — turns the app's separate activities into one coherent daily
 // session. Everything a learner does in a day hangs off a single theme so the
@@ -23,6 +25,12 @@ export interface PlanContext {
   /** Declared weaknesses, strongest first. When present they are the focus, and the plan says so. */
   weaknesses?: Weakness[];
   theme?: string; // optional override (e.g. an AI suggestion)
+  /**
+   * The repair category today's plan works on (PLAN-037). Arrives on the context
+   * the way `weaknesses` does — derived by `useDay` from the signals, never
+   * computed here (this module stays pure). `null` means no repair target today.
+   */
+  repairTarget?: RepairCategory | null;
 }
 
 /**
@@ -152,17 +160,36 @@ export function buildDailyPlan(s: Settings, ctx: PlanContext): DailyPlan {
   const [talkGoal, readGoal, listenGoal] = drillGoals(focus);
   const drill = talkGoal;
 
+  // PLAN-037: the day's repair target rides the conversation — the one activity
+  // that is always in the plan. The card's rationale becomes an outcome about the
+  // coach, and the target is folded into the goal so the session really is built
+  // around it (the seam App.tsx → talk.start → buildSystem). When the activity
+  // already carries a weakness drill, the two are joined rather than one silently
+  // winning — unless joining them would make the goal a paragraph, in which case
+  // the weakness drill keeps the slot and no repair line is written on the card.
+  // Saying nothing is always available; saying something untrue is not.
+  const repair = ctx.repairTarget ?? null;
+  const repairGoal = repair ? targetGoal(repair) : null;
+  const repairLine = repair ? todayLine(repair) : null;
+  // A goal that reads as a paragraph is a goal the model cannot act on — the
+  // weakness drill keeps the slot, and the card says nothing about the repair.
+  const goalTooLong = !!repairGoal && !!talkGoal && `${talkGoal}; ${repairGoal}`.length > 120;
+  const talkGoalFinal = goalTooLong || !repairGoal ? talkGoal : talkGoal ? `${talkGoal}; ${repairGoal}` : repairGoal;
+  const talkRationale = repairLine && !goalTooLong
+    ? repairLine
+    : drill
+      ? `Yesterday ${drill} gave you trouble, so you drill it in conversation first, while it is easiest to catch.`
+      : "Conversation comes first so the day's words are ones you produced yourself.";
+
   const activities: PlannedActivity[] = [
     planActivity({
       id: "talk",
       kind: "talk",
       title: "Conversation",
-      rationale: drill
-        ? `Yesterday ${drill} gave you trouble, so you drill it in conversation first, while it is easiest to catch.`
-        : "Conversation comes first so the day's words are ones you produced yourself.",
+      rationale: talkRationale,
       estimatedMinutes: 10,
       scenarioId: "free",
-      goal: talkGoal,
+      goal: talkGoalFinal,
     }),
     planActivity({
       id: "read",
@@ -427,6 +454,7 @@ export function recapPrompt(
   return [
     `The learner just finished a daily ${s.profile.targetLanguage} session themed "${plan.theme}" (level ${levelOf(s.profile)}).`,
     packGuidance(pack),
+    styleGuidance(s.coachStyle),
     `They completed: ${done.join(", ") || "nothing"}.`,
     focus.length ? `They are working on: ${focus.join("; ")}.` : "",
     `Answer with ONLY a JSON object: { "recap": "2-3 encouraging sentences in ${s.profile.nativeLanguage} on what they practised", "nextFocus": ["one short thing to work on tomorrow", ...] }.`,

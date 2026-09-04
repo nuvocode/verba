@@ -25,6 +25,23 @@ const CATEGORY: Record<SignalKind, Weakness["category"]> = {
   pace: "fluency",
   unpromptedTurn: "fluency",
   suggestionUsed: "fluency",
+  // PLAN-027: a repair move is never a miss (signalMiss returns false for it), so
+  // it can never become a weakness — this entry is unreachable, but SignalKind is
+  // exhaustive and must stay so. "fluency" is the least-wrong slot.
+  repairMove: "fluency",
+  // PLAN-031: an axis marker and an ease request are facts about the session, not
+  // observations of failure — neither is ever a miss (signalMiss returns false for
+  // kinds it does not special-case). Entries keep SignalKind exhaustive.
+  axisUsed: "fluency",
+  easeRequest: "fluency",
+  // PLAN-034: a rehearsal batch marker is a fact about the record, not an
+  // observation of failure — never a miss. Entry keeps SignalKind exhaustive.
+  rehearsal: "fluency",
+  // PLAN-036: a listening walk-back is a fact about the record — the variable
+  // and the grade it walked back from — not an observation of failure. It is
+  // never a miss (signalMiss returns false for it), so it can never become a
+  // weakness. Entry keeps SignalKind exhaustive.
+  listenWalkBack: "fluency",
 };
 
 /** Same input, same id: the id has to survive being recomputed, since nothing stores it. */

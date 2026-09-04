@@ -9,6 +9,8 @@ import type { SignalDraft, ActivityId } from "./model.ts";
 import type { Grade } from "./srs.ts";
 import { words, sentenceCount } from "./text.ts";
 import type { ProducedTurn, Reflection, VoiceTurn } from "./useTalk.ts";
+import { repairSignal, type RepairObservation } from "./repair.ts";
+import { countPauses, speechRatio } from "./breakdown.ts";
 
 /**
  * A finished conversation. A correction with no note names nothing, so it is not
@@ -39,7 +41,31 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
     // Times the learner asked to see the coach's text (PLAN-021). Recorded, never
     // scored — each ask is one assisted comprehension signal.
     ...(r.reveals ?? []).map((rv) => revealSignal(activityId, rv.what)),
+    // Every repair move the learner used or the coach modelled (PLAN-027). One
+    // signal per observation, written through repair.ts — nothing else constructs
+    // the payload, and the inventory is derived from these alone.
+    ...repairSignals(activityId, r.repairs ?? []),
+    // The difficulty axis a session ran with, and whether the learner asked for
+    // ease (PLAN-031). Both ride the record so Coach can see the pattern; neither
+    // is ever scored. Written beside the turn signals so recapsFrom can group them
+    // into the session they belong to.
+    ...(r.axis ? [{ activityId, kind: "axisUsed" as const, payload: { label: r.axis } }] : []),
+    ...(r.easeRequested ? [{ activityId, kind: "easeRequest" as const, payload: { label: "ease requested" } }] : []),
+    // The rehearsal marker (PLAN-034): one per rehearsal batch, written beside the
+    // turn signals at the same stamp. A mark on the record, never a score —
+    // `recapsFrom` reads it to skip the batch, so a rehearsal can never become one
+    // of the two "easy sessions" that raise the difficulty. It is a SignalKind,
+    // not an ActivityKind: nothing is scheduled on the learner's day.
+    ...(r.rehearsal ? [{ activityId, kind: "rehearsal" as const, payload: { label: "rehearsal" } }] : []),
   ];
+}
+
+/**
+ * A repair observation as a signal. One per observation, written through
+ * `repair.ts`'s door so the payload shape has a single builder.
+ */
+export function repairSignals(activityId: ActivityId, observations: RepairObservation[]): SignalDraft[] {
+  return observations.map((obs) => repairSignal(activityId, obs));
 }
 
 // The two labels a produced turn can carry. Fixed, not per-turn: a turn's own text
@@ -55,6 +81,20 @@ function turnSignal(activityId: ActivityId, t: ProducedTurn, locale: string): Si
     words: ws.length,
     sentences: Math.max(1, sentenceCount(t.text, locale)),
     chars: ws.reduce((n, w) => n + w.length, 0),
+    // Timing (PLAN-028): how long this send took measured from the coach's line
+    // landing, and how much of that was the coach's own voice holding the floor.
+    // `speakUnknown` marks a turn whose speak duration could not be measured —
+    // it is excluded from the baseline and timing signals entirely.
+    latencyMs: t.latencyMs,
+    speakMs: t.speakMs,
+    speakUnknown: t.speakUnknown,
+    // The decision (PLAN-029): the verdict this turn earned and the signals it
+    // stood on. Ridden unread — `signalMiss` and `coachMetrics` never look here,
+    // so a bluff stays arithmetically invisible. Nothing reads `verdict` to
+    // compute a number the learner sees; PLAN-037 turns the distribution into a
+    // direction in words, and that is the only reader there will be.
+    breakdown: t.breakdown,
+    verdict: t.verdict,
   };
   return t.fromSuggestion
     ? { activityId, kind: "suggestionUsed" as const, payload }
@@ -94,33 +134,19 @@ export function voiceSignals(
   }
 
   // Pronunciation → delivery: how much of the recording carried speech, and how
-  // often the learner paused. The threshold is the same one the silence detector
-  // uses, so "speech" here means the same thing the recorder heard.
+  // often the learner paused. The threshold is the silence detector's floor in
+  // speech.ts and the hesitation checker's floor in breakdown.ts — one shared
+  // constant, so "speech" means the same thing the recorder and the breakdown
+  // half both heard (PLAN-028, the no-third-copy rule).
   if (v.levels.length) {
-    // ponytail: 0.02 is the RMS ceiling the silence detector in speech.ts uses —
-    // a fixed "is there a voice right now" bar. It is duplicated here on purpose
-    // (speech.ts cannot import signals.ts), but if that threshold ever becomes
-    // tunable it must move to a shared constant first.
-    const THRESHOLD = 0.02;
-    const speechFrames = v.levels.filter((l) => l > THRESHOLD).length;
-    const speechRatio = speechFrames / v.levels.length;
-    // A silent break longer than 600 ms is a pause worth counting.
-    let pauses = 0;
-    let quiet = 0;
-    for (const l of v.levels) {
-      if (l > THRESHOLD) {
-        if (quiet > 0.6) pauses++;
-        quiet = 0;
-      } else {
-        quiet += 1 / 20; // ~20 frames/s
-      }
-    }
+    const ratio = speechRatio(v.levels);
+    const pauses = countPauses(v.levels);
     out.push({
       activityId,
       kind: "pronunciation" as const,
       payload: {
         label: "spoken delivery",
-        speechRatio: Math.round(speechRatio * 100) / 100,
+        speechRatio: Math.round(ratio * 100) / 100,
         pauses,
         unit: "fraction of speech, pauses",
         definition: "how much of your recording was speech, and how often you paused",
@@ -231,4 +257,27 @@ export function revealSignal(activityId: ActivityId, what: "line" | "all"): Sign
       definition: "you asked to see the coach's text",
     },
   };
+}
+
+/**
+ * A listening condition walked back one grade on a miss (PLAN-036). §8 wants the
+ * record of what defeated the learner, but it must not move the comprehension
+ * number — so it is its own kind, never a `comprehension` signal. `signalMiss`
+ * returns false for it (it carries no `correct`), so it can never become a
+ * weakness and `coachMetrics`'s comprehension is untouched.
+ */
+export function listenWalkBackSignals(
+  activityId: ActivityId,
+  walks: { variable: string; from: number }[],
+): SignalDraft[] {
+  return walks.map((w) => ({
+    activityId,
+    kind: "listenWalkBack" as const,
+    payload: {
+      label: `listening ${w.variable}`,
+      variable: w.variable,
+      from: w.from,
+      definition: `the ${w.variable} condition was walked back from grade ${w.from}`,
+    },
+  }));
 }

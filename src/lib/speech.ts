@@ -46,7 +46,30 @@ export interface Tts {
   canSpeak: boolean;
   /** Whether this tier can hand back a seekable clip. `false` → play/pause only. */
   seekable: boolean;
-  speak(text: string, opts?: SpeakOptions): Promise<void>;
+  /**
+   * What this tier can actually do to its output (PLAN-036). Absent capabilities
+   * are never offered — a grade the speech engine cannot honestly produce is not
+   * shown, and never faked. Declared by each tier rather than inferred, because
+   * `webSpeech` has no `clip()` at all and there is nothing to filter on a tier
+   * that never hands back a sample.
+   */
+  can: {
+    /** Whether the tier honours a rate/pace change. All four tiers do today. */
+    rate: boolean;
+    /** How many distinct voices this tier can produce for one locale. One voice
+     *  means `speakers` stops at grade 0. */
+    voices: number;
+    /** Whether the tier hands back audio we hold — the only kind we can filter.
+     *  True exactly where `clip()` exists. */
+    filterable: boolean;
+  };
+  /**
+   * Speak `text`, resolving with the milliseconds it actually held the floor
+   * (PLAN-028). `0` when cancelled before starting, `0` on a tier that could
+   * not speak, and the measured duration otherwise — so the leaner's thinking
+   * time can be separated from the coach's speaking time.
+   */
+  speak(text: string, opts?: SpeakOptions): Promise<number>;
   /** Bytes → a clip owned by the caller. Absent (and `seekable: false`) on a tier with no bytes. */
   clip?(text: string, opts?: SpeakOptions): Promise<Clip>;
   cancel(): void;
@@ -114,38 +137,77 @@ function pickVoice(locale?: string, hint?: string): SpeechSynthesisVoice | undef
   return pool[0] ?? voices[0];
 }
 
+/**
+ * How many distinct voices this tier can produce for one locale (PLAN-036). The
+ * OS voice list loads asynchronously — `getVoices()` is empty until the first
+ * `voiceschanged` fires — so this kicks a load and counts against the locale's
+ * language, not the whole machine. A locale with one voice means `speakers`
+ * stops at grade 0.
+ */
+function voicesForLocale(locale?: string): number {
+  if (!synth) return 0;
+  synth.getVoices(); // kick the async load
+  const voices = synth.getVoices();
+  if (!locale) return voices.length;
+  const want = baseLang(locale);
+  return voices.filter((v) => baseLang(v.lang) === want).length;
+}
+
 /** The OS voices + whatever recogniser the webview has (in practice: none). */
-export function webSpeech(): SpeechAdapter {
+export function webSpeech(locale?: string): SpeechAdapter {
   let recognition: any = null;
+  // Settles the in-flight utterance's promise. This tier speaks outside the
+  // webview and a cancelled utterance fires nothing back, so `cancel` has to
+  // resolve it here.
+  let settle: (() => void) | null = null;
   return {
     canSpeak: !!synth,
     // The OS voice speaks outside the webview and hands back no bytes, so there
     // is no clip and nothing seekable — play/pause only, and the surface hides
     // what this tier cannot do rather than faking it.
     seekable: false,
+    // PLAN-036: the OS voice honours a rate. `voices` is how many distinct
+    // voices this tier can produce *for the locale* — counted against the pack's
+    // locale, not the whole machine, and read after a `voiceschanged` load so it
+    // is not empty on first call. But it hands back no bytes — `clip()` is
+    // absent — so there is nothing to band-pass or mix noise under.
+    // `filterable: false` is that fact, declared, and `supported` reads it.
+    can: {
+      rate: true,
+      voices: voicesForLocale(locale),
+      filterable: false,
+    },
     canListen: !!Recognition,
     // No webview ships a recogniser that can stream partials — this tier is
     // record-then-transcribe at best, and usually nothing at all.
     partials: false,
 
     speak(text, opts = {}) {
-      return new Promise((resolve) => {
-        if (!synth || !text.trim()) return resolve();
+      return new Promise<number>((resolve) => {
+        if (!synth || !text.trim()) return resolve(0);
         synth.cancel();
+        settle?.(); // the utterance just cancelled fires no `end` — settle it here
+        settle = null;
         const u = new SpeechSynthesisUtterance(text);
         if (opts.locale) u.lang = opts.locale;
         const v = pickVoice(opts.locale, opts.voiceHint);
         if (v) u.voice = v;
         u.rate = opts.rate ?? 0.95;
+        const start = performance.now();
         const done = () => {
+          settle = null;
           voice.synthetic(false);
-          resolve();
+          resolve(Math.max(0, performance.now() - start));
         };
         u.onend = done;
         u.onerror = done; // never hang the UI on a TTS hiccup
+        // `cancel` reaches the promise through this: a cancelled utterance fires
+        // no `end` on most engines, and an unsettled promise hangs its caller.
+        settle = done;
         // This tier speaks outside the webview, so there is no audio to measure —
         // the coach's mouth runs on a synthetic curve instead, nudged onto each
-        // word by whatever boundary events the synthesiser bothers to fire.
+        // word by whatever boundary events the synthesiser bothers to fire. The
+        // wall clock around the utterance is still the floor it held (PLAN-028).
         u.onboundary = () => voice.boundary();
         voice.synthetic(true);
         synth.speak(u);
@@ -170,8 +232,11 @@ export function webSpeech(): SpeechAdapter {
     cancel() {
       synth?.cancel();
       // A cancelled utterance fires no `end` on every engine — close the mouth here
-      // too, or an interrupted reply leaves the coach mid-syllable forever.
+      // too, or an interrupted reply leaves the coach mid-syllable forever, and
+      // settle the promise by hand or its caller waits on it forever.
       voice.synthetic(false);
+      settle?.();
+      settle = null;
       recognition?.stop?.();
     },
   };
@@ -423,21 +488,35 @@ function clip(bytes: ArrayBuffer, mime: string): Clip {
 }
 
 /**
- * Play a clip to the end. Resolves on error too — a TTS hiccup must not hang the
- * turn. `release()` is the caller's job once the clip is done with; speak() owns
- * its clip, so it releases on every exit path (end, error, a play() that refused).
+ * Play a clip to the end, resolving with the milliseconds it actually held the
+ * floor (PLAN-028). `0` when the clip never started (cancelled or refused) — the
+ * coach held no floor, so nothing counts as learner thinking time. Resolves on
+ * error too — a TTS hiccup must not hang the turn. `release()` is the caller's
+ * job once the clip is done with; speak() owns its clip, so it releases on every
+ * exit path (end, error, a play() that refused).
+ *
+ * `onStop` hands the caller a way to settle the clip early. Pausing an element
+ * fires neither `ended` nor `error`, so a cancelled clip would otherwise never
+ * settle and every caller awaiting it would wait forever — useTalk's speech
+ * queue among them.
  */
-function playClip(c: Clip): Promise<void> {
-  return new Promise<void>((resolve) => {
+function playClip(c: Clip, onStop?: (stop: () => void) => void): Promise<number> {
+  return new Promise<number>((resolve) => {
     const el = c.el;
-    el.onended = el.onerror = () => {
+    const start = performance.now();
+    let settled = false;
+    const settle = (ms: number) => {
       c.release();
-      resolve();
+      if (settled) return;
+      settled = true;
+      resolve(ms);
     };
-    el.play().catch(() => {
-      c.release();
-      resolve();
-    });
+    const held = () => settle(Math.max(0, performance.now() - start));
+    el.onended = el.onerror = held;
+    // The floor a cancelled clip held is the floor it held — the learner waited
+    // through it whether or not it reached its end.
+    onStop?.(held);
+    el.play().catch(() => settle(0));
   });
 }
 
@@ -447,17 +526,34 @@ function playClip(c: Clip): Promise<void> {
  * pauses the in-flight clip. `clip` hands the clip to the caller, who owns its
  * `release()`.
  */
-function byteTier(synthesize: (text: string, opts?: SpeakOptions) => Promise<Clip>): Tts {
+export function byteTier(synthesize: (text: string, opts?: SpeakOptions) => Promise<Clip>): Tts {
   let audio: HTMLAudioElement | null = null;
+  // Settles the in-flight clip's promise. `cancel` pauses the element, which
+  // fires no event at all — without this the awaited `speak` never returns.
+  let stop: (() => void) | null = null;
   return {
     canSpeak: true,
     seekable: true,
+    // PLAN-036: a byte tier hands back a clip we hold, so it is filterable — the
+    // only kind of tier noise and channel can be applied to. It honours a rate
+    // through `playbackRate`, and it is one voice per adapter (a bundled model
+    // with many speaker ids is still one adapter at a time), so `speakers` stops
+    // at grade 0.
+    can: { rate: true, voices: 1, filterable: true },
     async speak(text, opts) {
-      if (!text.trim()) return;
+      if (!text.trim()) return 0;
       const c = await synthesize(text, opts);
+      // A byte tier plays an HTMLAudioElement, which has `playbackRate` — the one
+      // knob every byte tier shares, and the one the rewind's SLOW_RATE rides on
+      // (PLAN-030). No vendor API involved: elevenLabs and openaiTts drop `rate`
+      // in their request, so the slow-down happens here, on the element, for all
+      // three byte tiers alike.
+      c.el.playbackRate = opts?.rate ?? 1;
       audio = c.el;
-      await playClip(c);
+      const ms = await playClip(c, (s) => (stop = s));
       audio = null;
+      stop = null;
+      return ms;
     },
     clip(text, opts) {
       if (!text.trim()) return Promise.reject(new Error("Nothing to synthesise."));
@@ -466,6 +562,10 @@ function byteTier(synthesize: (text: string, opts?: SpeakOptions) => Promise<Cli
     cancel() {
       audio?.pause();
       audio = null;
+      // A paused element fires neither `ended` nor `error`, so the clip has to be
+      // settled by hand or whoever awaits it waits forever.
+      stop?.();
+      stop = null;
     },
   };
 }
@@ -961,8 +1061,8 @@ export function deepgramHelp(s: SpeechSettings, whisperReady: boolean): string {
  * conversation — and after one failure the half stays on the OS for the rest of
  * the session rather than stalling on every turn to retry a model that is gone.
  */
-export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void = () => {}): SpeechAdapter {
-  const web = webSpeech();
+export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void = () => {}, locale?: string): SpeechAdapter {
+  const web = webSpeech(locale);
 
   // resolveTier already asked whether the tier can serve, so these only ever build
   // the one it named; "native" (and a pin that could not serve) lands on the web.
@@ -1011,6 +1111,10 @@ export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void =
     // player reads it to decide what transport it can offer (PLAN-025). A tier
     // that cannot (`native`/`webSpeech`) has no `clip`, so the property stays false.
     seekable: tts.seekable,
+    // PLAN-036: what the serving tier can honestly do to its output. The
+    // listening surface reads this to decide which grades exist at all — a grade
+    // the engine cannot produce is not shown, and never faked.
+    can: tts.can,
     clip: tts.clip ? (text: string, opts?: SpeakOptions) => tts.clip!(text, opts) : undefined,
 
     async speak(text, opts) {
@@ -1031,7 +1135,9 @@ export function getSpeech(s: SpeechSettings, onFallback: (msg: string) => void =
       }
       // Safe with no synth: webSpeech().speak resolves immediately rather than
       // hanging the turn, which is the whole reason a failed tier can land here.
-      await web.speak(text, opts);
+      // The fallback must hand the measured floor onward (PLAN-028) — swallowing
+      // it would make every degrade turn look unmeasured and empty the baseline.
+      return await web.speak(text, opts);
     },
 
     async listen(opts) {

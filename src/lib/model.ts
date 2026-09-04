@@ -89,7 +89,12 @@ export type SignalKind =
   | "lexicalItem" // a word met or saved
   | "comprehension" // result of a comprehension question
   | "pronunciation" // a pronunciation observation
-  | "pace"; // reading/speaking speed
+  | "pace" // reading/speaking speed
+  | "repairMove" // a repair move the learner used (or the coach modelled) (PLAN-027)
+  | "axisUsed" // the one difficulty axis a session chose (PLAN-031)
+  | "easeRequest" // the learner asked not to be pushed that session (PLAN-031)
+  | "rehearsal" // a rehearsal batch marker — one per rehearsal, never an ActivityKind (PLAN-034)
+  | "listenWalkBack"; // a listening condition walked back one grade on a miss (PLAN-036)
 
 export type Signal = {
   id: SignalId;
@@ -156,7 +161,40 @@ export function turnStats(s: Signal): { words: number; sentences: number; chars:
 }
 
 /**
- * The fourth — and last — structural payload reader: is this a *reveal* — a
+ * The timing a produced turn carries (PLAN-028). `null` for a signal that is not
+ * a measured turn — an older row read before turns were timed reads as "no
+ * timing", never as an instant answer.
+ */
+export function turnTiming(s: Signal): { latencyMs: number; speakMs: number; speakUnknown: boolean } | null {
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { latencyMs, speakMs, speakUnknown } = p as {
+    latencyMs?: unknown;
+    speakMs?: unknown;
+    speakUnknown?: unknown;
+  };
+  if (typeof latencyMs !== "number" || typeof speakMs !== "number") return null;
+  return { latencyMs, speakMs, speakUnknown: speakUnknown === true };
+}
+
+/**
+ * The fifth structural payload reader: what a produced turn itself carried as
+ * breakdown signals (PLAN-028 → PLAN-031). `null` for a signal that is not a
+ * produced turn — a correction, a card, an axis marker. PLAN-031 reads this to
+ * turn a session's verdicts into "zero" and "drowned" without re-deriving them
+ * from the raw signals.
+ */
+export function turnBreakdown(s: Signal): string[] | null {
+  if (s.kind !== "unpromptedTurn" && s.kind !== "suggestionUsed") return null;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { breakdown } = p as { breakdown?: unknown };
+  if (!Array.isArray(breakdown)) return null;
+  return breakdown.map(String);
+}
+
+/**
+ * The sixth structural payload reader: is this a *reveal* — a
  * comprehension signal with no answer behind it, written solely because the
  * learner asked to see the coach's text (PLAN-021)?
  *
@@ -173,6 +211,44 @@ export function isAssistedReveal(s: Signal): boolean {
   if (p === null || typeof p !== "object") return false;
   const { assisted, source } = p as { assisted?: unknown; source?: unknown };
   return assisted === true && source === "talk-subtitles";
+}
+
+/**
+ * The seventh structural payload reader: what did a `repairMove`
+ * observe (PLAN-027)?
+ *
+ * A repair observation names its category, who made it, and the learner's own
+ * wording (empty for a coach observation). `null` unless the payload is a
+ * well-formed repair observation — a stored row that is not one reads as "not a
+ * repair move", never as a malformed one. `repair.ts` derives the inventory
+ * through this door and through nothing else.
+ */
+export function repairMoveInfo(
+  s: Signal,
+): { category: string; by: "learner" | "coach"; variant: string } | null {
+  if (s.kind !== "repairMove") return null;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { label, by, variant } = p as { label?: unknown; by?: unknown; variant?: unknown };
+  if (typeof label !== "string") return null;
+  if (by !== "learner" && by !== "coach") return null;
+  return { category: label, by, variant: typeof variant === "string" ? variant : "" };
+}
+
+/**
+ * The eighth — and last — structural payload reader: the verdict a produced turn
+ * carried (PLAN-029). `null` for a signal that is not a measured turn — a
+ * correction, a card, a repair move. `repair.ts`'s `direction` reads the verdict
+ * distribution through this door and through nothing else, so a later edit cannot
+ * reach into `payload` to print a percentage.
+ */
+export function turnVerdict(s: Signal): "clear" | "suspect" | "bluff" | null {
+  if (s.kind !== "unpromptedTurn" && s.kind !== "suggestionUsed") return null;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { verdict } = p as { verdict?: unknown };
+  if (verdict === "clear" || verdict === "suspect" || verdict === "bluff") return verdict;
+  return null;
 }
 
 // --- §1.4 VocabItem ------------------------------------------------------------
