@@ -9,8 +9,8 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, timingSignal, FILLERS } from "./fluency.ts";
-import { monitorContext, type Signal, type SignalKind } from "./model.ts";
+import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, timingSignal, FILLERS, verifySelfRepairs, selfRepairSignal } from "./fluency.ts";
+import { monitorContext, signalMiss, type Signal, type SignalKind } from "./model.ts";
 import { talkSignals } from "./signals.ts";
 import type { VoiceTurn } from "./useTalk.ts";
 
@@ -112,6 +112,7 @@ const base = {
   summary: "",
   strengths: [],
   focus: [],
+  selfRepairs: [],
 };
 const off = talkSignals("talk-1", { ...base, context: null }, "es", "es");
 assert(
@@ -378,6 +379,151 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
   //    signals do not disappear behind M7's switch.
   assert(off.some((d) => d.kind === "pace"), "pace survives context null");
   assert(off.some((d) => d.kind === "pronunciation"), "pronunciation survives context null");
+}
+
+// --- 10. the model may point, we check (PLAN-041) -----------------------------
+// fluency ledger 2 — a reported repair is believed only when both fragments are
+// in the text the learner produced, `before` ahead of `after`, after the same
+// folding `verifyCorrections` uses. `ahead` is checked *inside the line* too,
+// because one recording is one line and a self-repair lives entirely inside it —
+// item 3 is the case real data is made of. A repair the model authored is
+// dropped, not softened.
+{
+  const transcript = ["I go to the doctor yesterday", "I went to the clinic"];
+  const noCorrections: { original: string }[] = [];
+
+  // 1. A report whose `before` is not in the transcript is dropped.
+  assert.equal(
+    verifySelfRepairs([{ before: "I go to the bank", after: "I went to the clinic", type: "E" }], transcript, noCorrections, "en").length,
+    0,
+    "a before not in the transcript is dropped",
+  );
+  // 2. A report whose `after` is not in the transcript is dropped.
+  assert.equal(
+    verifySelfRepairs([{ before: "I go to the doctor", after: "I went to the bank", type: "E" }], transcript, noCorrections, "en").length,
+    0,
+    "an after not in the transcript is dropped",
+  );
+  // 3. The reversed report, entirely inside one line, is dropped — `after`
+  //    appearing *before* `before` within a single recording did not happen. This
+  //    is the intra-line case PLAN-041's cross-line tests never reached.
+  assert.equal(
+    verifySelfRepairs([{ before: "I went to the doctor", after: "I go", type: "E" }], ["dün I go, I went to the doctor"], noCorrections, "en").length,
+    0,
+    "an after that precedes before inside one line is dropped",
+  );
+  // 3b. The same two fragments in the correct intra-line order survive.
+  assert.equal(
+    verifySelfRepairs([{ before: "I go", after: "I went to the doctor", type: "E" }], ["dün I go, I went to the doctor"], noCorrections, "en").length,
+    1,
+    "a forward repair inside one line survives",
+  );
+  // 4. Folding matches `verifyCorrections`: case and punctuation differences
+  //    survive, a different word does not.
+  assert.equal(
+    verifySelfRepairs([{ before: "I go to the doctor", after: "I went to the clinic", type: "E" }], transcript, noCorrections, "en").length,
+    1,
+    "a verbatim repair survives",
+  );
+  assert.equal(
+    verifySelfRepairs([{ before: "I go to the doctor!", after: "I went to the clinic", type: "E" }], transcript, noCorrections, "en").length,
+    1,
+    "a punctuation difference survives folding",
+  );
+  assert.equal(
+    verifySelfRepairs([{ before: "I go to the doctor", after: "I went to the clinic", type: "E" }], ["I go to the doctor yesterday", "I went to the clinic"], noCorrections, "en").length,
+    1,
+    "a case difference survives folding",
+  );
+  // 5. An empty report list yields an empty signal list — not one signal with a zero.
+  assert.equal(verifySelfRepairs([], transcript, noCorrections, "en").length, 0, "an empty report list yields no repairs");
+}
+
+// --- 11. `falseAlarm` cannot outrank a correction the learner already saw -----
+// fluency ledger 2 — a falseAlarm on a phrase the coach corrected in the same
+// session is downgraded to A, not dropped and not left as falseAlarm. Matching is
+// exact after folding — a `before` that merely *contains* a corrected phrase is
+// left as falseAlarm (substring matching would silently erase real false alarms).
+{
+  const transcript = ["I go to the doctor yesterday", "I went to the clinic"];
+  const corrected = [{ original: "I go to the doctor" }];
+
+  // 1. A falseAlarm whose `before` matches a Correction.original comes back as A.
+  const downgraded = verifySelfRepairs(
+    [{ before: "I go to the doctor", after: "I went to the clinic", type: "falseAlarm" }],
+    transcript,
+    corrected,
+    "en",
+  );
+  assert.equal(downgraded.length, 1, "a falseAlarm on a corrected phrase is not dropped");
+  assert.equal(downgraded[0].type, "A", "a falseAlarm on a corrected phrase is downgraded to A");
+
+  // 2. Matching is exact after folding — a `before` that merely contains a
+  //    corrected phrase is left as falseAlarm.
+  const contains = verifySelfRepairs(
+    [{ before: "I go to the doctor yesterday", after: "I went to the clinic", type: "falseAlarm" }],
+    transcript,
+    corrected,
+    "en",
+  );
+  assert.equal(contains[0].type, "falseAlarm", "a before that merely contains a corrected phrase stays falseAlarm");
+
+  // 3. With no corrections at all, a falseAlarm stands.
+  const stands = verifySelfRepairs(
+    [{ before: "I go to the doctor", after: "I went to the clinic", type: "falseAlarm" }],
+    transcript,
+    [],
+    "en",
+  );
+  assert.equal(stands[0].type, "falseAlarm", "with no corrections, a falseAlarm stands");
+}
+
+// --- 12. absence, not zero, and §8's three doors (PLAN-041) -------------------
+// fluency ledger 2, fluency ledger 11 — a session with no restart writes no
+// selfRepair signal and no zero; Memory must not take these as errors.
+{
+  // 1. context: null ⇒ no selfRepair draft, whatever `selfRepairs` holds.
+  const off = talkSignals(
+    "talk-1",
+    { ...base, context: null, selfRepairs: [{ before: "x", after: "y", type: "E" }] },
+    "es",
+    "en",
+  );
+  assert(!off.some((d) => d.kind === "selfRepair"), "context null: no selfRepair signal is written");
+
+  // 2. An empty `selfRepairs` produces no draft — never a draft carrying count: 0.
+  const on = talkSignals("talk-1", { ...base, context: FREE_CONTEXT, selfRepairs: [] }, "es", "en");
+  assert(!on.some((d) => d.kind === "selfRepair"), "an empty selfRepairs produces no selfRepair signal");
+
+  // 3. signalMiss(selfRepairSignal(...)) is false for all five types, including
+  //    E, the one a reader would most plausibly think of as a mistake.
+  for (const type of ["E", "A", "D", "C", "falseAlarm"] as const) {
+    const draft = selfRepairSignal("talk-1", { before: "x", after: "y", type });
+    const asSignal: Signal = { id: "s1", activityId: "talk-1", kind: draft.kind, observedAt: 0, payload: draft.payload };
+    assert.equal(signalMiss(asSignal), false, `signalMiss(selfRepair ${type}) is false`);
+  }
+
+  // 4. talkSignals given a reflection with selfRepairs and no corrections produces
+  //    zero correction drafts — a falseAlarm is a phrase that was right, and filing
+  //    it as a correction is the exact corruption §8 names.
+  const withRepairs = talkSignals(
+    "talk-1",
+    { ...base, context: FREE_CONTEXT, selfRepairs: [{ before: "x", after: "y", type: "falseAlarm" }] },
+    "es",
+    "en",
+  );
+  assert.equal(withRepairs.filter((d) => d.kind === "correction").length, 0, "a selfRepair never becomes a correction draft");
+
+  // 5. §9's switch with teeth: with the measurement off, the model is not called
+  //    at all — the acceptance is the *absence of the request*, not the absence of
+  //    the signal. Pinned by source scan: the `repairsPrompt` call in useTalk must
+  //    sit behind `settings.monitorLoad`, so removing the gate fails the build.
+  const talkSrc = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
+  const repairsCall = talkSrc.slice(talkSrc.indexOf("settings.monitorLoad && voice.current.length"), talkSrc.indexOf("repairsPrompt(") + 200);
+  assert(
+    /settings\.monitorLoad/.test(repairsCall) && /repairsPrompt\(/.test(repairsCall),
+    "fluency ledger 2: the self-repair model call must be gated on settings.monitorLoad — off means no request",
+  );
 }
 
 console.log("fluency.check OK");

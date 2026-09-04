@@ -16,6 +16,7 @@ import {
   parseMemory,
   parseSummary,
   parseTurn,
+  parseRepairs,
   styleGuidance,
   SPOKEN_PROMPTS,
   STRUCTURED_PROMPTS,
@@ -86,6 +87,29 @@ assert.deepEqual(
   CATS.slice().sort(),
   "the category set is closed and stable",
 );
+
+// --- parseRepairs: shape only, no judgement (PLAN-041) ----------------------
+// `parseRepairs` checks shape, never truth — a non-array, a missing field, or a
+// `type` outside the five is dropped. The belief gate is `verifySelfRepairs`'s
+// job, and keeping the two apart is what PLAN-038's defect 2 taught.
+{
+  // A well-formed report parses through.
+  const ok = parseRepairs(
+    '{"repairs": [ { "before": "I go to", "after": "I went to", "type": "E" }, { "before": "the doctor", "after": "the clinic", "type": "falseAlarm" } ]}',
+  );
+  assert.equal(ok.length, 2, "two well-formed repairs parse");
+  assert.equal(ok[0].type, "E", "an E type parses");
+  assert.equal(ok[1].type, "falseAlarm", "a falseAlarm type parses");
+
+  // A non-array, a missing field, and a type outside the five are all dropped.
+  assert.equal(parseRepairs('{"repairs": {}}').length, 0, "a non-array repairs is dropped");
+  assert.equal(parseRepairs('{"repairs": [ { "after": "x", "type": "E" } ]}').length, 0, "a report with no before is dropped");
+  assert.equal(parseRepairs('{"repairs": [ { "before": "x", "type": "E" } ]}').length, 0, "a report with no after is dropped");
+  assert.equal(parseRepairs('{"repairs": [ { "before": "x", "after": "y", "type": "Z" } ]}').length, 0, "a type outside the five is dropped");
+  assert.equal(parseRepairs('{"repairs": [ { "before": "x", "after": "y", "type": "E" }, { "before": "a", "after": "b", "type": "nonsense" } ]}').length, 1, "a bad row is dropped, a good row survives");
+  assert.equal(parseRepairs('{"repairs": []}').length, 0, "an empty list is the expected answer");
+  assert.equal(parseRepairs("not json").length, 0, "a non-JSON reply yields no repairs");
+}
 
 // ============================================================================
 // PLAN-033: one remembered detail per opening, and a coach who does not drift.

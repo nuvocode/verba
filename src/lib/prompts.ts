@@ -480,6 +480,62 @@ export function parseVocab(raw: string): {
     .slice(0, MAX_VOCAB_PER_SESSION);
 }
 
+// ---- self-repair (PLAN-041) --------------------------------------------------
+
+/**
+ * Ask the model to find the learner's self-repairs in their own spoken turns.
+ * Spoken only: a typed turn's restarts are deleted before they are sent, so a
+ * transcript of typing carries no evidence and asking about it invents some.
+ */
+export function repairsPrompt(s: Settings, turns: string[], pack?: LanguagePack): string {
+  return [
+    `Here are the learner's own spoken turns from this session, each on its own line:`,
+    ...turns.map((t) => `- "${t}"`),
+    ``,
+    `Find the places where the learner interrupted themselves and rebuilt a phrase.`,
+    `Return ONLY repairs that are present in the text above, copied character for character — never a paraphrase, never a correction of your own.`,
+    `For each repair, give the abandoned fragment ("before") and what the learner said instead ("after"), both copied verbatim from the text.`,
+    `Classify each as one of: "E" (a real error was fixed), "A" (no error, a better phrasing was sought), "D" (the idea changed, rebuilt from scratch), "C" (cut mid-word), or "falseAlarm" (the abandoned fragment was already correct in ${s.profile.targetLanguage} and the learner changed it anyway).`,
+    `An empty list is the expected answer for most turns. Say [] rather than finding something.`,
+    packGuidance(pack),
+    `Answer with ONLY a JSON object: { "repairs": [ { "before": "the abandoned fragment, verbatim", "after": "what the learner said instead, verbatim", "type": "E | A | D | C | falseAlarm" } ] }.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** The five kinds of self-repair (§2.2). */
+export const SELF_REPAIR_TYPES = ["E", "A", "D", "C", "falseAlarm"] as const;
+
+export interface SelfRepairReport {
+  /** The abandoned fragment, copied verbatim from the transcript. */
+  before: string;
+  /** What the learner said instead, verbatim. */
+  after: string;
+  type: "E" | "A" | "D" | "C" | "falseAlarm";
+}
+
+/**
+ * Shape-checked only, like `parseTurn`: a non-array, a missing field, or a `type`
+ * outside the five is dropped. It makes no judgement about truth — that is
+ * `verifySelfRepairs`'s job, and keeping the two apart is what PLAN-038's defect 2
+ * taught.
+ */
+export function parseRepairs(raw: string): SelfRepairReport[] {
+  const obj = extractJson(raw);
+  if (!Array.isArray(obj?.repairs)) return [];
+  const out: SelfRepairReport[] = [];
+  for (const r of obj.repairs) {
+    if (!r || typeof r !== "object") continue;
+    const before = typeof r.before === "string" ? r.before.trim() : "";
+    const after = typeof r.after === "string" ? r.after.trim() : "";
+    if (!before || !after) continue;
+    if (!SELF_REPAIR_TYPES.includes(r.type)) continue;
+    out.push({ before, after, type: r.type });
+  }
+  return out;
+}
+
 /** Prompt for an end-of-session summary. */
 export function summaryPrompt(s: Settings, pack?: LanguagePack): string {
   return [
@@ -673,6 +729,7 @@ export const SPOKEN_PROMPTS = [
  */
 export const STRUCTURED_PROMPTS = [
   "prompts.ts:vocabPrompt",
+  "prompts.ts:repairsPrompt",
   "prompts.ts:titlePrompt",
   "prompts.ts:memoryPrompt",
   "placement.ts:placementPrompt",

@@ -11,7 +11,7 @@ import { words, sentenceCount } from "./text.ts";
 import type { ProducedTurn, Reflection, VoiceTurn } from "./useTalk.ts";
 import { repairSignal, type RepairObservation } from "./repair.ts";
 import { countPauses, speechRatio } from "./breakdown.ts";
-import { sessionContextSignal, timingOf, timingSignal } from "./fluency.ts";
+import { sessionContextSignal, timingOf, timingSignal, selfRepairSignal } from "./fluency.ts";
 
 /**
  * A finished conversation. A correction with no note names nothing, so it is not
@@ -43,6 +43,12 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
     // rides the same gate `sessionContext` does: no context means the learner
     // has the measurement off, and nothing here is written.
     ...(r.context ? timingSignals(activityId, r.voice ?? [], packId) : []),
+    // §2.2's self-repairs, one signal per verified repair. A monitor kind, so it
+    // rides the same gate `sessionContext` and `timing` do. §8's "gereksiz yere
+    // şüphelendiğin yapılar" list needs no new storage: it is these signals
+    // filtered to `type === "falseAlarm"`, grouped by `label`. PLAN-046 renders
+    // it; building a reader here would be a reader with no screen.
+    ...(r.context ? (r.selfRepairs ?? []).map((sr) => selfRepairSignal(activityId, sr)) : []),
     // Times the learner asked to see the coach's text (PLAN-021). Recorded, never
     // scored — each ask is one assisted comprehension signal.
     ...(r.reveals ?? []).map((rv) => revealSignal(activityId, rv.what)),

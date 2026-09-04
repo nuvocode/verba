@@ -346,7 +346,7 @@ const FLUENCY_LEDGER: FluencyRow[] = [
   {
     id: 2,
     claim: "`falseAlarmRepair` detection works and was validated by hand-sampling",
-    pending: "#71 — PLAN-041",
+    assertedIn: [{ file: "src/lib/fluency.check.ts", marker: "fluency ledger 2" }],
   },
   {
     id: 3,
@@ -391,7 +391,7 @@ const FLUENCY_LEDGER: FluencyRow[] = [
   {
     id: 11,
     claim: "Memory does not take `falseAlarmRepair` records as errors",
-    pending: "#71 — PLAN-041",
+    assertedIn: [{ file: "src/lib/fluency.check.ts", marker: "fluency ledger 11" }],
   },
   {
     id: 12,

@@ -280,6 +280,7 @@ const sc = rehearsalScenario(brief);
     easeRequested: false,
     rehearsal: { brief, debrief: null },
     context: null,
+    selfRepairs: [],
   };
   const drafts = talkSignals("talk-1", r, "es", "es");
   const kinds = drafts.map((d) => d.kind);

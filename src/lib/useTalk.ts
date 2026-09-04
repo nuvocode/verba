@@ -22,9 +22,12 @@ import {
   parseOwnLine,
   rewindUnpackPrompt,
   parseUnpack,
+  repairsPrompt,
+  parseRepairs,
   type UnpackResult,
   type Correction,
   type SessionSummary,
+  type SelfRepairReport,
 } from "./prompts";
 import {
   rehearsalScenario,
@@ -93,7 +96,7 @@ import {
   clearWait as clearWaitState,
   type WaitState,
 } from "./patience";
-import { FREE_CONTEXT, type MonitorContext } from "./fluency";
+import { FREE_CONTEXT, type MonitorContext, verifySelfRepairs } from "./fluency";
 import {
   addMessage,
   addVocab,
@@ -161,6 +164,14 @@ export interface Reflection extends SessionSummary {
    * start making it vary.
    */
   context: MonitorContext | null;
+  /**
+   * Self-repairs the learner made inside their own spoken turns (§2.2). Not to be
+   * confused with `repairs`, which is PLAN-027's comprehension repair — that layer
+   * is about not understanding, this one is about not trusting what you know.
+   * Empty when the measurement is off, when nothing was spoken, or when the
+   * transcript carried no restart to find.
+   */
+  selfRepairs: SelfRepairReport[];
 }
 
 /** One thing the learner actually sent, and whether they found it themselves. */
@@ -1669,6 +1680,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     // `null` when the summary call came back unusable — the DB row keeps NULL and
     // the reflection renders Unusable (PLAN-020). No fallback text, ever.
     let summary: SessionSummary | null = null;
+    // §2.2's self-repairs, verified against the mic's transcripts. Empty when the
+    // measurement is off, when nothing was spoken, or when the transcript carried
+    // no restart to find — never a zero.
+    let selfRepairs: SelfRepairReport[] = [];
 
     try {
       const provider = getProvider(settings);
@@ -1699,6 +1714,37 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // A failed summary writes nothing — `sessions.summary` stays NULL (invariant
       // 22). The reflection renders Unusable and offers a regenerate.
       if (summary && sessionId.current) await setSummary(sessionId.current, summary.summary).catch(() => {});
+
+      // §2.2's self-repairs, and §9's switch with teeth: with the measurement off
+      // there is no signal *and no request* — a layer that still calls the model
+      // while claiming not to measure has not stopped measuring, it has stopped
+      // filing. `spokenTexts` is the mic's own transcripts, not `produced`: a
+      // learner who dictated and then edited the box has a `ProducedTurn` that no
+      // longer contains the restart, and the mic's transcript is the only record
+      // of what was actually said.
+      if (settings.monitorLoad && voice.current.length) {
+        const spokenTexts = voice.current.map((v) => v.text);
+        try {
+          selfRepairs = verifySelfRepairs(
+            parseRepairs(
+              await provider.chat(
+                // History is deliberately not prepended — the prompt itself
+                // carries the transcript, and a model asked over the coach's
+                // whole session would start hunting for repairs in the coach's
+                // own lines.
+                [{ role: "user", content: repairsPrompt(settings, spokenTexts, pack) }],
+                { json: true },
+              ),
+            ),
+            spokenTexts,
+            corrections,
+            pack?.speech.locale ?? "en",
+          );
+        } catch {
+          // Offline or the provider is down. An unmeasured session measured
+          // nothing — absence, not zero (D3). Nothing is shown, nothing is retried.
+        }
+      }
 
       // What the learner told us about themselves. Best-effort like the rest of the
       // wrap-up: a coach that fails to take a note is a coach that took no note, not
@@ -1763,6 +1809,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // never be compared. The one exception is the kill switch: with
       // `monitorLoad` off, no `sessionContext` signal is written at all.
       context: settings.monitorLoad ? FREE_CONTEXT : null,
+      // §2.2's self-repairs, verified against the mic's transcripts. Empty when
+      // the measurement is off, when nothing was spoken, or when the transcript
+      // carried no restart to find — never a zero.
+      selfRepairs,
     });
     // Calibration (PLAN-031 §5.2): once, at the end of the session, over the
     // verdicts. The rise needs two consecutive zero-breakdown sessions; the drop
