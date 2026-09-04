@@ -31,6 +31,15 @@ export function scoreAnswer(q: Pick<Question, "answer">, given: string): boolean
 }
 
 /**
+ * The options as a card renders them. Reading's shared questions carry plain
+ * strings; listening's carry `{ text, why }`. One shape out, so the card reads
+ * `.text` for both and neither caller has to know about the other.
+ */
+export function optionList(options?: (string | { text: string })[]): { text: string }[] {
+  return (options ?? []).map((o) => (typeof o === "string" ? { text: o } : o));
+}
+
+/**
  * The instructions that make the questions worth asking. Shared by every activity
  * that wants a comprehension check — the source text is the caller's business;
  * this only ever says what a good question is.

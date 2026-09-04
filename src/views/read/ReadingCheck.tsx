@@ -47,53 +47,58 @@ export default function ReadingCheck({
         />
       </div>
 
-      {!stepChecked ? (
-        <>
-          <button className="btn" disabled={!currentAnswered} onClick={() => void read.gradeCheck()}>
-            Check answer
+      {/* Everything below the head and the question lives in one `.listen-work` div,
+          the way Listening.tsx does. `.listen` is a 3-row grid whose last row is
+          `1fr`; a bare button placed there would stretch to fill the screen. */}
+      <div className="listen-work">
+        {!stepChecked ? (
+          <>
+            <button className="btn" disabled={!currentAnswered} onClick={() => void read.gradeCheck()}>
+              Check answer
+            </button>
+            {/* Not a silent disabled (#42): the question is unanswered, so there is nothing to check yet. */}
+            {!currentAnswered && (
+              <span className="model" style={{ color: "var(--ink3)", marginLeft: 8 }}>
+                Answer the question first
+              </span>
+            )}
+          </>
+        ) : !lastStep ? (
+          <button className="btn" onClick={read.nextCheckQuestion}>
+            Next question →
           </button>
-          {/* Not a silent disabled (#42): the question is unanswered, so there is nothing to check yet. */}
-          {!currentAnswered && (
-            <span className="model" style={{ color: "var(--ink3)", marginLeft: 8 }}>
-              Answer the question first
-            </span>
-          )}
-        </>
-      ) : !lastStep ? (
-        <button className="btn" onClick={read.nextCheckQuestion}>
-          Next question →
-        </button>
-      ) : (
-        <div className="listen-after">
-          <p style={{ color: "var(--ink2)" }}>
-            You got <strong>{read.checkScore.correct}</strong> of {read.checkScore.total} — that accuracy feeds your level
-            signal.
-          </p>
-          <button
-            className="btn"
-            onClick={() => {
-              void read.finishCheck();
-              onDone();
-            }}
-          >
-            Back to today →
-          </button>
-        </div>
-      )}
+        ) : (
+          <div className="listen-after">
+            <p style={{ color: "var(--ink2)" }}>
+              You got <strong>{read.checkScore.correct}</strong> of {read.checkScore.total} — that accuracy feeds your level
+              signal.
+            </p>
+            <button
+              className="btn"
+              onClick={() => {
+                void read.finishCheck();
+                onDone();
+              }}
+            >
+              Back to today →
+            </button>
+          </div>
+        )}
 
-      {!(stepChecked && lastStep) && (
-        <div style={{ marginTop: 20 }}>
-          <button
-            className="btn ghost sm"
-            onClick={() => {
-              read.skipCheck();
-              onDone();
-            }}
-          >
-            Skip check
-          </button>
-        </div>
-      )}
+        {!(stepChecked && lastStep) && (
+          <div style={{ marginTop: 20 }}>
+            <button
+              className="btn ghost sm"
+              onClick={() => {
+                read.skipCheck();
+                onDone();
+              }}
+            >
+              Skip check
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
