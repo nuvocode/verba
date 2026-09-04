@@ -634,11 +634,13 @@ const NOW = 1_000_000_000_000;
       "case 19: the resumed session's budget sets off from settings.rewinds",
     );
     // And the fresh-session path still sets it too — the resume must not be the
-    // only place the preference holds.
+    // only place the preference holds. PLAN-043 folds fluency mode into the same
+    // gate: in a fluency session the interruption is off unconditionally (§4.2
+    // rule 1), and the learner's own preference holds whenever the mode is off.
     const startBlock = src.slice(src.indexOf("const start = useCallback"), src.indexOf("const startRehearsal = useCallback"));
     assert(
-      /budget\.current = \{ used: 0, handicap: 0, off: !settings\.rewinds \}/.test(startBlock),
-      "case 19: the fresh session's budget sets off from settings.rewinds too",
+      /sessionContext\.current\.mode === "fluency" \|\| !settings\.rewinds/.test(startBlock),
+      "case 19: the fresh session's budget sets off from fluency mode or settings.rewinds",
     );
   } finally {
     globalThis.setTimeout = realSetTimeout;

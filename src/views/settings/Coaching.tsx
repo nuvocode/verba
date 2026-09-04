@@ -161,6 +161,39 @@ export default function Coaching({ settings, onChange }: SectionProps) {
         />
       </div>
 
+      {/* PLAN-043 §4.2 rule 5, §9: how long the mic waits in silence before
+          closing a fluency-mode recording. Default 2 — the spec's floor, "en az
+          2 saniye" — and the ordinary session's fixed 1800 ms is untouched. A
+          number in seconds, so the row reads in the same unit the learner thinks
+          a silence in. */}
+      <div className="sec" style={{ marginTop: 44 }}>Fluency silence</div>
+      <div data-setting="fluency-silence">
+        <div className="srow">
+          <div style={{ flex: 1 }}>
+            <div className="name">How long a silence ends your turn</div>
+            <div className="desc">
+              In fluency mode, how many seconds of pause close the mic and pass the turn back. The coach waits the same way.
+            </div>
+          </div>
+          <input
+            type="number"
+            min={2}
+            max={10}
+            step={1}
+            value={settings.fluencySilenceSec}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              // §4.2 rule 5's floor: the mic waits *at least* two seconds of
+              // silence before closing a fluency recording. The row cannot drop
+              // below 2 — anything less would re-introduce the 1.8 s default the
+              // mode is explicitly out of compliance with.
+              if (Number.isFinite(n) && n >= 2 && n <= 10) onChange({ fluencySilenceSec: n });
+            }}
+            style={{ width: 72, textAlign: "center", padding: "7px", borderRadius: 7, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }}
+          />
+        </div>
+      </div>
+
       {/* PLAN-039, §7.4: the fluency layer's off switch. Off stops the measuring,
           not the display — no `sessionContext` signal is written, and every later
           plan gates its own writer on this same field. Past data is removed by

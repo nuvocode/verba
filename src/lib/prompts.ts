@@ -113,6 +113,19 @@ export function buildSystem(
 }
 
 /**
+ * §4.2 rule 4 (PLAN-043): the fluency system prompt's one added line. In
+ * fluency mode the coach never finishes, completes or repairs a sentence the
+ * learner left unfinished — if they stop mid-sentence, the coach waits and lets
+ * the silence stand (§4.2's patience rule, at the prompt level where it can
+ * hold). A constant so it can be asserted present in the prompt the mode sends,
+ * exactly as the offer lines are — deleting it fails the build. It is a prompt,
+ * and the plan says so plainly rather than pretending a model instruction is an
+ * interlock.
+ */
+export const FLUENCY_RULE4 =
+  "Never finish, complete or repair a sentence the learner left unfinished. If they stop mid-sentence, wait — say nothing and let the silence stand.";
+
+/**
  * Ceiling on one conversational turn.
  *
  * A turn measures around 280 tokens — a two-sentence reply, a correction or two,

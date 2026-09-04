@@ -356,17 +356,17 @@ const FLUENCY_LEDGER: FluencyRow[] = [
   {
     id: 4,
     claim: "Fluency mode obeys all seven rules of §4.2; live error marking is off at code level",
-    pending: "#73 — PLAN-043",
+    assertedIn: [{ file: "src/lib/fluency.check.ts", marker: "fluency ledger 4" }],
   },
   {
     id: 5,
     claim: "The contract screen is shown every session and cannot be skipped",
-    pending: "#73 — PLAN-043",
+    assertedIn: [{ file: "src/lib/fluency.check.ts", marker: "fluency ledger 5" }],
   },
   {
     id: 6,
     claim: "Accuracy mode is separate and cannot run in the same session",
-    pending: "#73 — PLAN-043",
+    assertedIn: [{ file: "src/lib/fluency.check.ts", marker: "fluency ledger 6" }],
   },
   {
     id: 7,

@@ -11,6 +11,8 @@ import { sessionGroups, sessionMessages, addVocab, type SessionDay, type Session
 import { PROVIDERS } from "../lib/models";
 import { when } from "../lib/fmt";
 import type { CorrectionCategory } from "../lib/prompts";
+import { accuracyContext, closingItems as computeClosingItems, FLUENCY_MINUTES } from "../lib/fluency";
+import Contract from "./talk/Contract";
 import {
   bandSplit,
   duplicateScenario,
@@ -34,6 +36,14 @@ const CORRECTION_GROUPS: { category: CorrectionCategory; label: string }[] = [
   { category: "register", label: "Register" },
   { category: "pronunciation", label: "Pronunciation" },
 ];
+
+/** A whole number of milliseconds as `mm:ss` (PLAN-043 §7.1's banner). */
+function mmss(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 // Where the reflection sends them, named by what the plan has next. The wording is the
 // day's, not this screen's — Talk never decides that reading (or anything) comes after.
@@ -86,6 +96,22 @@ export default function Talk({
   // the closed panel. `confirming` is the id of the scenario awaiting a delete.
   const [editing, setEditing] = useState<Scenario | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  // The mode the learner armed on the entry buttons (PLAN-043 §6), waiting for a
+  // scenario card to begin it. `null` is the ordinary start. A mode is applied
+  // when the learner picks a scenario: accuracy starts it immediately; fluency
+  // opens the contract for the chosen scenario first (the contract is the only
+  // path into fluency, so the mode is *established* by the button and *entered*
+  // by accepting the scenario-bound contract). Cleared once the mode begins.
+  const [pendingMode, setPendingMode] = useState<"fluency" | "accuracy" | null>(null);
+  // The scenario awaiting the fluency contract (PLAN-043 §7): a scenario card
+  // picked while the fluency mode is armed opens the contract bound to it,
+  // sitting over the picker until the learner accepts or goes back. `null` is
+  // the closed panel — no contract shown.
+  const [contractFor, setContractFor] = useState<Scenario | null>(null);
+  // §4.2 rule 3 (PLAN-043): in fluency mode the "If you're stuck" list opens only
+  // on the learner's own tap. The label stays; the list appears behind the click.
+  // Reset per conversation so a fresh session starts with the list closed.
+  const [stuckOpen, setStuckOpen] = useState(false);
   const [, bump] = useState(0); // scenarios live in localStorage — re-read after a change
 
   // The picker is also the archive — reload it whenever we come back to it.
@@ -108,6 +134,16 @@ export default function Talk({
   // (started false) and the live conversation (started true) both land here.
   useEffect(() => {
     setRevealed(new Set());
+  }, [talk.started]);
+
+  // A conversation that opens (or a resume) closes the fluency contract and any
+  // armed mode — the contract is for the start moment, the armed mode was
+  // consumed by the card that began the session, and neither is re-decided
+  // mid-conversation.
+  useEffect(() => {
+    setContractFor(null);
+    setPendingMode(null);
+    setStuckOpen(false);
   }, [talk.started]);
 
   // The streaming bubble's reveal is keyed to -1. When the stream empties — the
@@ -229,6 +265,23 @@ export default function Talk({
     const byId = new Map(registry.map((r) => [r.scenario.id, r.origin]));
     const { main, easier } = bandSplit(talk.scenarios, levelOf(settings.profile));
 
+    // Begin a scenario in whatever mode the learner armed (PLAN-043 §6). With
+    // no mode it is the ordinary start. Accuracy opens immediately — the same
+    // coach, live corrections. Fluency opens the contract bound to *this*
+    // scenario: the mode is established by the armed button and entered by
+    // accepting the scenario-bound contract (the only path into the mode).
+    const beginScenario = (sc: Scenario) => {
+      if (pendingMode === "accuracy") {
+        setPendingMode(null);
+        void talk.start(sc, "normal", undefined, undefined, undefined, accuracyContext());
+      } else if (pendingMode === "fluency") {
+        setPendingMode(null);
+        setContractFor(sc);
+      } else {
+        void talk.start(sc);
+      }
+    };
+
     // The rehearsal brief (PLAN-034): one screen, three questions. `who` is the
     // only one that is required — "a customer at work" is enough to build a
     // person; the rest refine.
@@ -291,6 +344,42 @@ export default function Talk({
           title="What are we practising?"
           why="The coach plays the other side. Pick a scenario — speak or type, and corrections are collected as you go and handed back at the end."
         />
+
+        {/* The fluency contract (PLAN-043 §7): the learner pressed "Fluency
+            mode · 5 minutes". One screen, one paragraph, one button — accepted
+            here, and only here, because `Contract` is the sole caller of
+            `fluencyContext`. The contract is not skippable and not suppressible:
+            no settings row, no "don't show this again", no persisted key. */}
+        {contractFor && (
+          <Contract
+            scenarioTitle={contractFor.title}
+            scenarioEmoji={contractFor.emoji}
+            onCancel={() => setContractFor(null)}
+            onStart={(ctx) => void talk.start(contractFor, "normal", undefined, undefined, undefined, ctx)}
+          />
+        )}
+
+        {/* PLAN-043 §6: the two modes, beside the ordinary start. A mode is
+            armed here and applied when the learner picks a scenario — accuracy
+            starts it immediately; fluency opens the contract bound to the chosen
+            scenario (the only path into the mode). Equal billing on the entry
+            screen is §4.3's half: the opposite mode must visibly exist. */}
+        <div className="mode-row" style={{ marginTop: 30, marginBottom: 34 }}>
+          <button
+            className={`btn sm ghost ${pendingMode === "fluency" ? "armed" : ""}`}
+            onClick={() => setPendingMode((m) => (m === "fluency" ? null : "fluency"))}
+            disabled={talk.busy || talk.scenarios.length === 0}
+          >
+            Fluency mode · {FLUENCY_MINUTES} minutes
+          </button>
+          <button
+            className={`btn sm ghost ${pendingMode === "accuracy" ? "armed" : ""}`}
+            onClick={() => setPendingMode((m) => (m === "accuracy" ? null : "accuracy"))}
+            disabled={talk.busy || talk.scenarios.length === 0}
+          >
+            Accuracy mode
+          </button>
+        </div>
         {talk.error && (
           /* surface talk: error */
           <Failed say={talk.error} retry={{ label: "Try again", onClick: () => talk.scenarios[0] && void talk.start(talk.scenarios[0]) }} />
@@ -311,7 +400,7 @@ export default function Talk({
         <div className="grid3">
           {main.map((sc) => (
             <div className="pick-wrap" key={sc.id}>
-              <button className="pick" onClick={() => void talk.start(sc)}>
+              <button className="pick" onClick={() => beginScenario(sc)}>
                 <div className="big">
                   {sc.emoji} {sc.title}
                 </div>
@@ -366,7 +455,7 @@ export default function Talk({
             <div className="grid3" style={{ marginTop: 12 }}>
               {easier.map((sc) => (
                 <div className="pick-wrap" key={sc.id}>
-                  <button className="pick" onClick={() => void talk.start(sc)}>
+                  <button className="pick" onClick={() => beginScenario(sc)}>
                     <div className="big">
                       {sc.emoji} {sc.title}
                     </div>
@@ -493,10 +582,15 @@ export default function Talk({
                 <b>{r.turns}</b>
                 <span>turns spoken</span>
               </div>
-              <div>
-                <b>{r.corrections.length}</b>
-                <span>things to revisit</span>
-              </div>
+              {/* PLAN-043: a fluency session's reflection shows only the three
+                  things. The correction counter is the monitor, rendered — it
+                  belongs to the ordinary reflection, never to the mode's. */}
+              {talk.mode !== "fluency" && (
+                <div>
+                  <b>{r.corrections.length}</b>
+                  <span>things to revisit</span>
+                </div>
+              )}
               <div>
                 <b>{r.words.length}</b>
                 <span>words captured</span>
@@ -510,6 +604,38 @@ export default function Talk({
                 </div>
               )}
             </div>
+
+            {/* PLAN-043 rule 6: "the three things" a fluency session promised.
+                At most three, in the fixed order meaning, pattern, strength —
+                computed deterministically by `closingItems` off the corrections
+                and strengths already on the reflection. No backfill: a slot with
+                nothing in it stays empty, and a fluency session ends with at most
+                three things, never a random list. */}
+            {talk.mode === "fluency" && r && (
+              (() => {
+                const items = computeClosingItems(r.corrections, r.strengths ?? []);
+                return items.length > 0 ? (
+                  <>
+                    <div className="eyebrow" style={{ marginBottom: 16 }}>
+                      The three things
+                    </div>
+                    <div style={{ marginBottom: 36 }}>
+                      {items.map((it, i) => (
+                        <div className="fix-row" key={i}>
+                          <span className="d" />
+                          <div style={{ flex: 1 }}>
+                            <div className="meta" style={{ fontSize: 11, color: "var(--ink3)", marginBottom: 3 }}>
+                              {it.slot}
+                            </div>
+                            <div style={{ fontSize: 14, lineHeight: 1.5 }}>{it.text}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : null;
+              })()
+            )}
 
             {/* The goal scorecard (PLAN-017's goalState, rendered). Each goal, its
                 final state, and one line of total — a missed goal is stated, not
@@ -538,7 +664,11 @@ export default function Talk({
               </>
             )}
 
-            {r.corrections.length > 0 && (
+            {/* PLAN-043: the full correction list is the ordinary reflection's. In
+                fluency mode the session promised "at most three things", so the
+                reflection delivers exactly the three computed above and hides the
+                categorised list the mode's contract promised not to surface. */}
+            {r.corrections.length > 0 && talk.mode !== "fluency" && (
               <>
                 <div className="eyebrow" style={{ marginBottom: 16 }}>
                   Worth revisiting
@@ -703,7 +833,7 @@ export default function Talk({
   const coachSaid = talk.msgs.filter((m) => m.role === "ai" && !m.isAsk).map((m) => m.text);
 
   return (
-    <div className="talk">
+    <div className={`talk ${talk.mode === "fluency" ? "fluency" : ""}`}>
       <div className="talk-grid">
         <div className="stream">
           <div className="stream-scroll" ref={scroll}>
@@ -714,6 +844,17 @@ export default function Talk({
               <div style={{ fontFamily: "var(--serif)", fontSize: 30, fontWeight: 500, marginBottom: 34 }}>
                 {talk.scenario?.title}
               </div>
+
+              {/* PLAN-043 §7.1: the one line above the transcript in fluency mode.
+                  The time is mm:ss; `no corrections` is a statement of what the
+                  session is doing, not a setting. When the time runs out the
+                  banner keeps reading 0:00 and the composer closes — the mode is
+                  still a mode, just over. */}
+              {talk.mode === "fluency" && (
+                <div className={`fluency-banner ${talk.fluencyUp ? "up" : ""}`}>
+                  Fluency mode · {mmss(talk.fluencyLeft)} left · no corrections
+                </div>
+              )}
 
               {/* The brief, at the top of the session (PLAN-034): a learner
                   returning to a half-finished rehearsal knows what they were
@@ -820,7 +961,7 @@ export default function Talk({
                         </div>
                       </div>
                     ))}
-                  {!m.inline && m.corrections.length > 0 && (
+                  {!m.inline && m.corrections.length > 0 && talk.mode !== "fluency" && (
                     <div className="noted">
                       <i />
                       noted — we'll revisit after the session
@@ -936,7 +1077,25 @@ export default function Talk({
             </button>
           )}
 
-          <div className="composer">
+          {/* PLAN-043 rule 7: the time is up — the composer is replaced by two
+              buttons and no new turn is accepted until one is pressed. "5 more
+              minutes" reopens the composer (the learner's own extension); "Finish
+              · see the three things" ends the session into the reflection. The
+              mode has closed, but the session is still a fluency session — the
+              closing items are the three things it promised. */}
+          {talk.fluencyUp ? (
+            <div className="composer">
+              <div className="bar" style={{ justifyContent: "center" }}>
+                <button className="btn sm" onClick={() => void talk.end()} disabled={talk.busy}>
+                  Finish · see the three things
+                </button>
+                <button className="btn sm ghost" onClick={() => talk.extend()}>
+                  5 more minutes
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="composer">
             <div className="bar">
               <div className="wrap">
                 <input
@@ -1034,6 +1193,7 @@ export default function Talk({
               )}
             </div>
           </div>
+          )}
         </div>
 
         <div className="rail">
@@ -1054,69 +1214,96 @@ export default function Talk({
             personaName={talk.persona?.name}
           />
 
-          {goals.length > 0 && (
-            <>
-              <div className="lbl">Scenario goals</div>
-              <div style={{ marginBottom: 30 }}>
-                {goals.map((g, i) => {
-                  const st = talk.goalState[i] ?? "pending";
-                  const mark = st === "met" ? "✓" : st === "missed" ? "✗" : "○";
-                  const label = st === "met" ? "met" : st === "missed" ? "missed" : "pending";
-                  return (
-                    <div className={`goal ${st}`} key={g}>
-                      <span className="mk" title={label}>
-                        {mark}
-                      </span>
-                      <span>{g}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
           {/* Suggestions (PLAN-032): while the coach is waiting, nothing renders —
               the screen is exactly what it was when the coach finished speaking.
               The array stays as it is (it is data, and PLAN-021's reveal machinery
               reads it); only the render is gated on `waiting`. Suggestions appear
               when the wait expires, or at once when the learner has already started
-              typing or holding the mic (input ends the wait). */}
+              typing or holding the mic (input ends the wait).
+              PLAN-043 rule 3: in fluency mode the list opens only on the learner's
+              own tap — the "If you're stuck" label stays, the list is behind the
+              click. Outside the mode the render is byte-identical to today's. */}
           {talk.suggestions.length > 0 && !talk.waiting && (
             <>
-              <div className="lbl">If you're stuck</div>
-              <div style={{ marginBottom: 30 }}>
-                {talk.suggestions.map((s, i) => (
-                  <button className="sugg" key={i} onClick={() => void talk.send(s, true)}>
-                    <span className="k">{i + 1}</span>
-                    <span className="t">{s}</span>
+              <div className="lbl">
+                {talk.mode === "fluency" ? (
+                  <button className="stuck-toggle" onClick={() => setStuckOpen((s) => !s)}>
+                    If you're stuck
                   </button>
-                ))}
+                ) : (
+                  "If you're stuck"
+                )}
               </div>
+              {(talk.mode !== "fluency" || stuckOpen) && (
+                <div style={{ marginBottom: talk.mode === "fluency" ? 18 : 30 }}>
+                  {talk.suggestions.map((s, i) => (
+                    <button className="sugg" key={i} onClick={() => void talk.send(s, true)}>
+                      <span className="k">{i + 1}</span>
+                      <span className="t">{s}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </>
           )}
 
-          <div className="lbl">Confidence</div>
-          {talk.confidence ? (
+          {/* PLAN-043 §7.1: the rail goes quiet in fluency mode. The Face stays; the
+              confidence block and the goal scorecard are hidden, and one line stands
+              in their place — "Listening." A percentage on screen while the learner
+              is being asked to stop monitoring themselves is the monitor, rendered. */}
+          {talk.mode !== "fluency" && (
             <>
-              <div className="conf">
-                <b>{talk.confidence.value}</b>
-              </div>
-              <div className="meter" style={{ marginBottom: 8 }}>
-                <div style={{ width: `${talk.confidence.value}%` }} />
-              </div>
-              <div style={{ fontSize: 11.5, color: "var(--ink3)", lineHeight: 1.5 }}>
-                Your unprompted-production rate over {talk.confidence.turns} turns. A signal, not a score.
-              </div>
+              {goals.length > 0 && (
+                <>
+                  <div className="lbl">Scenario goals</div>
+                  <div style={{ marginBottom: 30 }}>
+                    {goals.map((g, i) => {
+                      const st = talk.goalState[i] ?? "pending";
+                      const mark = st === "met" ? "✓" : st === "missed" ? "✗" : "○";
+                      const label = st === "met" ? "met" : st === "missed" ? "missed" : "pending";
+                      return (
+                        <div className={`goal ${st}`} key={g}>
+                          <span className="mk" title={label}>
+                            {mark}
+                          </span>
+                          <span>{g}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              <div className="lbl">Confidence</div>
+              {talk.confidence ? (
+                <>
+                  <div className="conf">
+                    <b>{talk.confidence.value}</b>
+                  </div>
+                  <div className="meter" style={{ marginBottom: 8 }}>
+                    <div style={{ width: `${talk.confidence.value}%` }} />
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink3)", lineHeight: 1.5 }}>
+                    Your unprompted-production rate over {talk.confidence.turns} turns. A signal, not a score.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="conf">
+                    <b>—</b>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink3)", lineHeight: 1.5 }}>
+                    Measuring. Three turns in, this starts reporting.
+                  </div>
+                </>
+              )}
             </>
-          ) : (
-            <>
-              <div className="conf">
-                <b>—</b>
-              </div>
-              <div style={{ fontSize: 11.5, color: "var(--ink3)", lineHeight: 1.5 }}>
-                Measuring. Three turns in, this starts reporting.
-              </div>
-            </>
+          )}
+
+          {talk.mode === "fluency" && (
+            <div className="lbl" style={{ marginTop: 30 }}>
+              Listening.
+            </div>
           )}
 
           {/* PLAN-034: in role, the learner decides when it is over — one control,

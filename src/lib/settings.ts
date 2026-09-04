@@ -188,6 +188,14 @@ export interface Settings {
    * month before it.
    */
   monitorLoad: boolean;
+  /**
+   * How long the microphone waits in silence before closing its recording, in
+   * **seconds**, for a fluency-mode session (PLAN-043 rule 5, §4.2). Default 2:
+   * §4.2 says "en az 2 saniye" — the fixed 1.8 s of the ordinary mic is out of
+   * compliance with the mode before a line is written. Only the mode's
+   * recordings read it; the ordinary session keeps its fixed 1800 ms.
+   */
+  fluencySilenceSec: number;
 }
 
 /** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
@@ -304,6 +312,11 @@ export const defaultSettings: Settings = {
   // slows you down" that ships measuring nothing is a broken one. Off stops
   // the measuring, never the display.
   monitorLoad: true,
+  // §4.2 rule 5: the mic waits at least two whole seconds of silence before it
+  // closes a fluency-mode recording. The mode's own number, separate from the
+  // ordinary mic's fixed 1800 ms — this plan does not retune the ordinary
+  // session.
+  fluencySilenceSec: 2,
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>

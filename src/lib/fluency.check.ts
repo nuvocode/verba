@@ -9,11 +9,12 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, timingSignal, FILLERS, verifySelfRepairs, selfRepairSignal, saidAt, saidInOrder, verifyAbandoned, verifyL1Fallback, verifyAvoidance, abandonedUtteranceSignal, l1FallbackSignal, avoidanceSignal } from "./fluency.ts";
+import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, timingSignal, FILLERS, verifySelfRepairs, selfRepairSignal, saidAt, saidInOrder, verifyAbandoned, verifyL1Fallback, verifyAvoidance, abandonedUtteranceSignal, l1FallbackSignal, avoidanceSignal, showInline, closingItems, fluencyContext, accuracyContext, FLUENCY_MINUTES, CONTRACT_TEXT } from "./fluency.ts";
 import { scriptOf, languageScript } from "./langs.ts";
-import { parseProduction } from "./prompts.ts";
+import { shouldShowInline, parseProduction, FLUENCY_RULE4 } from "./prompts.ts";
 import { monitorContext, signalMiss, type Signal, type SignalKind } from "./model.ts";
 import { talkSignals } from "./signals.ts";
+import type { Correction, CorrectionCategory, Severity } from "./prompts.ts";
 import type { VoiceTurn } from "./useTalk.ts";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -659,6 +660,233 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
   for (const kind of ["abandonedUtterance", "l1Fallback", "avoidance"] as const) {
     assert(!off.some((d) => d.kind === kind), `context null: no ${kind} signal is written`);
   }
+}
+
+// --- 17. showInline — the whole cross-product (PLAN-043) -----------------------
+// fluency ledger 4 — §4.2 rule 2 "live error marking is off at code level" is a
+// table, not a claim: three modes × three timings × three severities × in-role.
+// Every fluency row is false. Every in-role row is false. Accuracy answers live
+// (its *mode*, not a setting — §4.3) and equals `shouldShowInline("live", ...)`
+// exactly, whatever the learner's `correctionTiming`. Free answers
+// `shouldShowInline(timing, ...)` exactly — the ordinary session must not
+// quietly change.
+{
+  const MOODS = ["free", "fluency", "accuracy"] as const;
+  const TIMINGS = ["adaptive", "live", "delayed"] as const;
+  const SEVS = [undefined, "minor", "severe"] as unknown as Severity[];
+  let checks = 0;
+  for (const mode of MOODS)
+    for (const timing of TIMINGS)
+      for (const severity of SEVS)
+        for (const inRole of [false, true]) {
+          const got = showInline(mode, timing, severity, inRole);
+          if (mode === "fluency") {
+            assert.equal(got, false, `fluency must answer false for ${timing}/${severity}/role=${inRole}`);
+          } else if (inRole) {
+            assert.equal(got, false, `in-role must answer false for ${mode}/${timing}/${severity}`);
+          } else if (mode === "accuracy") {
+            assert.equal(
+              got,
+              shouldShowInline("live", severity),
+              `accuracy must equal shouldShowInline(live, ..) for ${timing}/${severity} — live is the mode, not a setting`,
+            );
+          } else {
+            assert.equal(
+              got,
+              shouldShowInline(timing, severity),
+              `free must equal shouldShowInline for ${timing}/${severity}`,
+            );
+          }
+          checks += 1;
+        }
+  assert.equal(checks, MOODS.length * TIMINGS.length * SEVS.length * 2, "the cross-product is walked in full");
+}
+
+// --- 18. closingItems — rule 6, every sub-rule (PLAN-043) ----------------------
+// fluency ledger 4 — §4.2 rule 6's arithmetic: at most three items in the fixed
+// order meaning → pattern → strength, and a slot with nothing in it stays empty.
+{
+  const corr = (
+    category: CorrectionCategory,
+    severity: Severity,
+    original = `${category}-${severity}`,
+    note = `note ${category} ${severity}`,
+  ): Correction => ({ original, fixed: `${original}✓`, note, severity, category });
+
+  // 1. A severe error, a repeated category, and a strength ⇒ exactly three, in order.
+  const c1 = corr("grammar", "severe");
+  const p1 = corr("vocabulary", "minor", "v1");
+  const p2 = corr("vocabulary", "minor", "v2");
+  const three = closingItems([c1, p1, p2], ["a strong moment"]);
+  assert.equal(three.length, 3, "all three slots fill");
+  assert.deepEqual(three.map((i) => i.slot), ["meaning", "pattern", "strength"], "order is meaning, pattern, strength");
+  assert.equal(three[0].text, "note grammar severe", "the meaning slot carries the severe correction's note");
+
+  // 2. No severe error ⇒ two items, and the meaning slot is not backfilled.
+  //    Two minor errors in the same category form a pattern; the meaning slot
+  //    stays empty rather than admitting a minor error as a stand-in severe one.
+  const noSevere = closingItems([corr("grammar", "minor", "g1"), corr("grammar", "minor", "g2")], ["a strong moment"]);
+  assert.equal(noSevere.length, 2, "no severe error, but a pattern + a strength ⇒ two items, not three");
+  assert.deepEqual(noSevere.map((i) => i.slot), ["pattern", "strength"], "the meaning slot stays empty, not backfilled with a minor one");
+
+  // 3. A category appearing once is not a pattern ⇒ no pattern item.
+  const noPattern = closingItems([corr("grammar", "minor")], ["a strong moment"]);
+  assert.deepEqual(noPattern.map((i) => i.slot), ["strength"], "a single category is not a pattern");
+
+  // 4. The same correction cannot fill both (a) and (b). A severe grammar error
+  //    and a second grammar error ⇒ the pattern slot takes the second one.
+  const g1 = corr("grammar", "severe", "g1");
+  const g2 = corr("grammar", "minor", "g2");
+  const both = closingItems([g1, g2], []);
+  assert.deepEqual(both.map((i) => i.slot), ["meaning", "pattern"], "severe + repeat grammar fills meaning and pattern");
+  assert.notEqual(both[1]?.text, g1.note, "the pattern slot does not reuse the meaning object");
+
+  // 5. Ten corrections and three strengths ⇒ still at most three items.
+  const many = closingItems(
+    Array.from({ length: 10 }, (_, i) => corr("grammar", i % 2 === 0 ? "severe" : "minor", `e${i}`)),
+    ["s1", "s2", "s3"],
+  );
+  assert(many.length <= 3, "ten corrections still close with at most three items");
+
+  // 6. Nothing at all ⇒ an empty array, not a placeholder line.
+  assert.deepEqual(closingItems([], []), [], "no corrections and no strengths ⇒ an empty array");
+}
+
+// --- 19. one mode per session (PLAN-043) ---------------------------------------
+// fluency ledger 6 — the mode is one field of one union on one ref written once,
+// in `start`. A source scan asserts `sessionContext.current =` appears only in
+// `start` and the resume path, and `fluencyContext(` is called from exactly one
+// file (the contract component). So a session is exactly one mode, at the type
+// level — accuracy and fluency cannot both run, because there is no second flag.
+{
+  const talkSrc = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
+  const writers = [...talkSrc.matchAll(/sessionContext\.current\s*=\s*(context|FREE_CONTEXT);/g)];
+  assert.equal(writers.length, 2, "sessionContext.current = appears exactly twice (start + resume)");
+  const startBody = talkSrc.slice(talkSrc.indexOf("const start = useCallback"), talkSrc.indexOf("const startRehearsal = useCallback"));
+  const resumeBody = talkSrc.slice(talkSrc.indexOf("const resume = useCallback"), talkSrc.indexOf("const driveRewind = useCallback"));
+  assert(/sessionContext\.current\s*=\s*context/.test(startBody), "start writes the context from its parameter");
+  assert(/sessionContext\.current\s*=\s*FREE_CONTEXT/.test(resumeBody), "resume resets the context to FREE_CONTEXT");
+
+  // `fluencyContext(` — the mode cannot be entered except through the contract.
+  const files = ["src/views/Talk.tsx", "src/views/talk/Contract.tsx", "src/lib/useTalk.ts", "src/lib/fluency.ts", "src/lib/fluency.check.ts"];
+  const callers: string[] = [];
+  for (const f of files) {
+    const src = readFileSync(join(ROOT, f), "utf8");
+    for (const m of src.matchAll(/fluencyContext\(/g)) callers.push(`${f}`);
+  }
+  // The definition in fluency.ts and the one call in the check file are not
+  // callers-of-record; exactly one *usage* file may call it (the contract view).
+  const usageFiles = [...new Set(callers.filter((f) => f !== "src/lib/fluency.ts" && f !== "src/lib/fluency.check.ts"))];
+  assert.equal(usageFiles.length, 1, "fluencyContext( is called from exactly one file");
+  assert(usageFiles[0]?.endsWith("Contract.tsx"), `fluencyContext( must be called from the contract, got ${usageFiles[0]}`);
+
+  // The two context builders produce the two modes; there is no second mode field.
+  assert.equal(fluencyContext().mode, "fluency", "fluencyContext builds the fluency mode");
+  assert.equal(accuracyContext().mode, "accuracy", "accuracyContext builds the accuracy mode");
+  assert.deepEqual({ ...FREE_CONTEXT, mode: "fluency" }, fluencyContext(), "fluencyContext is FREE_CONTEXT's fields with the mode changed");
+}
+
+// --- 20. the contract cannot be skipped or suppressed (PLAN-043) ---------------
+// fluency ledger 5 — no Settings field matches /contract|dontShow|skipIntro/i,
+// the contract component contains no localStorage/sessionStorage, and the accept
+// handler is the only path to `fluencyContext` (already asserted in 19).
+{
+  const settingsSrc = readFileSync(join(ROOT, "src/lib/settings.ts"), "utf8");
+  assert(
+    !/contract|dontShow|skipIntro/i.test(settingsSrc),
+    "the contract has no settings row, no 'don't show again', no skip — it is shown every session",
+  );
+  const contractSrc = readFileSync(join(ROOT, "src/views/talk/Contract.tsx"), "utf8");
+  assert(
+    !/localStorage|sessionStorage/.test(contractSrc),
+    "the contract must not persist anything — shown every session, never suppressed",
+  );
+  // The contract screen's accept button is the one onStart → fluencyContext path.
+  assert(/onStart\(fluencyContext\(\)\)/.test(contractSrc), "the contract's accept handler is the only path to fluencyContext");
+  // The contract's one paragraph is the §4.1 promise — pinned here so deleting
+  // the promise fails the build, not just the screen. The screen imports the
+  // constant and renders it in its single paragraph (`why`).
+  assert(/import \{ fluencyContext, CONTRACT_TEXT/.test(contractSrc), "the contract imports the §4.1 text from fluency.ts");
+  assert(
+    CONTRACT_TEXT.includes("mistakes are free") &&
+      CONTRACT_TEXT.includes("at most three things") &&
+      CONTRACT_TEXT.includes("keep speaking"),
+    "the contract text carries §4.1's promises: no corrections, at most three things, keep speaking",
+  );
+  assert(FLUENCY_MINUTES === 5, "the fluency session is five minutes — the contract and entry both say so");
+}
+
+// --- 21. the seven rules, one assertion each (PLAN-043) ------------------------
+// fluency ledger 4 — a numbered list of §4.2's seven rules, so a rule dropped
+// later leaves a numbered hole. The three pure-function rules (2, 4, 6) are
+// asserted in sections 17–19 above; the four flags are asserted at the lever
+// where they are set, in the source.
+{
+  // Rule 1 — the rewind is off in fluency mode.
+  const src = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
+  assert(
+    /off:\s*sessionContext\.current\.mode === "fluency" \|\| !settings\.rewinds/.test(src),
+    "rule 1: the rewind budget's off includes fluency mode",
+  );
+
+  // Rule 2 — live error marking off at code level, the pure function (see 17).
+  assert(showInline("fluency", "live", "severe", false) === false, "rule 2: showInline is false in fluency even on a severe error with live timing");
+  // The one call site in useTalk consults showInline, not shouldShowInline.
+  assert(
+    /inline:\s*rehearsal \? false : showInline\(/.test(src),
+    "rule 2: the inline decision is showInline, the single door",
+  );
+
+  // Rule 3 — the rail's suggestions are behind a click in fluency mode.
+  const talkView = readFileSync(join(ROOT, "src/views/Talk.tsx"), "utf8");
+  assert(
+    /talk\.mode === "fluency" \? \(\s*<button className="stuck-toggle"/.test(talkView),
+    "rule 3: the stuck list opens on the learner's own tap in fluency mode",
+  );
+
+  // Rule 4 — the prompt sentence is present in the mode's system prompt.
+  assert(FLUENCY_RULE4.length > 0, "rule 4: the rule-4 sentence is not empty");
+  assert(
+    /mode === "fluency" \? `\\n\$\{FLUENCY_RULE4\}` : ""/.test(src),
+    "rule 4: the fluency system prompt folds FLUENCY_RULE4 in",
+  );
+
+  // Rule 5 — the mic's silence floor is ≥ 2 s in fluency mode. §4.2 says "en az
+  // 2 saniye"; a value below that (or a bad one) must not let the 1.8 s default
+  // back in. Asserted as the floor at the read site, not as the setting's shape.
+  assert(
+    /silenceMs:\s*sessionContext\.current\.mode === "fluency" \? Math\.max\(2, \.\.\.\)/.test(src) ||
+      /silenceMs:\s*sessionContext\.current\.mode === "fluency" \? Math\.max\(2/.test(src),
+    "rule 5: the fluency silence is clamped to at least 2 s at the read site",
+  );
+  assert(
+    /fluencySilenceSec:\s*2/.test(readFileSync(join(ROOT, "src/lib/settings.ts"), "utf8")),
+    "rule 5: the silence default is 2 s — the §4.2 floor",
+  );
+
+  // Rule 6 — at most three closing items (see 18), and the reflection delivers
+  // exactly them. The same source-scan treatment rule 3 got: nothing else in the
+  // fluency reflection may surface the correction list or count, or it would
+  // silently come back as the random list the mode's contract refused.
+  assert(closingItems([], []).length === 0, "rule 6: closingItems is exercised (see 18)");
+  assert(
+    /talk\.mode !== "fluency" && \(\s*<div>\s*<b>\{r\.corrections\.length\}/.test(talkView),
+    "rule 6: the correction counter in the reflection's stats is gated off in fluency mode",
+  );
+  assert(
+    /r\.corrections\.length > 0 && talk\.mode !== "fluency"/.test(talkView),
+    "rule 6: the 'Worth revisiting' block is gated off in fluency mode",
+  );
+
+  // Rule 7 — the timer closes the mode and the extension is the learner's.
+  assert(
+    /fluencyUntil\.current\s*=\s*null;\s*setFluencyLeftMs\(0\);\s*setFluencyUp\(true\)/.test(src),
+    "rule 7: the timer closes the mode when it fires",
+  );
+  assert(
+    /const extend = useCallback/.test(src),
+    "rule 7: extend() exists — the learner's own extension",
+  );
 }
 
 console.log("fluency.check OK");

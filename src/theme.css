@@ -170,6 +170,12 @@ input { font: inherit; }
 /* min-height:0 on both columns — grid items default to min-height:auto, so a tall rail
    would stretch the row and hand the scrolling to .body instead of each column. */
 .stream { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* PLAN-043 §7.1: the error colour leaves the palette for the length of a fluency
+   mode — two tokens overridden on the whole subtree, so every component inside,
+   including ones written after this plan, reads error red as the quiet ink. That
+   is what "withdrawn from the system" means, and it is cheaper than auditing
+   components. */
+.talk.fluency { --warn: var(--ink3); --sev: var(--ink3); }
 .stream-scroll { flex: 1; overflow: auto; padding: 44px 48px 24px; }
 .stream-inner { max-width: 640px; margin: 0 auto; }
 .msg { margin-bottom: 28px; animation: vfade .35s ease both; }
@@ -197,6 +203,22 @@ input { font: inherit; }
 .subtitles-toggle { height: 46px; flex: none; padding: 0 14px; border: 1px solid var(--line); color: var(--ink2); background: var(--surface); border-radius: 9px; font-size: 12.5px; cursor: pointer; }
 .subtitles-toggle:hover { border-color: var(--accent); color: var(--accent-ink); }
 .typing { font-size: 13px; color: var(--ink3); animation: vpulse 1.2s ease infinite; margin-bottom: 20px; }
+/* PLAN-043 §7.1: the one line above the transcript in a fluency session. States
+   what the session is doing (`no corrections` is a fact, not a setting) and the
+   time in mm:ss. The `.up` state — timer fired, composer closed — keeps reading
+   0:00. */
+.fluency-banner { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; letter-spacing: .02em; color: var(--ink2); background: var(--bg2); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; margin-bottom: 26px; }
+.fluency-banner.up { opacity: .75; }
+/* PLAN-043 rule 3: the "If you're stuck" label in fluency mode is the open
+   control — the list sits behind the learner's own tap, and the label says it
+   is the thing that opens. */
+.stuck-toggle { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink3); cursor: pointer; }
+.stuck-toggle:hover { color: var(--accent-ink); }
+.stuck-toggle::after { content: " · tap to open"; text-transform: none; letter-spacing: 0; margin-left: 4px; font-size: 10px; opacity: .8; }
+/* PLAN-043 §6: the two mode entries beside the ordinary start. A row of two
+   outline buttons, distinct from the primary scenario grid — these start a mode,
+   not a scenario. */
+.mode-row { display: flex; flex-wrap: wrap; gap: 10px; }
 /* The rewind (PLAN-030): a distinguishable pause, not a warning. One grouped
    block with a quiet left rule and more vertical space than a normal turn. Only
    the neutral ramp (ink/ink2/ink3/line/bg2) — no accent, no warn, no sev, no

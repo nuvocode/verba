@@ -7,7 +7,8 @@
 // Spec: docs/plans/5-verba-akicilik-ve-monitor-katmani-spec.md §2.4, §7.4, §9.
 import type { ActivityId, SignalDraft, SignalKind } from "./model.ts";
 import type { VoiceTurn } from "./useTalk.ts";
-import type { SelfRepairReport } from "./prompts.ts";
+import type { Correction, CorrectionCategory, SelfRepairReport, Severity } from "./prompts.ts";
+import { shouldShowInline } from "./prompts.ts";
 import { scriptOf } from "./langs.ts";
 import { words, clauseCount } from "./text.ts";
 import { pauseLengths, leadingSilence, speechRuns, speechRatio, fromFirstSpeech } from "./breakdown.ts";
@@ -427,4 +428,152 @@ export function avoidanceSignal(activityId: ActivityId, avoidance: { goal: strin
       definition: "a structure the plan aimed at that you did not attempt",
     },
   };
+}
+
+// --- §4: the modes, and the rules that make a mode (PLAN-043) ------------------
+
+/**
+ * The default length of a fluency session, in minutes (PLAN-043 §6/§7). The
+ * contract screen says "five minutes", the entry button says it, and the timer
+ * runs off this same constant — one number, one place to change the length.
+ */
+export const FLUENCY_MINUTES = 5;
+
+/**
+ * The fluency contract, English rendering of §4.1 (PLAN-043 §7). One screen, one
+ * paragraph, one button — the promise the seven rules of §4.2 are the delivery of.
+ */
+export const CONTRACT_TEXT =
+  "For the next five minutes, mistakes are free. I won't stop you, I won't correct you, and nothing on this screen will turn red. At the end I'll say at most three things. The goal isn't to speak correctly — it's to keep speaking.";
+
+/**
+ * Build the `MonitorContext` for a fluency session (PLAN-043 §5, §7). Mode is
+ * `"fluency"`; the rest of the fields are the free baseline's — unplanned,
+ * first pass, unpressured, novel topic. The one and only way into the mode, by
+ * design: ledger row 6 asserts `fluencyContext(` is called from exactly one file
+ * (the contract screen), so no future screen can start the mode without the
+ * contract. It is a context builder, not a flag — the mode being one field of a
+ * union is what makes "one mode per session" true at the type level.
+ */
+export function fluencyContext(): MonitorContext {
+  return { ...FREE_CONTEXT, mode: "fluency" };
+}
+
+/**
+ * The accuracy-mode context (PLAN-043 §5/§6). Same machine, opposite pole: the
+ * mode field is `"accuracy"` and nothing else changes — corrections land live
+ * (§4.3: accuracy shows a correction beside the turn it corrects, as it
+ * happens), no timer, no contract screen, no colour withdrawal. It exists so
+ * fluency mode is not the unnamed "easy way out": the two are one union, and
+ * any session is exactly one of them because the mode is one field written
+ * once, in `start`. Accuracy's "live" marking is decided by `showInline`, not
+ * by a field on this context.
+ */
+export function accuracyContext(): MonitorContext {
+  return { ...FREE_CONTEXT, mode: "accuracy" };
+}
+
+/**
+ * §4.2 rule 2 — whether a correction is shown beside the turn it corrects.
+ *
+ * One pure function, so "live error marking is off at code level" is provable as
+ * a cross-product (fluency.check §17) rather than as a source scan. It is the
+ * one and only thing `useTalk` consults for the inline decision:
+ *
+ *   - **Fluency mode answers `false` for every severity and every
+ *     `correctionTiming`** — rule 2 is not a preference the learner can
+ *     out-configure, and it is not the model's to decide.
+ *   - **Accuracy mode answers `shouldShowInline("live", severity)`** — §4.3:
+ *     the opposite mode's live marking is not the learner's timing setting, it
+ *     is the mode. The learner's `correctionTiming` is deliberately ignored for
+ *     the length of an accuracy session.
+ *   - **In role (PLAN-034) the answer was already false** — the other party does
+ *     not grade. Preserved.
+ *   - **Everything else is `shouldShowInline` unchanged** — the ordinary session
+ *     keeps today's behaviour byte for byte. The mode must not quietly change
+ *     the ordinary session, and §17 is what proves it.
+ */
+export function showInline(
+  mode: MonitorContext["mode"],
+  timing: "adaptive" | "live" | "delayed",
+  severity: Severity | undefined,
+  inRole: boolean,
+): boolean {
+  if (mode === "fluency") return false; // §4.2 rule 2 — not configurable, not negotiable
+  if (inRole) return false; // PLAN-034 — the other party does not grade
+  if (mode === "accuracy") return shouldShowInline("live", severity); // §4.3 — live is the mode, not a setting
+  return shouldShowInline(timing, severity);
+}
+
+/**
+ * One of the at-most-three things the coach says at the end of a fluency session
+ * (PLAN-043 §4.2 rule 6, §3): the meaning slot, the pattern slot, or the strength
+ * slot, in that fixed order. `text` is the sentence that fills it.
+ */
+export interface ClosingItem {
+  slot: "meaning" | "pattern" | "strength";
+  text: string;
+}
+
+/**
+ * §4.2 rule 6 — at most three closing items, in this order, chosen by arithmetic
+ * and never left to a model:
+ *
+ *   (a) **meaning** — the first correction with `severity === "severe"`.
+ *   (b) **pattern** — the `category` carried by the most corrections, when that
+ *       count is **≥ 2**; its first correction, skipped when that is the same
+ *       object already used by (a). A count of one is not a pattern.
+ *   (c) **strength** — `strengths[0]`, when there is one.
+ *
+ * A slot with nothing in it stays **empty**; it is never backfilled from a slot
+ * below it and never filled with the next error down the list. **§4.2's
+ * "Rastgele hata listesi verilmez" is the rule**: a minor error promoted into the
+ * meaning slot because there was no severe one is exactly the random list the
+ * spec refuses. A session with one strength and no severe error closes with one
+ * item, and that is the honest answer. At most three, possibly fewer, never more,
+ * always in this order.
+ */
+export function closingItems(corrections: Correction[], strengths: string[]): ClosingItem[] {
+  const items: ClosingItem[] = [];
+
+  // (a) meaning — the first severe error.
+  const meaning = corrections.find((c) => c.severity === "severe");
+  if (meaning) items.push({ slot: "meaning", text: noteOf(meaning) });
+
+  // (b) pattern — the most frequent category, only when it repeats ≥ 2 times.
+  // No category with a count of one is a pattern; when every category is unique
+  // there is no pattern item at all. Condition 4: the same object may not fill
+  // both (a) and (b) — when the winning category's first correction is the
+  // meaning object, its next one is chosen instead.
+  const counts = new Map<CorrectionCategory, Correction[]>();
+  for (const c of corrections) {
+    const list = counts.get(c.category);
+    if (list) list.push(c);
+    else counts.set(c.category, [c]);
+  }
+  let best: { category: CorrectionCategory; list: Correction[] } | null = null;
+  for (const [category, list] of counts) {
+    if (list.length < 2) continue;
+    if (!best || list.length > best.list.length) best = { category, list };
+  }
+  if (best) {
+    const first = best.list.find((c) => c !== meaning) ?? null; // skip the (a) object if it leads
+    if (first) items.push({ slot: "pattern", text: noteOf(first) });
+  }
+
+  // (c) strength — the first strong moment, when there is one.
+  if (strengths[0]) items.push({ slot: "strength", text: strengths[0] });
+
+  return items;
+}
+
+/**
+ * The sentence a closing item fills its slot with. The meaning and pattern slots
+ * carry the correction's `note` — the coach's own explanation, already written
+ * for the learner's native language. `note` is the thing the learner reads at the
+ * end; `original`/`fixed` are the raw record and belong to the reflection, not
+ * to the spoken three things.
+ */
+function noteOf(c: Correction): string {
+  return c.note.trim() || c.fixed;
 }
