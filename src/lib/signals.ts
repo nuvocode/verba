@@ -11,7 +11,24 @@ import { words, sentenceCount } from "./text.ts";
 import type { ProducedTurn, Reflection, VoiceTurn } from "./useTalk.ts";
 import { repairSignal, type RepairObservation } from "./repair.ts";
 import { countPauses, speechRatio } from "./breakdown.ts";
-import { sessionContextSignal, timingOf, timingSignal, selfRepairSignal } from "./fluency.ts";
+import { sessionContextSignal, timingOf, timingSignal, selfRepairSignal, abandonedUtteranceSignal, l1FallbackSignal, avoidanceSignal } from "./fluency.ts";
+import type { ProductionReport } from "./prompts.ts";
+
+/**
+ * §2.3's completion signals. One `abandonedUtterance` and one `l1Fallback` per
+ * verified item from the report, and exactly one `avoidance` signal per activity
+ * when a claim survived the gates in `useTalk` — `completion.avoidance` is already
+ * null (no goal, or a claim dropped) by the time it reaches here, so these drafts
+ * only ever describe what was actually believed. Monitor kinds, so the caller
+ * gates each on `r.context`.
+ */
+export function completionSignals(activityId: ActivityId, c: ProductionReport): SignalDraft[] {
+  return [
+    ...c.abandoned.map((a) => abandonedUtteranceSignal(activityId, a)),
+    ...c.l1.map((o) => l1FallbackSignal(activityId, o)),
+    ...(c.avoidance ? [avoidanceSignal(activityId, c.avoidance)] : []),
+  ];
+}
 
 /**
  * A finished conversation. A correction with no note names nothing, so it is not
@@ -49,6 +66,13 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
     // filtered to `type === "falseAlarm"`, grouped by `label`. PLAN-046 renders
     // it; building a reader here would be a reader with no screen.
     ...(r.context ? (r.selfRepairs ?? []).map((sr) => selfRepairSignal(activityId, sr)) : []),
+    // §2.3's completion signals. Monitor kinds, so they ride the same gate
+    // `sessionContext`, `timing` and `selfRepair` do. `abandonedUtterance` and
+    // `l1Fallback` ride the `completion` report already verified in `useTalk`;
+    // `avoidance` is null (no signal, not a zero) when the activity had no goal
+    // or the model's claim failed its gates — the gate lives in `useTalk`, which
+    // is where the goal and the language are known.
+    ...(r.context ? completionSignals(activityId, r.completion) : []),
     // Times the learner asked to see the coach's text (PLAN-021). Recorded, never
     // scored — each ask is one assisted comprehension signal.
     ...(r.reveals ?? []).map((rv) => revealSignal(activityId, rv.what)),

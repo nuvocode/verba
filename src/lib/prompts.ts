@@ -480,14 +480,20 @@ export function parseVocab(raw: string): {
     .slice(0, MAX_VOCAB_PER_SESSION);
 }
 
-// ---- self-repair (PLAN-041) --------------------------------------------------
+// ---- production signals (§2.2 + §2.3, PLAN-041 / PLAN-042) -------------------
 
 /**
- * Ask the model to find the learner's self-repairs in their own spoken turns.
+ * Ask the model to read the learner's own spoken turns and report both the
+ * self-repairs (§2.2) and the completion signals (§2.3) — abandoned utterances,
+ * L1 slips, and whether the planned structure was attempted — from one pass.
  * Spoken only: a typed turn's restarts are deleted before they are sent, so a
  * transcript of typing carries no evidence and asking about it invents some.
+ *
+ * `goal` is the structure the plan aimed at, when the activity carried one. It is
+ * folded in so the model can judge avoidance against something; a session with no
+ * goal does not mention it, and `parseProduction` then carries `avoidance: null`.
  */
-export function repairsPrompt(s: Settings, turns: string[], pack?: LanguagePack): string {
+export function productionPrompt(s: Settings, turns: string[], pack?: LanguagePack, goal?: string): string {
   return [
     `Here are the learner's own spoken turns from this session, each on its own line:`,
     ...turns.map((t) => `- "${t}"`),
@@ -497,8 +503,14 @@ export function repairsPrompt(s: Settings, turns: string[], pack?: LanguagePack)
     `For each repair, give the abandoned fragment ("before") and what the learner said instead ("after"), both copied verbatim from the text.`,
     `Classify each as one of: "E" (a real error was fixed), "A" (no error, a better phrasing was sought), "D" (the idea changed, rebuilt from scratch), "C" (cut mid-word), or "falseAlarm" (the abandoned fragment was already correct in ${s.profile.targetLanguage} and the learner changed it anyway).`,
     `An empty list is the expected answer for most turns. Say [] rather than finding something.`,
+    ``,
+    `In the same text, find any sentence the learner started and did not finish. For each, copy the fragment that got cut off, verbatim, into "abandoned".`,
+    `Find any word or phrase that slipped into the learner's own native language (${s.profile.nativeLanguage}) and copy it, verbatim, into "l1".`,
+    goal
+      ? `The plan aimed at the structure "${goal}". Say whether the learner attempted it in "avoidance": "attempted" is true when the learner used the structure (or clearly came close), false when the session gave them a real opening and they steered around it. Back "attempted" with a verbatim fragment from the text as "evidence".`
+      : `There is no planned structure this session — set "avoidance" to null.`,
     packGuidance(pack),
-    `Answer with ONLY a JSON object: { "repairs": [ { "before": "the abandoned fragment, verbatim", "after": "what the learner said instead, verbatim", "type": "E | A | D | C | falseAlarm" } ] }.`,
+    `Answer with ONLY a JSON object: { "repairs": [ { "before": "…", "after": "…", "type": "E | A | D | C | falseAlarm" } ], "abandoned": [ { "fragment": "…" } ], "l1": [ { "span": "…" } ], "avoidance": { "goal": "…", "attempted": true, "evidence": "…" } or null }.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -516,24 +528,57 @@ export interface SelfRepairReport {
 }
 
 /**
+ * What the model reports for the whole of §2.2 and §2.3 in one call. Repairs,
+ * abandoned utterances and L1 slips are lists (absent parses to empty); avoidance
+ * is `null` when the activity carried no goal at all.
+ */
+export interface ProductionReport {
+  repairs: SelfRepairReport[];
+  /** Sentences started and never finished (§2.3). */
+  abandoned: { fragment: string }[];
+  /** Slips into the native language (§2.3). */
+  l1: { span: string }[];
+  /** Whether the planned structure was attempted (§2.3). Null without a goal. */
+  avoidance: { goal: string; attempted: boolean; evidence: string } | null;
+}
+
+/**
  * Shape-checked only, like `parseTurn`: a non-array, a missing field, or a `type`
  * outside the five is dropped. It makes no judgement about truth — that is
- * `verifySelfRepairs`'s job, and keeping the two apart is what PLAN-038's defect 2
- * taught.
+ * `verifySelfRepairs` and the §2.3 verifiers' job, and keeping the two apart is
+ * what PLAN-038's defect 2 taught. Every field is optional in the model's JSON and
+ * absent parses to empty — a model that only answers half the question has
+ * answered half the question, not zero for the rest.
  */
-export function parseRepairs(raw: string): SelfRepairReport[] {
+export function parseProduction(raw: string): ProductionReport {
   const obj = extractJson(raw);
-  if (!Array.isArray(obj?.repairs)) return [];
-  const out: SelfRepairReport[] = [];
-  for (const r of obj.repairs) {
-    if (!r || typeof r !== "object") continue;
-    const before = typeof r.before === "string" ? r.before.trim() : "";
-    const after = typeof r.after === "string" ? r.after.trim() : "";
-    if (!before || !after) continue;
-    if (!SELF_REPAIR_TYPES.includes(r.type)) continue;
-    out.push({ before, after, type: r.type });
+  const repairs: SelfRepairReport[] = [];
+  if (Array.isArray(obj?.repairs)) {
+    for (const r of obj.repairs) {
+      if (!r || typeof r !== "object") continue;
+      const before = typeof r.before === "string" ? r.before.trim() : "";
+      const after = typeof r.after === "string" ? r.after.trim() : "";
+      if (!before || !after) continue;
+      if (!SELF_REPAIR_TYPES.includes(r.type)) continue;
+      repairs.push({ before, after, type: r.type });
+    }
   }
-  return out;
+  const abandoned: { fragment: string }[] = Array.isArray(obj?.abandoned)
+    ? obj.abandoned.filter((a: any) => a && typeof a.fragment === "string" && a.fragment.trim()).map((a: any) => ({ fragment: a.fragment.trim() }))
+    : [];
+  const l1: { span: string }[] = Array.isArray(obj?.l1)
+    ? obj.l1.filter((o: any) => o && typeof o.span === "string" && o.span.trim()).map((o: any) => ({ span: o.span.trim() }))
+    : [];
+  // `evidence` is deliberately not required: it backs `attempted: true`, and the
+  // answer that writes a signal is `attempted: false`, which has nothing to
+  // evidence — a model that leaves the field out there has answered the question,
+  // not malformed it. Requiring it would drop the only branch that files.
+  const av = obj?.avoidance;
+  const avoidance =
+    av && typeof av === "object" && typeof av.goal === "string" && av.goal.trim() && typeof av.attempted === "boolean"
+      ? { goal: av.goal.trim(), attempted: av.attempted, evidence: typeof av.evidence === "string" ? av.evidence.trim() : "" }
+      : null;
+  return { repairs, abandoned, l1, avoidance };
 }
 
 /** Prompt for an end-of-session summary. */
@@ -729,7 +774,7 @@ export const SPOKEN_PROMPTS = [
  */
 export const STRUCTURED_PROMPTS = [
   "prompts.ts:vocabPrompt",
-  "prompts.ts:repairsPrompt",
+  "prompts.ts:productionPrompt",
   "prompts.ts:titlePrompt",
   "prompts.ts:memoryPrompt",
   "placement.ts:placementPrompt",

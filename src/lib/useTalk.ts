@@ -22,12 +22,13 @@ import {
   parseOwnLine,
   rewindUnpackPrompt,
   parseUnpack,
-  repairsPrompt,
-  parseRepairs,
+  productionPrompt,
+  parseProduction,
   type UnpackResult,
   type Correction,
   type SessionSummary,
   type SelfRepairReport,
+  type ProductionReport,
 } from "./prompts";
 import {
   rehearsalScenario,
@@ -96,7 +97,8 @@ import {
   clearWait as clearWaitState,
   type WaitState,
 } from "./patience";
-import { FREE_CONTEXT, type MonitorContext, verifySelfRepairs } from "./fluency";
+import { FREE_CONTEXT, type MonitorContext, verifySelfRepairs, verifyAbandoned, verifyL1Fallback, verifyAvoidance } from "./fluency";
+import { languageScript } from "./langs";
 import {
   addMessage,
   addVocab,
@@ -172,6 +174,14 @@ export interface Reflection extends SessionSummary {
    * transcript carried no restart to find.
    */
   selfRepairs: SelfRepairReport[];
+  /**
+   * §2.3's completion signals, verified against the mic's transcripts — the
+   * sentences abandoned unfinished, the slips into the native language, and
+   * whether the planned structure was attempted. `completion.avoidance` is null
+   * when the activity carried no goal (no signal is then written). Empty when
+   * the measurement is off or when nothing was spoken — never a zero.
+   */
+  completion: ProductionReport;
 }
 
 /** One thing the learner actually sent, and whether they found it themselves. */
@@ -431,6 +441,12 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   // session start; the timing signals grade each turn against them.
   const baseline = useRef<ReturnType<typeof baselineFrom>>({ median: 0, mad: 0, sample: 0, ready: false });
   const medianLen = useRef<number | null>(null);
+  // §2.3 (PLAN-042): the structure this session's plan aimed at, when the
+  // activity carried one. Folded into the system prompt by `start` (the "Quietly
+  // give the learner practice with:" line); kept here so the reflection can read
+  // it back into the avoidance gate. Null for a session with no goal — and no
+  // avoidance signal is then written. Cleared with the rest of the session state.
+  const completionGoal = useRef<string | null>(null);
   // How far the session's title has got: 0 unnamed, 1 named off the opening,
   // 2 re-named once the subject settled. Not a rolling rewrite — 2 is the end.
   const titleStage = useRef<0 | 1 | 2>(0);
@@ -750,6 +766,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       spokenDraft.current = false;
       reveals.current = [];
       repairs.current = [];
+      // §2.3's goal is a per-session fact (PLAN-042): set from this session's
+      // parameter so the reflection's completion report can judge avoidance
+      // against it, and cleared with the rest of the session state.
+      completionGoal.current = goal ?? null;
       spokeMs.current = 0;
       spokeUnknown.current = false;
       // A fresh session is a fresh floor: nothing queued from the old one may
@@ -1024,6 +1044,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         spokenDraft.current = false;
         reveals.current = [];
         repairs.current = [];
+        // A resume is not a fresh opening (PLAN-042): it carries no plan goal,
+        // so no avoidance is judged against it.
+        completionGoal.current = null;
         spokeMs.current = 0;
         spokeUnknown.current = false;
         // A resume begins a fresh floor: nothing queued from the old one plays
@@ -1684,6 +1707,11 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     // measurement is off, when nothing was spoken, or when the transcript carried
     // no restart to find — never a zero.
     let selfRepairs: SelfRepairReport[] = [];
+    // §2.3's completion signals, verified against the same transcripts: abandoned
+    // utterances and L1 slips as lists, and the avoidance claim (null without a
+    // goal, or when no signal survives the gates). Rides the reflection so
+    // `talkSignals` can write the drafts behind the `r.context` gate.
+    let completion: ProductionReport = { repairs: [], abandoned: [], l1: [], avoidance: null };
 
     try {
       const provider = getProvider(settings);
@@ -1715,31 +1743,37 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // 22). The reflection renders Unusable and offers a regenerate.
       if (summary && sessionId.current) await setSummary(sessionId.current, summary.summary).catch(() => {});
 
-      // §2.2's self-repairs, and §9's switch with teeth: with the measurement off
-      // there is no signal *and no request* — a layer that still calls the model
-      // while claiming not to measure has not stopped measuring, it has stopped
-      // filing. `spokenTexts` is the mic's own transcripts, not `produced`: a
-      // learner who dictated and then edited the box has a `ProducedTurn` that no
-      // longer contains the restart, and the mic's transcript is the only record
-      // of what was actually said.
+      // §2.2 and §2.3 in one call, and §9's switch with teeth: with the
+      // measurement off there is no signal *and no request* — a layer that still
+      // calls the model while claiming not to measure has not stopped measuring,
+      // it has stopped filing. `spokenTexts` is the mic's own transcripts, not
+      // `produced`: a learner who dictated and then edited the box has a
+      // `ProducedTurn` that no longer contains the restart, and the mic's
+      // transcript is the only record of what was actually said. The prompt itself
+      // carries the transcript; history is deliberately not prepended — a model
+      // asked over the coach's whole session would start hunting for repairs in
+      // the coach's own lines.
       if (settings.monitorLoad && voice.current.length) {
         const spokenTexts = voice.current.map((v) => v.text);
         try {
-          selfRepairs = verifySelfRepairs(
-            parseRepairs(
-              await provider.chat(
-                // History is deliberately not prepended — the prompt itself
-                // carries the transcript, and a model asked over the coach's
-                // whole session would start hunting for repairs in the coach's
-                // own lines.
-                [{ role: "user", content: repairsPrompt(settings, spokenTexts, pack) }],
-                { json: true },
-              ),
+          const report = parseProduction(
+            await provider.chat(
+              [{ role: "user", content: productionPrompt(settings, spokenTexts, pack, completionGoal.current ?? undefined) }],
+              { json: true },
             ),
-            spokenTexts,
-            corrections,
-            pack?.speech.locale ?? "en",
           );
+          const locale = pack?.speech.locale ?? "en";
+          selfRepairs = verifySelfRepairs(report.repairs, spokenTexts, corrections, locale);
+          const targetScript = languageScript(settings.profile.targetLanguage);
+          const nativeScript = languageScript(settings.profile.nativeLanguage);
+          completion = {
+            repairs: selfRepairs,
+            abandoned: verifyAbandoned(report.abandoned, spokenTexts, locale),
+            l1: verifyL1Fallback(report.l1, spokenTexts, locale, targetScript, nativeScript),
+            // Avoidance's gates (no goal, or an attempt rather than a dodge) are
+            // decided here, beside the goal that is the only reason to ask.
+            avoidance: completionGoal.current ? verifyAvoidance(report.avoidance) : null,
+          };
         } catch {
           // Offline or the provider is down. An unmeasured session measured
           // nothing — absence, not zero (D3). Nothing is shown, nothing is retried.
@@ -1813,6 +1847,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // the measurement is off, when nothing was spoken, or when the transcript
       // carried no restart to find — never a zero.
       selfRepairs,
+      // §2.3's completion signals, verified the same way. `avoidance` is null
+      // without a goal or when it did not survive the four gates; `abandoned` and
+      // `l1` are empty when nothing spoken carried them.
+      completion,
     });
     // Calibration (PLAN-031 §5.2): once, at the end of the session, over the
     // verdicts. The rise needs two consecutive zero-breakdown sessions; the drop

@@ -9,7 +9,9 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, timingSignal, FILLERS, verifySelfRepairs, selfRepairSignal } from "./fluency.ts";
+import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, timingSignal, FILLERS, verifySelfRepairs, selfRepairSignal, saidAt, saidInOrder, verifyAbandoned, verifyL1Fallback, verifyAvoidance, abandonedUtteranceSignal, l1FallbackSignal, avoidanceSignal } from "./fluency.ts";
+import { scriptOf, languageScript } from "./langs.ts";
+import { parseProduction } from "./prompts.ts";
 import { monitorContext, signalMiss, type Signal, type SignalKind } from "./model.ts";
 import { talkSignals } from "./signals.ts";
 import type { VoiceTurn } from "./useTalk.ts";
@@ -113,6 +115,7 @@ const base = {
   strengths: [],
   focus: [],
   selfRepairs: [],
+  completion: { repairs: [], abandoned: [], l1: [], avoidance: null },
 };
 const off = talkSignals("talk-1", { ...base, context: null }, "es", "es");
 assert(
@@ -516,14 +519,146 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
 
   // 5. §9's switch with teeth: with the measurement off, the model is not called
   //    at all — the acceptance is the *absence of the request*, not the absence of
-  //    the signal. Pinned by source scan: the `repairsPrompt` call in useTalk must
-  //    sit behind `settings.monitorLoad`, so removing the gate fails the build.
+  //    the signal. Pinned by source scan: the `productionPrompt` call in useTalk
+  //    must sit behind `settings.monitorLoad`, so removing the gate fails the
+  //    build.
   const talkSrc = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
-  const repairsCall = talkSrc.slice(talkSrc.indexOf("settings.monitorLoad && voice.current.length"), talkSrc.indexOf("repairsPrompt(") + 200);
+  const prodCall = talkSrc.slice(talkSrc.indexOf("settings.monitorLoad && voice.current.length"), talkSrc.indexOf("productionPrompt(") + 200);
   assert(
-    /settings\.monitorLoad/.test(repairsCall) && /repairsPrompt\(/.test(repairsCall),
-    "fluency ledger 2: the self-repair model call must be gated on settings.monitorLoad — off means no request",
+    /settings\.monitorLoad/.test(prodCall) && /productionPrompt\(/.test(prodCall),
+    "fluency ledger 2: the production model call must be gated on settings.monitorLoad — off means no request",
   );
+}
+
+// --- 13. the shared gate, and the bug it exists to prevent (PLAN-042) ---------
+// The ordering door every §2.2/§2.3 verification goes through checks *inside*
+// the line as well as across lines, because one recording is one line and a
+// self-repair lives entirely inside it.
+{
+  // 1. The reversed report, entirely inside one line, is out of order — this is
+  //    the case PLAN-041's cross-line test did not reach, and the case real data
+  //    is made of.
+  assert.equal(
+    saidInOrder(["dün I go, I went to the doctor"], "I went to the doctor", "I go", "en"),
+    false,
+    "saidInOrder: the reversed report inside one line is false",
+  );
+  // 2. The same pair forwards is true.
+  assert.equal(
+    saidInOrder(["dün I go, I went to the doctor"], "I go", "I went to the doctor", "en"),
+    true,
+    "saidInOrder: the forward report inside one line is true",
+  );
+  // 3. `after` overlapping `before` is false — it must start after `before` ends.
+  assert.equal(saidInOrder(["abcdef"], "abc", "bcd", "en"), false, "saidInOrder: an after overlapping before is false");
+  // 4. saidAt finds a fragment and folds.
+  assert.ok(saidAt(["I go to the doctor"], "I go to the doctor", "en"), "saidAt finds the span");
+  assert.ok(saidAt(["I go to the doctor!"], "I go to the doctor", "en"), "saidAt folds punctuation");
+  assert.equal(saidAt(["the clinic"], "I went", "en"), null, "saidAt null when the span is absent");
+}
+
+// --- 14. abandoned and L1 (PLAN-042) ------------------------------------------
+// fluency ledger 1 — the abandoned-utterance and L1 slips rest on the same
+// presence gate, and the script gate is open-fails so it never deletes a real
+// fallback.
+{
+  // 1. A fragment not in the transcript is dropped.
+  assert.equal(verifyAbandoned([{ fragment: "I was going to" }], ["I went to the doctor"], "en").length, 0, "an abandoned fragment not in the transcript is dropped");
+  assert.equal(verifyAbandoned([{ fragment: "I went to" }], ["I went to the doctor"], "en").length, 1, "an abandoned fragment in the transcript survives");
+
+  // 2. A Japanese target with an English native language: a reported L1 span
+  //    written in kana is dropped; one written in Latin survives. The scripts are
+  //    the ones `languageScript` really hands the caller, not hand-picked ones —
+  //    a gate tested on inputs its caller never produces is not tested.
+  const jaTrans = ["えー、私は今日学校に行かなかった。Actually I went to the doctor."];
+  const ja = languageScript("Japanese");
+  const en = languageScript("English");
+  assert.equal(verifyL1Fallback([{ span: "学校に" }], jaTrans, "ja", ja, en).length, 0, "a kana span is not an English fallback");
+  assert.equal(verifyL1Fallback([{ span: "Actually I went" }], jaTrans, "ja", ja, en).length, 1, "a Latin span survives the script gate");
+
+  // 2b. The same two languages the other way round — an English target with a
+  //     Japanese native language. The transcript is an English recognizer's
+  //     output, so it is Latin from end to end and a romanized slip is the only
+  //     shape a real L1 fallback can take. A gate reading "not kana, so not
+  //     Japanese" would delete every one of them, for every learner whose native
+  //     language is not written in Latin. The gate has nothing to read here and
+  //     stays open.
+  assert.equal(
+    verifyL1Fallback([{ span: "nanka" }], ["I went to the doctor, nanka, it was fine"], "en", en, ja).length,
+    1,
+    "a romanized slip survives when the native script cannot appear in the transcript",
+  );
+
+  // 3. A Spanish target with an English native language (shared script): gate 1
+  //    only, and a span in the transcript survives. Asserted so the *absence* of
+  //    the script gate is deliberate and visible rather than an accident.
+  assert.equal(verifyL1Fallback([{ span: "the bill" }], ["Quiero the bill, por favor."], "es", languageScript("Spanish"), en).length, 1, "a shared-script span survives on gate 1 alone");
+
+  // 4. scriptOf("") and scriptOf("123 …") are null, and a null script never drops
+  //    anything — an unmeasurable gate is open, not closed.
+  assert.equal(scriptOf(""), null, "scriptOf('') is null");
+  assert.equal(scriptOf("123 …"), null, "scriptOf of digits and punctuation is null");
+  // A null *language* script is treated as the shared-script case, never as a
+  // differing one — a null script must not fail shut.
+  assert.equal(verifyL1Fallback([{ span: "the bill" }], ["Quiero the bill"], "es", null, null).length, 1, "a null script never drops anything");
+}
+
+// --- 15. avoidance, every gate (PLAN-042) -------------------------------------
+// fluency ledger 11 — avoidance is the silent one: nothing in the transcript
+// stands behind it, so every gate errs towards writing nothing. `judged: true`
+// is the honest flag on the one signal it does write.
+{
+  // 1. No goal ⇒ no signal, whatever the model said.
+  assert.equal(verifyAvoidance(null), null, "no goal: no avoidance claim");
+
+  // 2. attempted: true ⇒ no signal.
+  assert.equal(verifyAvoidance({ goal: "past simple", attempted: true, evidence: "I went" }), null, "attempted: true writes no signal");
+
+  // 3. attempted: true whose evidence is nowhere near the transcript ⇒ still no
+  //    signal. Dropped, never flipped to avoidance: the two answers are the same
+  //    answer, which is why the check is one line and not a gate.
+  assert.equal(verifyAvoidance({ goal: "past simple", attempted: true, evidence: "I flew" }), null, "an unevidenced attempt is dropped, never flipped to avoidance");
+
+  // 4. attempted: false with a goal ⇒ a signal whose label is the goal and whose
+  //    payload carries judged: true. Read through `parseProduction` rather than
+  //    hand-built: `attempted: false` has nothing to evidence, so the answer a
+  //    model actually sends omits the field, and a parse that demanded it would
+  //    drop the only branch that ever files a signal.
+  const parsed = parseProduction('{"repairs": [], "avoidance": { "goal": "past simple", "attempted": false }}');
+  assert.ok(parsed.avoidance, "an avoidance claim with no evidence field still parses");
+  const kept = verifyAvoidance(parsed.avoidance);
+  assert.ok(kept, "attempted: false with a goal survives");
+  const signal = avoidanceSignal("talk-1", kept!)!;
+  assert.equal(signal.kind, "avoidance");
+  assert.equal((signal.payload as { label: string }).label, "past simple", "the avoidance label is the goal itself");
+  assert.equal((signal.payload as { judged: boolean }).judged, true, "the avoidance payload carries judged: true");
+
+  // 5. signalMiss is false for avoidance, abandonedUtterance and l1Fallback —
+  //    Memory must not take any of them as a miss.
+  const asSig = (d: { kind: SignalKind; payload: unknown }): Signal => ({ id: "s", activityId: "talk-1", kind: d.kind, observedAt: 0, payload: d.payload });
+  assert.equal(signalMiss(asSig(abandonedUtteranceSignal("talk-1", { fragment: "x" }))), false, "signalMiss(abandonedUtterance) is false");
+  assert.equal(signalMiss(asSig(l1FallbackSignal("talk-1", { span: "x" }))), false, "signalMiss(l1Fallback) is false");
+  assert.equal(signalMiss(asSig(signal)), false, "signalMiss(avoidance) is false");
+}
+
+// --- 16. the completion signals write only through the context gate (PLAN-042) -
+// With the measurement off, none of the three §2.3 kinds reaches a draft,
+// whatever the reflection carries.
+{
+  const reflection = {
+    ...base,
+    context: null,
+    completion: {
+      repairs: [],
+      abandoned: [{ fragment: "I was going to" }],
+      l1: [{ span: "the bill" }],
+      avoidance: { goal: "past simple", attempted: false, evidence: "" },
+    },
+  };
+  const off = talkSignals("talk-1", reflection, "es", "en");
+  for (const kind of ["abandonedUtterance", "l1Fallback", "avoidance"] as const) {
+    assert(!off.some((d) => d.kind === kind), `context null: no ${kind} signal is written`);
+  }
 }
 
 console.log("fluency.check OK");

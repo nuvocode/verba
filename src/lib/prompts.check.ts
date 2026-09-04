@@ -16,7 +16,7 @@ import {
   parseMemory,
   parseSummary,
   parseTurn,
-  parseRepairs,
+  parseProduction,
   styleGuidance,
   SPOKEN_PROMPTS,
   STRUCTURED_PROMPTS,
@@ -88,27 +88,46 @@ assert.deepEqual(
   "the category set is closed and stable",
 );
 
-// --- parseRepairs: shape only, no judgement (PLAN-041) ----------------------
-// `parseRepairs` checks shape, never truth — a non-array, a missing field, or a
-// `type` outside the five is dropped. The belief gate is `verifySelfRepairs`'s
-// job, and keeping the two apart is what PLAN-038's defect 2 taught.
+// --- parseProduction: shape only, no judgement (PLAN-041 / PLAN-042) ----------
+// `parseProduction` checks shape, never truth — a non-array, a missing field, or
+// a `type` outside the five is dropped. The belief gates are `verifySelfRepairs`
+// and the §2.3 verifiers' job, and keeping the two apart is what PLAN-038's
+// defect 2 taught. Every field is optional in the model's JSON and absent parses
+// to empty — a model that only answers half the question has answered half the
+// question, not zero for the rest.
 {
   // A well-formed report parses through.
-  const ok = parseRepairs(
-    '{"repairs": [ { "before": "I go to", "after": "I went to", "type": "E" }, { "before": "the doctor", "after": "the clinic", "type": "falseAlarm" } ]}',
+  const ok = parseProduction(
+    '{"repairs": [ { "before": "I go to", "after": "I went to", "type": "E" } ], "abandoned": [ { "fragment": "I was going to" } ], "l1": [ { "span": "the doctor" } ], "avoidance": { "goal": "past simple", "attempted": false, "evidence": "I went" } }',
   );
-  assert.equal(ok.length, 2, "two well-formed repairs parse");
-  assert.equal(ok[0].type, "E", "an E type parses");
-  assert.equal(ok[1].type, "falseAlarm", "a falseAlarm type parses");
+  assert.equal(ok.repairs.length, 1, "a well-formed repair parses");
+  assert.equal(ok.repairs[0].type, "E", "an E type parses");
+  assert.equal(ok.abandoned.length, 1, "an abandoned fragment parses");
+  assert.equal(ok.abandoned[0].fragment, "I was going to", "the abandoned fragment is read through");
+  assert.equal(ok.l1.length, 1, "an l1 span parses");
+  assert.equal(ok.l1[0].span, "the doctor", "the l1 span is read through");
+  assert.ok(ok.avoidance, "a well-formed avoidance claim parses");
+  assert.equal(ok.avoidance!.goal, "past simple", "the avoidance goal is read through");
+  assert.equal(ok.avoidance!.attempted, false, "the avoidance attempted flag is read through");
 
-  // A non-array, a missing field, and a type outside the five are all dropped.
-  assert.equal(parseRepairs('{"repairs": {}}').length, 0, "a non-array repairs is dropped");
-  assert.equal(parseRepairs('{"repairs": [ { "after": "x", "type": "E" } ]}').length, 0, "a report with no before is dropped");
-  assert.equal(parseRepairs('{"repairs": [ { "before": "x", "type": "E" } ]}').length, 0, "a report with no after is dropped");
-  assert.equal(parseRepairs('{"repairs": [ { "before": "x", "after": "y", "type": "Z" } ]}').length, 0, "a type outside the five is dropped");
-  assert.equal(parseRepairs('{"repairs": [ { "before": "x", "after": "y", "type": "E" }, { "before": "a", "after": "b", "type": "nonsense" } ]}').length, 1, "a bad row is dropped, a good row survives");
-  assert.equal(parseRepairs('{"repairs": []}').length, 0, "an empty list is the expected answer");
-  assert.equal(parseRepairs("not json").length, 0, "a non-JSON reply yields no repairs");
+  // The four ways a repairs field is malformed are all dropped.
+  assert.equal(parseProduction('{"repairs": {}}').repairs.length, 0, "a non-array repairs is dropped");
+  assert.equal(parseProduction('{"repairs": [ { "after": "x", "type": "E" } ]}').repairs.length, 0, "a report with no before is dropped");
+  assert.equal(parseProduction('{"repairs": [ { "before": "x", "type": "E" } ]}').repairs.length, 0, "a report with no after is dropped");
+  assert.equal(parseProduction('{"repairs": [ { "before": "x", "after": "y", "type": "Z" } ]}').repairs.length, 0, "a type outside the five is dropped");
+  assert.equal(parseProduction('{"repairs": [ { "before": "x", "after": "y", "type": "E" }, { "before": "a", "after": "b", "type": "nonsense" } ]}').repairs.length, 1, "a bad row is dropped, a good row survives");
+
+  // §2.3's fields are lenient the same way: absent parses to empty.
+  assert.equal(parseProduction('{"repairs": []}').repairs.length, 0, "an empty repairs is the expected answer");
+  assert.equal(parseProduction("not json").repairs.length, 0, "a non-JSON reply yields no repairs");
+  assert.equal(parseProduction('{"repairs": [], "abandoned": {}}').abandoned.length, 0, "a non-array abandoned is dropped");
+  assert.equal(parseProduction('{"repairs": [], "abandoned": [ { "fragment": "" } ]}').abandoned.length, 0, "an empty fragment is dropped");
+  assert.equal(parseProduction('{"repairs": [], "l1": [ { "span": "   " } ]}').l1.length, 0, "a blank l1 span is dropped");
+  // A model that only answers §2.2 leaves §2.3 empty, not zero for the rest.
+  const half = parseProduction('{"repairs": [ { "before": "x", "after": "y", "type": "E" } ]}');
+  assert.equal(half.abandoned.length, 0, "an absent abandoned parses to empty");
+  assert.equal(half.l1.length, 0, "an absent l1 parses to empty");
+  assert.equal(half.avoidance, null, "an absent avoidance parses to null");
 }
 
 // ============================================================================

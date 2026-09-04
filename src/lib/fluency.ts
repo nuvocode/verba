@@ -8,6 +8,7 @@
 import type { ActivityId, SignalDraft, SignalKind } from "./model.ts";
 import type { VoiceTurn } from "./useTalk.ts";
 import type { SelfRepairReport } from "./prompts.ts";
+import { scriptOf } from "./langs.ts";
 import { words, clauseCount } from "./text.ts";
 import { pauseLengths, leadingSilence, speechRuns, speechRatio, fromFirstSpeech } from "./breakdown.ts";
 
@@ -283,6 +284,147 @@ export function selfRepairSignal(activityId: ActivityId, r: SelfRepairReport): S
       after: r.after,
       unit: "count",
       definition: "a phrase you interrupted and rebuilt",
+    },
+  };
+}
+
+// --- §2.3: abandoned utterances and L1 slips -----------------------------------
+
+/**
+ * The abandoned utterances we believe, out of what the model reported.
+ *
+ * One gate only, and none is needed beyond it: "this sentence stops" is a claim
+ * about text that is present, not about text that is missing, so the fragment
+ * just has to be in the learner's own transcript. A fragment that is not there
+ * was authored by the model and is dropped.
+ */
+export function verifyAbandoned(
+  reported: { fragment: string }[],
+  transcript: string[],
+  locale: string,
+): { fragment: string }[] {
+  return reported.filter((a) => saidAt(transcript, a.fragment, locale) !== null);
+}
+
+/**
+ * The L1 slips we believe, out of what the model reported. Two gates:
+ *
+ * 1. **It happened** — the span is in the transcript (`saidAt`).
+ * 2. **The script gate.** A reported L1 span whose characters are not in the
+ *    native script is dropped: a Japanese learner whose native language is
+ *    English cannot have "fallen back to English" in a span written in kana, and
+ *    that is checkable for nothing. The gate is open-fails: a span with no letters
+ *    (`scriptOf` returns null) survives, because an unmeasurable gate must not
+ *    silently delete a real fallback.
+ *
+ * The gate only runs when it has something to read. The transcript is the
+ * *target* language's STT output, so it is written in the target's script; a span
+ * in the native script can only appear when that script is one the transcript can
+ * carry — in practice Latin, the romanization every recognizer falls back to. A
+ * learner whose native language is written in kana studying English produces a
+ * transcript that is Latin from end to end, and a gate reading "not kana, so not
+ * Japanese" would delete every real slip they make. So with a non-Latin native
+ * language, and for two languages that **share** a script, this signal gets gate 1
+ * only and rests on the model — the deliberate, stated rule.
+ */
+export function verifyL1Fallback(
+  reported: { span: string }[],
+  transcript: string[],
+  locale: string,
+  targetScript: string | null,
+  nativeScript: string | null,
+): { span: string }[] {
+  // The gate is readable only when the native script can appear in a transcript
+  // written in the target's script — Latin — and the target's own script is
+  // something else to tell it apart from. Any other configuration (shared script,
+  // a non-Latin native language, an unknown script) leaves the gate open: it must
+  // not fail shut.
+  const scriptGate = nativeScript === "Latin" && targetScript !== null && targetScript !== "Latin";
+  return reported.filter((o) => {
+    if (saidAt(transcript, o.span, locale) === null) return false;
+    if (scriptGate) {
+      const script = scriptOf(o.span);
+      // Open-fails: a span whose script is null (no letters) is unmeasurable and
+      // survives; only a span in a *definitively wrong* script is dropped.
+      if (script !== null && script !== nativeScript) return false;
+    }
+    return true;
+  });
+}
+
+/** One `abandonedUtterance` signal. The single builder. */
+export function abandonedUtteranceSignal(activityId: ActivityId, a: { fragment: string }): SignalDraft {
+  return {
+    activityId,
+    kind: "abandonedUtterance",
+    payload: {
+      label: "sentence you left unfinished",
+      fragment: a.fragment,
+      unit: "count",
+      definition: "a sentence you started and did not finish",
+    },
+  };
+}
+
+/** One `l1Fallback` signal. The single builder. */
+export function l1FallbackSignal(activityId: ActivityId, o: { span: string }): SignalDraft {
+  return {
+    activityId,
+    kind: "l1Fallback",
+    payload: {
+      label: "words from your own language",
+      span: o.span,
+      unit: "count",
+      definition: "a moment you reached for your own language",
+    },
+  };
+}
+
+// --- §2.3: avoidance — the one that cannot be checked --------------------------
+
+/**
+ * The avoidance claim we keep. Returns `null` when no signal should be written:
+ *
+ * 1. **No goal, no signal.** `avoidance === null` (no goal) is a claim about
+ *    nothing, and no caller reaches here without one — kept as the shape's guard.
+ * 2. **`attempted: true` writes no signal**, evidenced or not. The absence of
+ *    avoidance is not a measurement of avoidance, so an attempt the transcript
+ *    backs and an attempt it does not back have the same answer: nothing is
+ *    filed, and neither is ever flipped into avoidance. The model does not get to
+ *    clear the learner on its own word any more than it gets to accuse them — and
+ *    with nothing to clear, that costs one line, not a gate.
+ * 3. What remains — `attempted: false` — is a model judgement with no local
+ *    verification, and the builder's `judged: true` is the honest flag.
+ *
+ * This is the one §2.3 signal with no transcript behind it, which is why it takes
+ * no transcript: there is nothing here to check. `judged: true` is the whole of
+ * its provenance, and PLAN-045 must hold it to a higher sample bar because of it.
+ */
+export function verifyAvoidance(
+  avoidance: { goal: string; attempted: boolean; evidence: string } | null,
+): { goal: string; attempted: boolean; evidence: string } | null {
+  if (!avoidance) return null; // gate 1: no goal, no signal
+  if (avoidance.attempted) return null; // gate 2: an attempt, checked or not, files nothing
+  // gate 3: attempted === false — the model's judgement stands, flagged as one.
+  return avoidance;
+}
+
+/**
+ * The single builder for the avoidance signal. By the time a claim reaches here
+ * it has survived `verifyAvoidance`, so this is a draft or nothing. The label is
+ * the goal itself, verbatim — §8's grouping and PLAN-045's row both need the
+ * structure as the label, not a constant.
+ */
+export function avoidanceSignal(activityId: ActivityId, avoidance: { goal: string; attempted: boolean; evidence: string }): SignalDraft {
+  return {
+    activityId,
+    kind: "avoidance",
+    payload: {
+      label: avoidance.goal,
+      goal: avoidance.goal,
+      judged: true,
+      unit: "count",
+      definition: "a structure the plan aimed at that you did not attempt",
     },
   };
 }
