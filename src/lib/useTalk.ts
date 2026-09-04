@@ -17,6 +17,7 @@ import {
   parseMemory,
   openingDetail,
   shouldShowInline,
+  verifyCorrections,
   rewindOwnPrompt,
   parseOwnLine,
   rewindUnpackPrompt,
@@ -1279,13 +1280,19 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         coachReplyAt.current = performance.now();
         const sent = produced.current[produced.current.length - 1];
 
+        // PLAN-038: the corrections that survive the gate. A model that re-corrects an
+        // earlier turn is dropped here, so the rail, the wrap-up, the metrics and the
+        // signals all count one mistake once.
+        const corrections = rehearsal
+          ? []
+          : verifyCorrections((turn as { corrections?: Correction[] }).corrections ?? [], msg, pack?.speech.locale ?? "en");
+
         // In role (PLAN-034) there are no corrections to show and no rail to fill:
         // the other party does not grade, and "want me to start you off?" is the
         // coach teaching. The wait itself still runs — the silence is the point.
         const worst = rehearsal
           ? undefined
-          : ((turn as { corrections?: Correction[] }).corrections ?? []).find((c) => c.severity === "severe") ??
-            (turn as { corrections?: Correction[] }).corrections?.[0];
+          : corrections.find((c) => c.severity === "severe") ?? corrections[0];
         // Dropped in the same commit the real message lands in — anywhere earlier
         // and the DB write above sits between them as a frame of empty screen.
         setStreaming("");
@@ -1294,7 +1301,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
           if (next[idx])
             next[idx] = {
               ...next[idx],
-              corrections: rehearsal ? [] : ((turn as { corrections?: Correction[] }).corrections ?? []),
+              corrections: rehearsal ? [] : corrections,
               inline: rehearsal ? false : shouldShowInline(settings.correctionTiming, worst?.severity),
             };
           next.push({ role: "ai", text: turn.reply, corrections: [], inline: false });

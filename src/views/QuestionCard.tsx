@@ -1,4 +1,4 @@
-import type { Question } from "../lib/questions";
+import { optionList, type Question } from "../lib/questions";
 import type { ListenOption } from "../lib/listening";
 
 /**
@@ -28,7 +28,7 @@ export default function QuestionCard({
   hideMiss?: boolean;
 }) {
   const done = result !== undefined;
-  const opts = q.options as ListenOption[] | undefined;
+  const opts = optionList(q.options as (string | ListenOption)[] | undefined);
   return (
     <div className={`listen-q ${done ? (result ? "ok" : "miss") : ""}`}>
       <div className="listen-q-prompt" dir={q.kind === "cloze" ? dir : undefined}>

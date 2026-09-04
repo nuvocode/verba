@@ -2,7 +2,7 @@
 // scoring both activities lean on.
 // Run: node --experimental-strip-types src/lib/questions.check.ts
 import assert from "node:assert";
-import { parseQuestions, scoreAnswer, questionInstructions, questionsShape } from "./questions.ts";
+import { parseQuestions, scoreAnswer, questionInstructions, questionsShape, optionList } from "./questions.ts";
 
 // --- the quality bar lives in the instructions, so assert it is actually stated ---
 const instr = questionInstructions("Spanish", "English", 3);
@@ -37,5 +37,11 @@ assert(!scoreAnswer(qs[1], ""), "a blank answer never counts as correct");
 const shape = questionsShape("Spanish", "English");
 assert(shape.includes("multiple_choice") && shape.includes("fill_blank"), "the shape carries both kinds");
 assert(shape.includes("source sentence") && shape.includes('"line"'), "…and asks for the source-sentence line");
+
+// --- the card reads one option shape; reading's strings and listening's objects both
+// have to arrive as `{ text }` — a plain string read as `{text}` renders an empty chip ---
+assert(optionList(["Ana", "Luis"])[0].text === "Ana", "plain string options carry their text");
+assert(optionList([{ text: "Ana", why: "x" } as any])[0].text === "Ana", "object options pass through");
+assert(optionList(undefined).length === 0, "no options is an empty list, never a throw");
 
 console.log("questions.check.ts — all assertions passed");

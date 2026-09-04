@@ -798,11 +798,18 @@ function parseJson(raw: string): unknown {
  * Scoped to the language like every other table here (§3): the streak belongs to
  * the learner as a learner of *that* language, so switching does not inherit a
  * number that was never earned there, and switching back finds the old one intact.
+ *
+ * The number is the days strictly before this one, plus this one. Today's row is
+ * not written until the plan is saved, and on a rebuild it already is — counting
+ * strictly-earlier days makes both paths give the same number.
  */
-export async function dayNumber(lang: string): Promise<number> {
+export async function dayNumber(lang: string, date: string): Promise<number> {
   const db = await getDb();
-  const rows = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM daily_sessions WHERE lang = $1", [lang]);
-  return rows[0]?.n ?? 1;
+  const rows = await db.select<{ n: number }[]>(
+    "SELECT COUNT(*) AS n FROM daily_sessions WHERE lang = $1 AND date < $2",
+    [lang, date],
+  );
+  return (rows[0]?.n ?? 0) + 1;
 }
 
 /**

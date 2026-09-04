@@ -187,7 +187,7 @@ export function useDay(settings: Settings): Day {
         // No plan for today (or the learner switched language, or the row is stale) — build fresh.
         const [{ today, due: backlog }, dayIndex, scores, before] = await Promise.all([
           vocabCounts(settings.profile.targetLanguage),
-          dayNumber(settings.profile.targetLanguage),
+          dayNumber(settings.profile.targetLanguage, date),
           recentMetricScores(settings.profile.targetLanguage, 12),
           previousDay(settings.profile.targetLanguage, date),
         ]);
