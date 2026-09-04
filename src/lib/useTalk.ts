@@ -231,6 +231,14 @@ export interface VoiceTurn {
   ms: number;
   levels: number[];
   locale: string;
+  /**
+   * ms from the coach finishing its line to the learner opening the mic (§2.1's
+   * `initiationLatency`, before the leading silence inside the recording is
+   * added). Null when the coach was still speaking at mic-open, or when there
+   * was no coach line to measure from — an unmeasured initiation is absent, not
+   * an instant one. The same rule `speakUnknown` follows.
+   */
+  initiationMs: number | null;
 }
 
 /**
@@ -1605,6 +1613,16 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     // show the suggestions again (PLAN-032).
     clearWait();
     waitState.current = { ...waitState.current, offerCount: 0 };
+    // §2.1's initiation clock, read at the moment recording starts. When the
+    // coach still has the floor (`speaking.current`), `spokeMs` holds only part
+    // of this turn's audio and the subtraction would under-count — the same
+    // `floorInProgress` reasoning `send()` applies at the other end. No coach
+    // line to measure from is the same absence: an unmeasured initiation is
+    // null, not an instant one.
+    const initiationMs =
+      speaking.current || coachReplyAt.current === null
+        ? null
+        : Math.max(0, performance.now() - coachReplyAt.current - spokeMs.current);
     try {
       const heard = await speech.listen({
         locale: pack?.speech.locale,
@@ -1624,7 +1642,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         // the fact being recorded is the modality of the turn, not its final
         // spelling. `send()` reads and clears it.
         spokenDraft.current = true;
-        voice.current.push({ text: heard.text, ms: heard.ms, levels: heard.levels, locale: pack?.speech.locale ?? "en" });
+        voice.current.push({ text: heard.text, ms: heard.ms, levels: heard.levels, locale: pack?.speech.locale ?? "en", initiationMs });
       }
     } catch (e: unknown) {
       const { say: said, log } = humanError(e);

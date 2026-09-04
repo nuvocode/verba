@@ -11,7 +11,7 @@ import { words, sentenceCount } from "./text.ts";
 import type { ProducedTurn, Reflection, VoiceTurn } from "./useTalk.ts";
 import { repairSignal, type RepairObservation } from "./repair.ts";
 import { countPauses, speechRatio } from "./breakdown.ts";
-import { sessionContextSignal } from "./fluency.ts";
+import { sessionContextSignal, timingOf, timingSignal } from "./fluency.ts";
 
 /**
  * A finished conversation. A correction with no note names nothing, so it is not
@@ -22,7 +22,7 @@ import { sessionContextSignal } from "./fluency.ts";
  * be a number Coach could not recount, and a session that mixed one long unaided
  * answer with four picked suggestions would arrive as a single middling figure.
  */
-export function talkSignals(activityId: ActivityId, r: Reflection, locale: string): SignalDraft[] {
+export function talkSignals(activityId: ActivityId, r: Reflection, locale: string, packId: string): SignalDraft[] {
   return [
     ...r.corrections
       .filter((c) => c.note.trim() !== "")
@@ -39,6 +39,10 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
     ...r.produced.map((t) => turnSignal(activityId, t, locale)),
     // What the mic observed, per spoken turn — pace and delivery.
     ...(r.voice ?? []).flatMap((v) => voiceSignals(activityId, v)),
+    // §2.1's six timing numbers, one per spoken recording. A monitor kind, so it
+    // rides the same gate `sessionContext` does: no context means the learner
+    // has the measurement off, and nothing here is written.
+    ...(r.context ? timingSignals(activityId, r.voice ?? [], packId) : []),
     // Times the learner asked to see the coach's text (PLAN-021). Recorded, never
     // scored — each ask is one assisted comprehension signal.
     ...(r.reveals ?? []).map((rv) => revealSignal(activityId, rv.what)),
@@ -170,6 +174,19 @@ export function voiceSignals(
   }
 
   return out;
+}
+
+/**
+ * §2.1's six timing numbers, one per spoken recording. A monitor kind, so it is
+ * written only when the session has a context — `talkSignals` does the gating,
+ * this just measures. A recording that measures nothing (`timingOf` returns null)
+ * writes no signal at all.
+ */
+export function timingSignals(activityId: ActivityId, voice: VoiceTurn[], packId: string): SignalDraft[] {
+  return voice
+    .map((v) => timingOf(v, packId))
+    .filter((t): t is NonNullable<typeof t> => t !== null)
+    .map((t) => timingSignal(activityId, t));
 }
 
 /**

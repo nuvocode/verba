@@ -64,6 +64,7 @@ const drafts = talkSignals(
     context: null,
   },
   "es",
+  "es",
 );
 
 assert.deepEqual(
@@ -96,7 +97,7 @@ assert(
   "a produced turn is never a miss",
 );
 // A language with no spaces still measures: Japanese is cut by its own rules.
-const ja = talkSignals("talk-1", { turns: 1, corrections: [], words: [], produced: [{ text: "こんにちは、元気ですか。", fromSuggestion: false, words: 6, latencyMs: 1000 }], summary: "", strengths: [], focus: [], context: null }, "ja");
+const ja = talkSignals("talk-1", { turns: 1, corrections: [], words: [], produced: [{ text: "こんにちは、元気ですか。", fromSuggestion: false, words: 6, latencyMs: 1000 }], summary: "", strengths: [], focus: [], context: null }, "ja", "ja");
 assert((ja[0].payload as { words: number }).words > 1, "a no-space language still counts more than one word");
 
 // --- voiceSignals: pace and delivery, both with a unit and a definition --------
@@ -146,6 +147,7 @@ assert((pausedPron.payload as { speechRatio: number }).speechRatio < 1, "a pause
 const withVoice = talkSignals(
   "talk-1",
   { turns: 1, corrections: [], words: [], produced: [{ text: "Quisiera un café.", fromSuggestion: false, words: 3, latencyMs: 1000 }], summary: "", strengths: [], focus: [], voice: [{ text: "Quisiera un café.", ms: 4000, levels: [0.1, 0.1, 0.1, 0.1], locale: "es" }], context: null },
+  "es",
   "es",
 );
 assert(withVoice.some((d) => d.kind === "pace"), "a spoken reflection carries a pace signal");

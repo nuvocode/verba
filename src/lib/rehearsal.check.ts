@@ -281,7 +281,7 @@ const sc = rehearsalScenario(brief);
     rehearsal: { brief, debrief: null },
     context: null,
   };
-  const drafts = talkSignals("talk-1", r, "es");
+  const drafts = talkSignals("talk-1", r, "es", "es");
   const kinds = drafts.map((d) => d.kind);
   assert(kinds.includes("unpromptedTurn"), "case 8: an unpromptedTurn lands, same as any session");
   assert(kinds.includes("repairMove"), "case 8: a repairMove lands, same as any session");

@@ -9,9 +9,10 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal } from "./fluency.ts";
+import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, timingSignal, FILLERS } from "./fluency.ts";
 import { monitorContext, type Signal, type SignalKind } from "./model.ts";
 import { talkSignals } from "./signals.ts";
+import type { VoiceTurn } from "./useTalk.ts";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -112,12 +113,12 @@ const base = {
   strengths: [],
   focus: [],
 };
-const off = talkSignals("talk-1", { ...base, context: null }, "es");
+const off = talkSignals("talk-1", { ...base, context: null }, "es", "es");
 assert(
   !off.some((d) => MONITOR_KINDS.includes(d.kind)),
   "fluency ledger 12: with context null (measurement off), no monitor signal is written",
 );
-const on = talkSignals("talk-1", { ...base, context: FREE_CONTEXT }, "es");
+const on = talkSignals("talk-1", { ...base, context: FREE_CONTEXT }, "es", "es");
 assert.equal(
   on.filter((d) => d.kind === "sessionContext").length,
   1,
@@ -135,6 +136,7 @@ const spoken = talkSignals(
     ],
     context: FREE_CONTEXT,
   },
+  "es",
   "es",
 );
 const turnKinds = spoken.filter((d) => d.kind === "unpromptedTurn" || d.kind === "suggestionUsed");
@@ -195,5 +197,187 @@ assert(
   !/retain|recordAudio|saveAudio|keepAudio/.test(settingsSrc),
   "fluency ledger 13: no settings field turns audio retention on",
 );
+
+// --- 7. the six numbers --------------------------------------------------------
+// fluency ledger 1 — §2's signals are computed from transcript + audio and stored
+// with their context. Hand-built envelopes at 20 frames/s, so every expected
+// value is arithmetic a reader can do.
+const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
+  text: "one two three four five six",
+  ms: 3000,
+  levels: [],
+  locale: "en",
+  initiationMs: 0,
+  ...over,
+});
+
+// 1. A 60-frame envelope (3 s) all above the floor, six words → speechRate 120,
+//    articulationRate 120, meanLengthOfRun 6, midClausePauseRatio null (no pause).
+{
+  const allSpeech = Array.from({ length: 60 }, () => 0.3);
+  const t = timingOf(vt({ levels: allSpeech }), "en")!;
+  assert(t, "a full 3 s recording measures");
+  assert.equal(Math.round(t.speechRate), 120, "six words over 3 s is 120 wpm");
+  assert.equal(Math.round(t.articulationRate), 120, "no silence: articulation equals speech rate");
+  assert.equal(t.meanLengthOfRun, 6, "one run of six words");
+  assert.equal(t.midClausePauseRatio, null, "no pause → no mid-clause ratio, not 0");
+}
+
+// 2. The same six words over 3 s of speech with a 1 s gap in the middle →
+//    articulationRate stays 120 while speechRate drops. The pair §2.1 says matters.
+{
+  const gap: number[] = [
+    ...Array.from({ length: 30 }, () => 0.3),
+    ...Array.from({ length: 20 }, () => 0),
+    ...Array.from({ length: 30 }, () => 0.3),
+  ];
+  const t = timingOf(vt({ levels: gap, ms: 4000 }), "en")!;
+  assert(t, "a gapped recording measures");
+  assert(Math.round(t.articulationRate) > Math.round(t.speechRate), "a pause widens the gap between articulation and speech rate");
+  assert.equal(Math.round(t.articulationRate), 120, "articulation rate ignores the silence");
+}
+
+// 3. meanLengthOfRun halves when one pause splits an even recording in two.
+{
+  const split: number[] = [
+    ...Array.from({ length: 30 }, () => 0.3),
+    ...Array.from({ length: 20 }, () => 0),
+    ...Array.from({ length: 30 }, () => 0.3),
+  ];
+  const t = timingOf(vt({ levels: split, ms: 4000 }), "en")!;
+  assert.equal(t.meanLengthOfRun, 3, "one pause splits six words into two runs of three");
+}
+
+// 4. timingOf returns null for: no words, no envelope, and a recording under 1.5 s.
+{
+  assert.equal(timingOf(vt({ text: "" }), "en"), null, "no words → null");
+  assert.equal(timingOf(vt({ levels: [] }), "en"), null, "no envelope → null");
+  assert.equal(timingOf(vt({ ms: 1000, levels: [0.3, 0.3] }), "en"), null, "under 1.5 s → null");
+}
+
+// 4b. A full envelope that carries no speech frame at all — the mic opened and
+// nothing was said — measures nothing. Without this guard, `utteranceMs` is 0 and
+// both rates divide by it to `Infinity`; a recording that caught no speech has
+// measured nothing, and the answer is null, never a number.
+{
+  const silent = Array.from({ length: 60 }, () => 0); // 3 s of pure silence
+  assert.equal(timingOf(vt({ levels: silent }), "en"), null, "an envelope with no speech frame → null");
+}
+
+// 5. initiationLatency is null when initiationMs is null, even when the envelope
+//    has a perfectly good leading silence.
+{
+  const lead: number[] = [...Array.from({ length: 20 }, () => 0), ...Array.from({ length: 40 }, () => 0.3)];
+  const t = timingOf(vt({ levels: lead, initiationMs: null }), "en")!;
+  assert(t, "a recording with leading silence still measures");
+  assert.equal(t.initiationLatency, null, "an absent initiation half makes the whole absent");
+}
+
+// --- 8. midClausePauseRatio is a bound, in more than one language --------------
+// fluency ledger 3 — clause-boundary detection for midClausePauseRatio is tested
+// in the target language. For each of es, tr and ja.
+{
+  const cases: { locale: string; text: string; sep: string }[] = [
+    { locale: "es", text: "una respuesta", sep: ", " },
+    { locale: "tr", text: "bir cevap", sep: ", " },
+    // ja is here on purpose: its clause punctuation (、) is not in the Latin set,
+    // and this is what proves the boundary set is not Latin-only.
+    { locale: "ja", text: "こんにちは", sep: "、" },
+  ];
+  for (const { locale, text, sep } of cases) {
+    // A one-clause utterance with three pauses → ratio 1 (nothing accounts for them).
+    const threePauses: number[] = [
+      ...Array.from({ length: 10 }, () => 0.3),
+      ...Array.from({ length: 10 }, () => 0),
+      ...Array.from({ length: 10 }, () => 0.3),
+      ...Array.from({ length: 10 }, () => 0),
+      ...Array.from({ length: 10 }, () => 0.3),
+      ...Array.from({ length: 10 }, () => 0),
+      ...Array.from({ length: 10 }, () => 0.3),
+    ];
+    const one = timingOf(vt({ text, locale, levels: threePauses, ms: 3500 }), "en")!;
+    assert.equal(one.midClausePauseRatio, 1, `${locale}: three pauses, one clause → ratio 1`);
+
+    // An utterance with as many clause boundaries as pauses → ratio 0.
+    const twoClauses = text + sep + text; // one boundary → two clauses
+    const onePause: number[] = [
+      ...Array.from({ length: 10 }, () => 0.3),
+      ...Array.from({ length: 10 }, () => 0),
+      ...Array.from({ length: 10 }, () => 0.3),
+    ];
+    const zero = timingOf(vt({ text: twoClauses, locale, levels: onePause, ms: 1500 }), "en")!;
+    assert.equal(zero.midClausePauseRatio, 0, `${locale}: as many boundaries as pauses → ratio 0`);
+
+    // More clause boundaries than pauses → ratio 0, never negative.
+    const threeClauses = text + sep + text + sep + text; // two boundaries → three clauses
+    const neverNeg = timingOf(vt({ text: threeClauses, locale, levels: onePause, ms: 1500 }), "en")!;
+    assert.equal(neverNeg.midClausePauseRatio, 0, `${locale}: more boundaries than pauses → 0, never negative`);
+
+    // No pauses at all → null, never 0.
+    const noPause = Array.from({ length: 30 }, () => 0.3);
+    const none = timingOf(vt({ text, locale, levels: noPause, ms: 1500 }), "en")!;
+    assert.equal(none.midClausePauseRatio, null, `${locale}: no pause → null, never 0`);
+  }
+}
+
+// --- 8b. leading silence is initiation, not a mid-clause pause -----------------
+// A recording that opens with 3 s of silence, then a single clause with no
+// mid-clause pause, must report midClausePauseRatio null (P is zero on the
+// utterance slice) while initiationLatency carries those 3 s. One event, one
+// place — the leading silence is never counted twice.
+{
+  const lead: number[] = [
+    ...Array.from({ length: 60 }, () => 0), // 3 s of silence before the first sound
+    ...Array.from({ length: 30 }, () => 0.3), // 1.5 s of continuous speech, one clause
+  ];
+  const t = timingOf(vt({ text: "una respuesta", locale: "es", levels: lead, ms: 4500, initiationMs: 500 }), "es")!;
+  assert(t, "a recording with leading silence measures");
+  assert.equal(t.midClausePauseRatio, null, "leading silence is not a mid-clause pause — P is zero on the utterance");
+  assert(Math.abs(t.initiationLatency! - 3500) < 1, "initiationLatency carries the 3 s of leading silence plus the 500 ms initiationMs");
+}
+
+// --- 8c. FILLERS excludes common function words (regression lock) --------------
+// The rule is that only tokens whose lexical use is rare enough to under-report
+// belong in a filler list. "o" and "sea" are common Spanish function words, so
+// they must never be counted as fillers — pinning them here stops a future edit
+// from re-adding them.
+{
+  assert(!FILLERS.es.includes("o"), "es: 'o' is a common conjunction, not a filler");
+  assert(!FILLERS.es.includes("sea"), "es: 'sea' is a common verb form, not a filler");
+}
+
+// --- 9. the signal, and the gate ----------------------------------------------
+// fluency ledger 1 — the timing signal carries its unit and definition, and it is
+// written only when the session has a context.
+{
+  // 1. timingSignal's payload carries a label, a unit and a definition, all
+  //    non-empty (invariant 12), and no correct or grade.
+  const t = timingOf(vt({ levels: Array.from({ length: 60 }, () => 0.3) }), "en")!;
+  const draft = timingSignal("talk-1", t);
+  const p = draft.payload as Record<string, unknown>;
+  assert.equal(p.label, "spoken timing", "the timing signal names itself");
+  assert(typeof p.unit === "string" && p.unit.length > 0, "the timing signal carries a unit");
+  assert(typeof p.definition === "string" && p.definition.length > 0, "the timing signal carries a definition");
+  assert(!("correct" in p) && !("grade" in p), "a timing payload must not carry correct/grade");
+
+  // 2. Every rate's unit says words, not syllables — D1 written down.
+  assert.match(p.unit as string, /words per minute/, "the unit names words, not syllables");
+
+  // 3. A Reflection with voice and context: null produces no timing draft; the
+  //    same reflection with FREE_CONTEXT produces exactly one per qualifying
+  //    recording.
+  const voice: VoiceTurn[] = [
+    { text: "one two three four five six", ms: 3000, levels: Array.from({ length: 60 }, () => 0.3), locale: "en", initiationMs: 0 },
+  ];
+  const off = talkSignals("talk-1", { ...base, voice, context: null }, "es", "en");
+  assert(!off.some((d) => d.kind === "timing"), "context null: no timing signal is written");
+  const on = talkSignals("talk-1", { ...base, voice, context: FREE_CONTEXT }, "es", "en");
+  assert.equal(on.filter((d) => d.kind === "timing").length, 1, "with a context, exactly one timing signal per qualifying recording");
+
+  // 4. pace and pronunciation are still produced when context is null — M6's
+  //    signals do not disappear behind M7's switch.
+  assert(off.some((d) => d.kind === "pace"), "pace survives context null");
+  assert(off.some((d) => d.kind === "pronunciation"), "pronunciation survives context null");
+}
 
 console.log("fluency.check OK");

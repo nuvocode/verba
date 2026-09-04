@@ -14,6 +14,7 @@ import {
   medianTurnWords,
   turnSignalsFor,
   countPauses,
+  pauseLengths,
   speechRatio,
   keyWordActuallyMissing,
   BREAKDOWN_SIGNALS,
@@ -220,6 +221,24 @@ const ctx = (over: Partial<TurnContext> = {}): TurnContext => ({
     !turnSignalsFor(turn({ latencyMs: 1000, speakMs: 0 }), baselineFrom([], NOW), ctx({ reply: "x", levels: smooth })).includes("hesitation"),
     "a mostly-speech envelope is not a hesitation",
   );
+}
+
+// --- case 7b: countPauses is pauseLengths at 600 ms, byte for byte -------------
+// `countPauses` is the one number `judge()` reads to decide whether the coach
+// interrupts a learner, so the refactor must not move it. It is exactly the
+// length of `pauseLengths(levels, 0.6)` for a hand-built envelope.
+{
+  const frames: number[] = [];
+  const push = (v: number, k: number) => {
+    for (let i = 0; i < k; i++) frames.push(v);
+  };
+  push(0.3, 3); // speech
+  push(0, 14); // 700 ms quiet → pause 1
+  push(0.3, 3);
+  push(0, 16); // 800 ms quiet → pause 2
+  push(0.3, 3);
+  assert.equal(countPauses(frames), pauseLengths(frames, 0.6).length, "countPauses is pauseLengths at 600 ms");
+  assert.equal(countPauses(frames), 2, "the hand-built envelope still carries two pauses");
 }
 
 // --- case 8: keyWordMissing is dropped when the key word is really present ------

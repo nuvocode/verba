@@ -155,7 +155,7 @@ export default function Talk({
   const closing = (day.plan?.activities ?? []).find((b) => b.kind === closes);
   useEffect(() => {
     if (talk.reflection && closes && !day.isDone(closes))
-      void day.complete(closes, closing ? talkSignals(closing.id, talk.reflection, getPack(settings.packId)?.speech.locale ?? "en") : []);
+      void day.complete(closes, closing ? talkSignals(closing.id, talk.reflection, getPack(settings.packId)?.speech.locale ?? "en", settings.packId) : []);
   }, [talk.reflection]);
 
   // What the plan hands them next. Computed by skipping `closes` rather than reading

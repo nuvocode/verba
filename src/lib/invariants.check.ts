@@ -331,8 +331,8 @@ assert.deepEqual(
 // M7 introduces a third spec (docs/plans/5-verba-akicilik-ve-monitor-katmani-spec.md
 // §10) with its own list of claims. One ledger file, three specs. Rows are
 // `assertedIn` a *.check.ts marker, or `pending` until the plan that builds them
-// lands. Eleven rows are pending here; the two this plan closes point at markers
-// that really exist in fluency.check.ts.
+// lands. Nine rows are pending here; the four this milestone has closed point at
+// markers that really exist in fluency.check.ts.
 type FluencyRow =
   | { id: number; claim: string; assertedIn: { file: string; marker: string }[] }
   | { id: number; claim: string; pending: string }; // "#<issue> — <what builds it>"
@@ -341,7 +341,7 @@ const FLUENCY_LEDGER: FluencyRow[] = [
   {
     id: 1,
     claim: "§2's signals are computed from transcript + audio and stored with their context",
-    pending: "#70 — PLAN-040",
+    assertedIn: [{ file: "src/lib/fluency.check.ts", marker: "fluency ledger 1" }],
   },
   {
     id: 2,
@@ -351,7 +351,7 @@ const FLUENCY_LEDGER: FluencyRow[] = [
   {
     id: 3,
     claim: "Clause-boundary detection for `midClausePauseRatio` is tested in the target language",
-    pending: "#70 — PLAN-040",
+    assertedIn: [{ file: "src/lib/fluency.check.ts", marker: "fluency ledger 3" }],
   },
   {
     id: 4,

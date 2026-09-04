@@ -70,3 +70,22 @@ export function sentenceCount(text: string, locale: string): number {
   for (const s of seg.segment(text)) if (s.segment.trim()) n++;
   return Math.max(1, n);
 }
+
+/**
+ * How many clauses `text` holds, near enough. `Intl.Segmenter` has word and
+ * sentence granularity and no clause granularity, so this is sentences plus the
+ * punctuation that opens a clause inside one: , ; : and their CJK forms.
+ *
+ * Never returns 0, so it is safe as a divisor and as a subtrahend.
+ *
+ * ponytail: punctuation, not a parser. It misses an unpunctuated coordinate
+ * clause ("I went home and I ate") and over-counts a list ("bread, milk, eggs").
+ * Both errors make `midClausePauseRatio` report *fewer* mid-clause pauses than
+ * there are, which is the safe direction — see D2. A dependency parser per pack
+ * is the upgrade, and it is not worth it until a learner disputes the number.
+ */
+export function clauseCount(text: string, locale: string): number {
+  const boundaries = /[,;:、，；：]/g;
+  const matches = text.match(boundaries) ?? [];
+  return Math.max(1, sentenceCount(text, locale) + matches.length);
+}
