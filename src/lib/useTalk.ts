@@ -93,6 +93,7 @@ import {
   clearWait as clearWaitState,
   type WaitState,
 } from "./patience";
+import { FREE_CONTEXT, type MonitorContext } from "./fluency";
 import {
   addMessage,
   addVocab,
@@ -152,6 +153,14 @@ export interface Reflection extends SessionSummary {
    * In-role corrections never appear here — there were none to collect.
    */
   rehearsal?: { brief: RehearsalBrief; debrief: Debrief | null };
+  /**
+   * The conditions this session ran under (§2.4), written once per session.
+   * `null` when the learner has the measurement off — `talkSignals` then writes
+   * no `sessionContext` signal. In this plan every session is free, unplanned,
+   * first-pass and unpressured (`FREE_CONTEXT`); PLAN-043 and PLAN-044 are what
+   * start making it vary.
+   */
+  context: MonitorContext | null;
 }
 
 /** One thing the learner actually sent, and whether they found it themselves. */
@@ -192,6 +201,13 @@ export interface ProducedTurn {
    * line, the learner's reply, and the turn index.
    */
   coachLine?: string;
+  /**
+   * The learner spoke this turn rather than typing it (§3.1's first comparison:
+   * written accuracy against spoken accuracy). A fact about the turn, like
+   * `words` — not a monitor measurement, so the kill switch does not remove it
+   * and the same rule `axisUsed` follows applies: recorded, never scored.
+   */
+  spoken: boolean;
 }
 
 /**
@@ -250,7 +266,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [msgs, setMsgs] = useState<TalkMsg[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [input, setInput] = useState("");
+  const [input, setInputRaw] = useState("");
   const [busy, setBusy] = useState(false);
   // Cloud STT has two phases the learner can feel: the mic is open, then the clip
   // is in flight. One "Listening…" bar covering both is a lie for the second half.
@@ -287,6 +303,20 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   // What each spoken turn observed, beside what it said. Accumulated in `mic()`
   // and handed to the reflection, where `voiceSignals` turns it into signals.
   const voice = useRef<VoiceTurn[]>([]);
+  // Whether the current draft in the input box came from the mic (PLAN-039).
+  // The mic fills the box as an editable draft, so the send path cannot tell a
+  // spoken turn from a typed one by the text alone — this flag is set by `mic()`
+  // when it lands a transcript and read-and-cleared by `send()` when the turn is
+  // produced. A learner who edits the draft still spoke it; the flag survives
+  // the edit, because the fact being recorded is the modality of the turn.
+  const spokenDraft = useRef(false);
+  // The one door the input box is written through (PLAN-039). Wrapping the raw
+  // setter lets an empty write clear the mic-draft flag: the box emptying means
+  // the draft is gone, so a later send must not claim the turn was spoken.
+  const setInput = useCallback((value: string) => {
+    if (value === "") spokenDraft.current = false;
+    setInputRaw(value);
+  }, []);
   // Times the learner asked to see the coach's text (PLAN-021). Recorded, never
   // scored — the reflection carries them so `talkSignals` can write a reveal
   // signal per ask, and nothing counts them against the learner.
@@ -698,6 +728,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       produced.current = [];
       setProducedVersion((v) => v + 1);
       voice.current = [];
+      spokenDraft.current = false;
       reveals.current = [];
       repairs.current = [];
       spokeMs.current = 0;
@@ -971,6 +1002,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         produced.current = [];
         setProducedVersion((v) => v + 1);
         voice.current = [];
+        spokenDraft.current = false;
         reveals.current = [];
         repairs.current = [];
         spokeMs.current = 0;
@@ -1198,6 +1230,15 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     async (text: string, fromSuggestion = false) => {
       const msg = text.trim();
       if (!msg || busy || !scenario) return;
+      // PLAN-039: whether this turn was spoken. Read *before* `setInput("")`
+      // below — the wrapped setter clears the flag on an empty write, so reading
+      // after it would always see false. A picked suggestion is by definition
+      // not spoken — the learner clicked it, they did not say it — so
+      // `fromSuggestion` forces `false` even if the mic had filled the box
+      // first. The flag is cleared here in every case, so a stale flag can never
+      // leak into the next turn.
+      const spoken = !fromSuggestion && spokenDraft.current;
+      spokenDraft.current = false;
       setInput("");
       setError("");
       setNotice(""); // last turn's degrade notice is not this turn's news
@@ -1235,6 +1276,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         keyWord: "",
         breakdown: [],
         verdict: "clear",
+        // PLAN-039: the modality of this turn — spoken or typed. A fact about
+        // the turn, recorded, never scored.
+        spoken,
         // PLAN-037: the coach's line this turn answers, captured at send time so
         // the end-of-session review can replay the moment that broke.
         coachLine: prevCoachLine.current,
@@ -1576,6 +1620,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // the conversation measures, so a spoken turn is a produced turn too.
       if (heard.text.trim()) {
         setInput(heard.text);
+        // PLAN-039: this draft came from the mic. The flag survives an edit —
+        // the fact being recorded is the modality of the turn, not its final
+        // spelling. `send()` reads and clears it.
+        spokenDraft.current = true;
         voice.current.push({ text: heard.text, ms: heard.ms, levels: heard.levels, locale: pack?.speech.locale ?? "en" });
       }
     } catch (e: unknown) {
@@ -1691,6 +1739,12 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // so its phrases can be offered to Memory through the existing vocab save
       // path (the learner chooses; nothing is auto-saved).
       rehearsal: rehearsal ? { brief: rehearsal.brief, debrief } : undefined,
+      // PLAN-039: the conditions this session ran under. Every session in this
+      // plan genuinely is free, unplanned, first-pass and unpressured, so it is
+      // `FREE_CONTEXT` — never `null`, because a session with no condition can
+      // never be compared. The one exception is the kill switch: with
+      // `monitorLoad` off, no `sessionContext` signal is written at all.
+      context: settings.monitorLoad ? FREE_CONTEXT : null,
     });
     // Calibration (PLAN-031 §5.2): once, at the end of the session, over the
     // verdicts. The rise needs two consecutive zero-breakdown sessions; the drop

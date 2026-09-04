@@ -5,6 +5,7 @@ import { planMemory, type Memory, type MemoryWrite } from "./prompts";
 import { markDirty } from "./vault";
 import { foldSessions, type SessionRow, type SessionDay } from "./fmt";
 import type { Signal, SignalKind } from "./model";
+import { MONITOR_KINDS } from "./fluency";
 
 let dbPromise: Promise<Database> | null = null;
 
@@ -739,6 +740,35 @@ export async function saveSignals(lang: string, signals: Signal[]): Promise<void
       [s.id, lang, s.activityId, s.kind, JSON.stringify(s.payload), s.observedAt],
     );
   }
+}
+
+/**
+ * How many monitor measurements exist for a language (PLAN-039 §7.4). The delete
+ * confirm reads this *before* asking, so it can say what would be lost.
+ */
+export async function countMonitorSignals(lang: string): Promise<number> {
+  const db = await getDb();
+  const kinds = MONITOR_KINDS.map((_, i) => `$${i + 2}`).join(", ");
+  const rows = await db.select<{ n: number }[]>(
+    `SELECT COUNT(*) AS n FROM signals WHERE lang = $1 AND kind IN (${kinds})`,
+    [lang, ...MONITOR_KINDS],
+  );
+  return rows[0]?.n ?? 0;
+}
+
+/**
+ * Delete every monitor measurement for a language (§9). Scoped to
+ * `MONITOR_KINDS` and to one language, like every other table here — evidence
+ * from one language may not argue about another, and that holds for deleting it
+ * too. Returns how many rows went, so the confirm can say it.
+ */
+export async function deleteMonitorSignals(lang: string): Promise<number> {
+  const kinds = MONITOR_KINDS.map((_, i) => `$${i + 2}`).join(", ");
+  const r = await write(
+    `DELETE FROM signals WHERE lang = $1 AND kind IN (${kinds})`,
+    [lang, ...MONITOR_KINDS],
+  );
+  return r.rowsAffected;
 }
 
 interface SignalRow {

@@ -11,6 +11,7 @@ import { words, sentenceCount } from "./text.ts";
 import type { ProducedTurn, Reflection, VoiceTurn } from "./useTalk.ts";
 import { repairSignal, type RepairObservation } from "./repair.ts";
 import { countPauses, speechRatio } from "./breakdown.ts";
+import { sessionContextSignal } from "./fluency.ts";
 
 /**
  * A finished conversation. A correction with no note names nothing, so it is not
@@ -57,6 +58,12 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
     // of the two "easy sessions" that raise the difficulty. It is a SignalKind,
     // not an ActivityKind: nothing is scheduled on the learner's day.
     ...(r.rehearsal ? [{ activityId, kind: "rehearsal" as const, payload: { label: "rehearsal" } }] : []),
+    // The conditions this session ran under (§2.4). One per session, written
+    // beside the turn signals at the same stamp so `recapsFrom` groups it into
+    // the session it describes. Never written when the learner has the
+    // measurement off — that gate is in `useTalk`, not here: this file is pure
+    // and does not read Settings.
+    ...(r.context ? [sessionContextSignal(activityId, r.context)] : []),
   ];
 }
 
@@ -95,6 +102,14 @@ function turnSignal(activityId: ActivityId, t: ProducedTurn, locale: string): Si
     // direction in words, and that is the only reader there will be.
     breakdown: t.breakdown,
     verdict: t.verdict,
+    // The learner spoke this turn rather than typing it (§3.1's first comparison:
+    // written accuracy against spoken accuracy). A fact about the turn, like
+    // `words` — not a monitor measurement, so the kill switch does not remove it
+    // and the same rule `axisUsed` follows applies: recorded, never scored.
+    // A picked suggestion is by definition not spoken — the learner clicked it —
+    // so `fromSuggestion` forces `false` here, the single builder, even if a
+    // caller handed a `spoken: true` turn through.
+    spoken: t.fromSuggestion ? false : t.spoken,
   };
   return t.fromSuggestion
     ? { activityId, kind: "suggestionUsed" as const, payload }

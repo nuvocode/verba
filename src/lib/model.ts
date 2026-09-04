@@ -17,6 +17,12 @@ export type ActivityId = string;
 export type SignalId = string;
 export type WeaknessId = string;
 
+// The conditions a session ran under (§2.4). Defined in fluency.ts, the pure
+// module that owns the monitor layer; model.ts reads it back through the
+// `monitorContext` door below. Type-only, so the two files' mutual import is
+// erased at runtime.
+import type { MonitorContext } from "./fluency.ts";
+
 // --- Level — single source of truth (#12 single door) --------------------------
 
 export const CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
@@ -94,7 +100,13 @@ export type SignalKind =
   | "axisUsed" // the one difficulty axis a session chose (PLAN-031)
   | "easeRequest" // the learner asked not to be pushed that session (PLAN-031)
   | "rehearsal" // a rehearsal batch marker — one per rehearsal, never an ActivityKind (PLAN-034)
-  | "listenWalkBack"; // a listening condition walked back one grade on a miss (PLAN-036)
+  | "listenWalkBack" // a listening condition walked back one grade on a miss (PLAN-036)
+  | "sessionContext" // the conditions a session ran under (PLAN-039)
+  | "timing" // §2.1's six timing numbers for one spoken turn (PLAN-040)
+  | "selfRepair" // one self-repair, classified E / A / D / C / falseAlarm (PLAN-041)
+  | "abandonedUtterance" // a sentence started and never finished (PLAN-042)
+  | "l1Fallback" // a slip into the native language (PLAN-042)
+  | "avoidance"; // the planned structure was not attempted (PLAN-042)
 
 export type Signal = {
   id: SignalId;
@@ -175,6 +187,32 @@ export function turnTiming(s: Signal): { latencyMs: number; speakMs: number; spe
   };
   if (typeof latencyMs !== "number" || typeof speakMs !== "number") return null;
   return { latencyMs, speakMs, speakUnknown: speakUnknown === true };
+}
+
+/**
+ * The third structural payload door: the conditions a session ran under.
+ * Returns null for anything that is not a well-formed `sessionContext` signal —
+ * an unreadable context is *no* context, never a default one, because a default
+ * would silently file an interrupted session as an unpressured one and §3.1's
+ * fourth comparison would then compare a condition against itself.
+ */
+export function monitorContext(s: Signal): MonitorContext | null {
+  if (s.kind !== "sessionContext") return null;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { mode, planningTimeSec, taskRepetition, interlocutorPressure, topicFamiliarity } = p as {
+    mode?: unknown;
+    planningTimeSec?: unknown;
+    taskRepetition?: unknown;
+    interlocutorPressure?: unknown;
+    topicFamiliarity?: unknown;
+  };
+  if (mode !== "fluency" && mode !== "accuracy" && mode !== "free") return null;
+  if (typeof planningTimeSec !== "number") return null;
+  if (taskRepetition !== 1 && taskRepetition !== 2 && taskRepetition !== 3) return null;
+  if (interlocutorPressure !== "none" && interlocutorPressure !== "paced" && interlocutorPressure !== "interrupting") return null;
+  if (topicFamiliarity !== "prepared" && topicFamiliarity !== "novel") return null;
+  return { mode, planningTimeSec, taskRepetition, interlocutorPressure, topicFamiliarity };
 }
 
 /**

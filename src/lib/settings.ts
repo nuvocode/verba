@@ -175,6 +175,19 @@ export interface Settings {
    * the interruption stops, and an in-session `ease` still persists nothing.
    */
   rewinds: boolean;
+  /**
+   * Whether the fluency layer measures at all (§7.4, §9). On by default: the
+   * signals are computed on this machine and stay on it, and a layer whose
+   * whole claim is "we measure what slows you down" that ships measuring
+   * nothing is not a conservative default, it is a broken one.
+   *
+   * Off stops the **measuring**, not the display — no `sessionContext` signal is
+   * written, and every later plan gates its own writer on this same field.
+   * Past data is removed by the action beside it, never by this switch alone:
+   * a learner who turns measurement off for a week has not asked to lose the
+   * month before it.
+   */
+  monitorLoad: boolean;
 }
 
 /** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
@@ -286,6 +299,11 @@ export const defaultSettings: Settings = {
   // until the learner says they bother them. A standing preference, distinct
   // from "don't push me today" — it feeds the same SessionBudget.off gate.
   rewinds: true,
+  // Measurement on by default (PLAN-039): the signals are computed on this
+  // machine and stay on it, and a layer whose whole claim is "we measure what
+  // slows you down" that ships measuring nothing is a broken one. Off stops
+  // the measuring, never the display.
+  monitorLoad: true,
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>

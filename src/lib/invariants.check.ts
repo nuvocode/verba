@@ -326,6 +326,108 @@ assert.deepEqual(
   "the repair ledger must carry spec 4 §12's 24 claims, in order, exactly once each",
 );
 
+// --- FLUENCY_LEDGER: spec 5 §10's thirteen boxes, audited by the same machinery --
+//
+// M7 introduces a third spec (docs/plans/5-verba-akicilik-ve-monitor-katmani-spec.md
+// §10) with its own list of claims. One ledger file, three specs. Rows are
+// `assertedIn` a *.check.ts marker, or `pending` until the plan that builds them
+// lands. Eleven rows are pending here; the two this plan closes point at markers
+// that really exist in fluency.check.ts.
+type FluencyRow =
+  | { id: number; claim: string; assertedIn: { file: string; marker: string }[] }
+  | { id: number; claim: string; pending: string }; // "#<issue> — <what builds it>"
+
+const FLUENCY_LEDGER: FluencyRow[] = [
+  {
+    id: 1,
+    claim: "§2's signals are computed from transcript + audio and stored with their context",
+    pending: "#70 — PLAN-040",
+  },
+  {
+    id: 2,
+    claim: "`falseAlarmRepair` detection works and was validated by hand-sampling",
+    pending: "#71 — PLAN-041",
+  },
+  {
+    id: 3,
+    claim: "Clause-boundary detection for `midClausePauseRatio` is tested in the target language",
+    pending: "#70 — PLAN-040",
+  },
+  {
+    id: 4,
+    claim: "Fluency mode obeys all seven rules of §4.2; live error marking is off at code level",
+    pending: "#73 — PLAN-043",
+  },
+  {
+    id: 5,
+    claim: "The contract screen is shown every session and cannot be skipped",
+    pending: "#73 — PLAN-043",
+  },
+  {
+    id: 6,
+    claim: "Accuracy mode is separate and cannot run in the same session",
+    pending: "#73 — PLAN-043",
+  },
+  {
+    id: 7,
+    claim: "4/3/2 shows the three rounds side by side",
+    pending: "#74 — PLAN-044",
+  },
+  {
+    id: 8,
+    claim: "The ladder's fourth rung is left with one key",
+    pending: "#74 — PLAN-044",
+  },
+  {
+    id: 9,
+    claim: "Coach does not comment on thin data, and can say \"no problem\" outright",
+    pending: "#72 — PLAN-045",
+  },
+  {
+    id: 10,
+    claim: "§6.3's prohibitions are enforced at prompt level and tested",
+    pending: "#75 — PLAN-046",
+  },
+  {
+    id: 11,
+    claim: "Memory does not take `falseAlarmRepair` records as errors",
+    pending: "#71 — PLAN-041",
+  },
+  {
+    id: 12,
+    claim: "Turning the measurement off really stops the measurement",
+    assertedIn: [{ file: "src/lib/fluency.check.ts", marker: "fluency ledger 12" }],
+  },
+  {
+    id: 13,
+    claim: "Audio is not retained by default",
+    assertedIn: [{ file: "src/lib/fluency.check.ts", marker: "fluency ledger 13" }],
+  },
+];
+
+// Fluency assertedIn targets are audited like the other ledgers': a fluency claim
+// must point at a real file that really carries its marker.
+const fluencyUnverified: string[] = [];
+for (const row of FLUENCY_LEDGER)
+  if ("assertedIn" in row) fluencyUnverified.push(...verifyAssertedIn(row.assertedIn));
+assert(
+  fluencyUnverified.length === 0,
+  "invariants.check: unverified FLUENCY_LEDGER targets:\n" + fluencyUnverified.join("\n"),
+);
+
+// Every pending fluency row names the issue and plan that builds it. A pending row
+// without one is a claim that has quietly left the spec.
+for (const row of FLUENCY_LEDGER)
+  if ("pending" in row)
+    assert.match(row.pending, /^#\d+ — PLAN-\d+$/, `fluency ledger ${row.id} must name the issue and plan that build it`);
+
+// The fluency ledger is complete: 13 rows, ids 1..13, no gaps, no duplicates.
+assert.deepEqual(
+  FLUENCY_LEDGER.map((r) => r.id),
+  Array.from({ length: 13 }, (_, i) => i + 1),
+  "the fluency ledger must carry spec 5 §10's 13 claims, in order, exactly once each",
+);
+
 // --- assertedIn verification --------------------------------------------------
 
 function verifyAssertedIn(entries: { file: string; marker: string }[]): string[] {
@@ -464,4 +566,10 @@ console.log(`invariants: ${asserted} asserted, ${pending}, ${future} out of scop
 const repairAsserted = REPAIR_LEDGER.filter((r) => "assertedIn" in r).length;
 const repairPending = REPAIR_LEDGER.filter((r): r is Extract<RepairRow, { pending: string }> => "pending" in r).length;
 console.log(`repair ledger: ${repairAsserted} asserted, ${repairPending} pending`);
+
+// The fluency ledger's bill — computed, never hardcoded. PLAN-039 closes rows 12
+// and 13; every later M7 plan moves its rows from pending to asserted.
+const fluencyAsserted = FLUENCY_LEDGER.filter((r) => "assertedIn" in r).length;
+const fluencyPending = FLUENCY_LEDGER.filter((r): r is Extract<FluencyRow, { pending: string }> => "pending" in r).length;
+console.log(`fluency ledger: ${fluencyAsserted} asserted, ${fluencyPending} pending`);
 console.log("invariants.check OK");
