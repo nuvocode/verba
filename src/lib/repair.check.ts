@@ -112,8 +112,11 @@ const NOW = 1_000_000_000_000;
 // --- case 5: four uses on one day is uses; three across two days is fluent -----
 {
   // Four learner uses on a single day: fluent needs ≥2 distinct days too.
+  // Offsets are in minutes, not hours: NOW sits ~107 minutes into its day, so a
+  // 4-hour spread would bleed across midnight into two different dayKeys — the
+  // four uses would then read as fluent. Minutes keep all four on one day.
   const sameDay = inventoryFrom(
-    [1, 2, 3, 4].map((i) => sig(NOW - i * 60 * 60 * 1000, "REPEAT", "learner", `repeat please ${i}`)),
+    [1, 2, 3, 4].map((i) => sig(NOW - i * 60 * 1000, "REPEAT", "learner", `repeat please ${i}`)),
     NOW,
   );
   const rep = sameDay.find((e) => e.category === "REPEAT")!;
