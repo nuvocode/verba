@@ -10,8 +10,8 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { monitorProfile, profileReading, readingSentence, SMALL_ACCURACY_DIFF, SMALL_RATE_DIFF, LOW_ACCURACY } from "./profile.ts";
-import { turnSpoken, turnStats, monitorContext, timingRate, type Signal } from "./model.ts";
+import { monitorProfile, profileReading, readingSentence, rowComment, pauseSentence, earnedPraise, SMALL_ACCURACY_DIFF, SMALL_RATE_DIFF, LOW_ACCURACY, PAUSE_DROP, type ProfileRow } from "./profile.ts";
+import { turnSpoken, turnStats, monitorContext, timingRate, timingPauseRatio, type Signal } from "./model.ts";
 import { talkSignals } from "./signals.ts";
 import type { MonitorContext } from "./fluency.ts";
 import { FALSE_ALARM_ON_SCREEN } from "./fluency.ts";
@@ -376,6 +376,288 @@ const recentFirst = (s: Signal[]): Signal[] => [...s].sort((a, b) => b.observedA
   assert.equal(monitorContext(sig("a", "timing", { label: "t" }, 0)), null, "monitorContext is null for a non-context");
   assert.equal(timingRate(sig("a", "sessionContext", { label: "c" }, 0)), null, "timingRate is null for a non-timing");
   assert.equal(timingRate(sig("a", "timing", { label: "t", speechRate: 80 }, 0)), 80, "timingRate reads a timing signal");
+}
+
+// --- 7. the word scan — §6.1's "sayı verilir, sıfat verilmez" (PLAN-046) ------
+// Every sentence this layer can emit is generated from fixtures and scanned
+// against a pinned list of judgement adjectives and §6.3's therapy vocabulary.
+// The scan is over generated output, not source text, so a sentence assembled
+// from parts is covered. Probe: the scanner must reject a planted string, or it
+// is a scanner that scans nothing.
+{
+  const BANNED = [
+    "relax", "breathe", "calm down", "anxious", "anxiety", "confidence", "perfectionist",
+    "don't worry", "great", "excellent", "poor", "bad", "impressive", "only", "healthy",
+    "quite", "genuinely fine", "well done", "nice job", "perfect",
+  ];
+  const scan = (s: string): string[] => BANNED.filter((w) => s.toLowerCase().includes(w));
+
+  // The eight rowComment forms — four rows, both sides of the threshold.
+  const row = (id: ProfileRow["id"], a: number, b: number): ProfileRow => ({
+    id,
+    question: "q",
+    a: { label: "A", value: a, sessions: 2 },
+    b: { label: "B", value: b, sessions: 2 },
+    unit: id === "writtenVsSpoken" ? "corrections per 100 words" : "words per minute",
+    definition: "d",
+  });
+  const rowComments = [
+    rowComment(row("writtenVsSpoken", 1.0, 1.0)),
+    rowComment(row("writtenVsSpoken", 1.0, 3.0)),
+    rowComment(row("plannedVsUnplanned", 100, 100)),
+    rowComment(row("plannedVsUnplanned", 100, 80)),
+    rowComment(row("firstVsThird", 100, 100)),
+    rowComment(row("firstVsThird", 100, 80)),
+    rowComment(row("calmVsInterrupted", 100, 100)),
+    rowComment(row("calmVsInterrupted", 100, 80)),
+  ];
+  for (const s of rowComments) {
+    assert(scan(s).length === 0, `rowComment must not carry a judgement adjective or therapy word: "${s}"`);
+  }
+
+  // The four readingSentence forms, pauseSentence, earnedPraise. pauseSentence
+  // and earnedPraise are generated from a fixture that makes them non-null, so
+  // the scan covers the actual sentences the layer can emit.
+  const pauseSession = (
+    activityId: string,
+    ctx: MonitorContext,
+    opts: { corrections: number; wordsPerTurn: number; pauseRatio: number; at: number },
+  ): Signal[] => {
+    const out: Signal[] = [sig(activityId, "sessionContext", ctx, opts.at)];
+    for (let i = 0; i < opts.corrections; i++) out.push(sig(activityId, "correction", { label: "x" }, opts.at));
+    for (let i = 0; i < 2; i++)
+      out.push(
+        sig(activityId, "unpromptedTurn", { label: "unaided turn", words: opts.wordsPerTurn, sentences: 1, chars: opts.wordsPerTurn * 5, spoken: true }, opts.at),
+      );
+    out.push(
+      sig(activityId, "timing", { label: "spoken timing", speechRate: 100, midClausePauseRatio: opts.pauseRatio, unit: "wpm", definition: "d" }, opts.at),
+    );
+    return out;
+  };
+  const pauseFixture = recentFirst([
+    ...pauseSession("a1", PLANNED_FIRST_CALM, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.5, at: 4000 }),
+    ...pauseSession("a2", PLANNED_FIRST_CALM, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.5, at: 3000 }),
+  ]);
+  const sentences = [
+    ...(["monitorDominant", "slowAccess", "knowledgeGap", "noProblem"] as const).map(readingSentence),
+    pauseSentence(pauseFixture)!,
+    earnedPraise(recentFirst([
+      ...pauseSession("a1", PLANNED_FIRST_CALM, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.3, at: 4000 }),
+      ...pauseSession("a2", PLANNED_FIRST_CALM, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.3, at: 3000 }),
+      ...pauseSession("a3", UNPLANNED_THIRD_INTERRUPTED, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.5, at: 2000 }),
+      ...pauseSession("a4", UNPLANNED_THIRD_INTERRUPTED, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.5, at: 1000 }),
+    ]))!,
+  ];
+  for (const s of sentences) {
+    assert(scan(s).length === 0, `a layer sentence must not carry a judgement adjective or therapy word: "${s}"`);
+  }
+
+  // Probe: the scanner must reject a planted string, or it is a scanner that
+  // scans nothing.
+  assert(scan("you're genuinely fine, great job").length > 0, "the scanner must reject a planted judgement string");
+  assert(scan("relax and breathe").length > 0, "the scanner must reject a planted therapy string");
+}
+
+// --- 8. rowComment states the difference with its unit (PLAN-046) --------------
+// All four rows, on both sides of the threshold — eight assertions, and the
+// number must appear in the sentence.
+{
+  const row = (id: ProfileRow["id"], a: number, b: number): ProfileRow => ({
+    id,
+    question: "q",
+    a: { label: "A", value: a, sessions: 2 },
+    b: { label: "B", value: b, sessions: 2 },
+    unit: id === "writtenVsSpoken" ? "corrections per 100 words" : "words per minute",
+    definition: "d",
+  });
+  const cases: { r: ProfileRow; unit: string }[] = [
+    { r: row("writtenVsSpoken", 1.0, 1.0), unit: "corrections per 100 words" },
+    { r: row("writtenVsSpoken", 1.0, 3.0), unit: "corrections per 100 words" },
+    { r: row("plannedVsUnplanned", 100, 100), unit: "words per minute" },
+    { r: row("plannedVsUnplanned", 100, 80), unit: "words per minute" },
+    { r: row("firstVsThird", 100, 100), unit: "words per minute" },
+    { r: row("firstVsThird", 100, 80), unit: "words per minute" },
+    { r: row("calmVsInterrupted", 100, 100), unit: "words per minute" },
+    { r: row("calmVsInterrupted", 100, 80), unit: "words per minute" },
+  ];
+  for (const { r, unit } of cases) {
+    const s = rowComment(r);
+    assert(s.includes(unit), `rowComment must state the difference with its unit: "${s}"`);
+    assert(/\d/.test(s), `rowComment must carry the difference as a number: "${s}"`);
+  }
+}
+
+// --- 9. earnedPraise and pauseSentence (PLAN-046 §4, §3) ----------------------
+// earnedPraise returns a sentence when pauses fall and accuracy holds; null on a
+// fixture where pauses fall by the same amount and accuracy worsens past
+// SMALL_ACCURACY_DIFF. Plus null on three measured sessions (under the
+// four-session bar), and null with monitorLoad off. pauseSentence is null when
+// no session carries a midClausePauseRatio, and carries the percentage and its
+// definition when they do.
+{
+  // A session with a context, two spoken turns, corrections, and a timing signal
+  // carrying a midClausePauseRatio.
+  const session = (
+    activityId: string,
+    ctx: MonitorContext,
+    opts: { corrections: number; wordsPerTurn: number; pauseRatio: number; at: number },
+  ): Signal[] => {
+    const out: Signal[] = [sig(activityId, "sessionContext", ctx, opts.at)];
+    for (let i = 0; i < opts.corrections; i++) out.push(sig(activityId, "correction", { label: "x" }, opts.at));
+    for (let i = 0; i < 2; i++)
+      out.push(
+        sig(activityId, "unpromptedTurn", { label: "unaided turn", words: opts.wordsPerTurn, sentences: 1, chars: opts.wordsPerTurn * 5, spoken: true }, opts.at),
+      );
+    out.push(
+      sig(activityId, "timing", { label: "spoken timing", speechRate: 100, midClausePauseRatio: opts.pauseRatio, unit: "words per minute, ms, ratio", definition: "how fast you spoke" }, opts.at),
+    );
+    return out;
+  };
+
+  // 1. Pauses fall by PAUSE_DROP and accuracy holds ⇒ a sentence. The older
+  //    sessions (lower observedAt) carry the higher pause; the newer carry the
+  //    lower one — pauses fall over time.
+  const praise = recentFirst([
+    ...session("a1", PLANNED_FIRST_CALM, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.3, at: 4000 }),
+    ...session("a2", PLANNED_FIRST_CALM, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.3, at: 3000 }),
+    ...session("a3", UNPLANNED_THIRD_INTERRUPTED, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.5, at: 2000 }),
+    ...session("a4", UNPLANNED_THIRD_INTERRUPTED, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.5, at: 1000 }),
+  ]);
+  const praiseSentence = earnedPraise(praise);
+  assert(praiseSentence !== null, "earnedPraise returns a sentence when pauses fall and accuracy holds");
+  assert(praiseSentence!.includes("20"), "the praise sentence states the pause drop as a number");
+
+  // 2. The assertion that matters: pauses fall by the same amount but accuracy
+  //    worsens past SMALL_ACCURACY_DIFF ⇒ null. Here the newer half (a1, a2)
+  //    has 4 corrections over 100 words (4.0) vs the older half's 1.0 — a
+  //    worsening of 3.0, past the 1.0 bar.
+  const accWorsened = recentFirst([
+    ...session("a1", PLANNED_FIRST_CALM, { corrections: 4, wordsPerTurn: 50, pauseRatio: 0.3, at: 4000 }),
+    ...session("a2", PLANNED_FIRST_CALM, { corrections: 4, wordsPerTurn: 50, pauseRatio: 0.3, at: 3000 }),
+    ...session("a3", UNPLANNED_THIRD_INTERRUPTED, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.5, at: 2000 }),
+    ...session("a4", UNPLANNED_THIRD_INTERRUPTED, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.5, at: 1000 }),
+  ]);
+  assert.equal(earnedPraise(accWorsened), null, "fluency ledger 10: pauses down but accuracy down ⇒ null — praise is a conjunction");
+
+  // 3. Three measured sessions (under the four-session bar) ⇒ null.
+  const three = recentFirst([
+    ...session("a1", PLANNED_FIRST_CALM, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.3, at: 3000 }),
+    ...session("a2", PLANNED_FIRST_CALM, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.3, at: 2000 }),
+    ...session("a3", UNPLANNED_THIRD_INTERRUPTED, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.5, at: 1000 }),
+  ]);
+  assert.equal(earnedPraise(three), null, "earnedPraise is null under the four-session bar");
+
+  // 4. monitorLoad off ⇒ null — the same kill-switch fixture PLAN-045's review
+  //    added. With no sessionContext signal, no session qualifies.
+  const base = {
+    turns: 1,
+    corrections: [],
+    words: [],
+    produced: [
+      { text: "Hola.", fromSuggestion: false, words: 1, latencyMs: 1000, speakMs: 0, speakUnknown: false, missed: [], keyWord: "", breakdown: [], verdict: "clear" as const, spoken: false },
+    ],
+    summary: "",
+    strengths: [],
+    focus: [],
+    selfRepairs: [],
+    completion: { repairs: [], abandoned: [], l1: [], avoidance: null },
+  };
+  const offSignals: Signal[] = [];
+  for (const [a, spoken] of [["a1", false], ["a2", false], ["a3", true], ["a4", true]] as const) {
+    const drafts = talkSignals(
+      a,
+      { ...base, context: null, produced: [{ ...base.produced[0], spoken }, { ...base.produced[0], spoken }] },
+      "es",
+      "es",
+    );
+    drafts.forEach((d, i) => offSignals.push({ id: `${a}-${i}`, activityId: d.activityId, kind: d.kind, observedAt: i, payload: d.payload }));
+  }
+  assert.equal(earnedPraise(offSignals), null, "fluency ledger 10: with the measurement off, earnedPraise is null");
+
+  // 5. pauseSentence is null when no session carries a midClausePauseRatio.
+  const noPause = recentFirst([
+    ...session("a1", PLANNED_FIRST_CALM, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.5, at: 4000 }),
+    ...session("a2", PLANNED_FIRST_CALM, { corrections: 1, wordsPerTurn: 50, pauseRatio: 0.5, at: 3000 }),
+  ]);
+  // Strip the midClausePauseRatio from the timing payloads.
+  const stripped = noPause.map((s) =>
+    s.kind === "timing" ? { ...s, payload: { ...(s.payload as object), midClausePauseRatio: undefined } } : s,
+  );
+  assert.equal(pauseSentence(stripped), null, "pauseSentence is null when no session carries a midClausePauseRatio");
+
+  // 6. pauseSentence carries the percentage and its definition when they do.
+  const withPause = pauseSentence(noPause);
+  assert(withPause !== null, "pauseSentence returns a sentence when sessions carry a midClausePauseRatio");
+  assert(withPause!.includes("50"), "pauseSentence carries the mean ratio as a percentage");
+  assert(/mid-clause/.test(withPause!), "pauseSentence says what a mid-clause pause means");
+
+  // 7. timingPauseRatio is the door: null for a non-timing signal, reads a timing.
+  assert.equal(timingPauseRatio(sig("a", "sessionContext", { label: "c" }, 0)), null, "timingPauseRatio is null for a non-timing");
+  assert.equal(timingPauseRatio(sig("a", "timing", { label: "t", midClausePauseRatio: 0.4 }, 0)), 0.4, "timingPauseRatio reads a timing signal");
+}
+
+// --- 10. the shape the app really writes (PLAN-046 review) --------------------
+// Every fixture above invents an activityId per session — `a1`, `a2`, … — and the
+// app never does. `db.ts` stores `activity_id` as "the ActivityId within that
+// day's plan" and `learn.ts` draws it from a fixed set, so every conversation the
+// learner ever has is filed under `"talk"`. Grouping by it made `monitorProfile`
+// return `[]` for any real record, which is to say the Monitor Load section could
+// never render at all. This section is the same fixture written the way the app
+// writes it: one activityId, sessions a day apart.
+{
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const day = (d: number) => 1_000_000 + d * DAY_MS;
+  const real = recentFirst([
+    ...session("talk", PLANNED_FIRST_CALM, { spoken: false, corrections: 1, wordsPerTurn: 50, speechRate: 100, at: day(0) }),
+    ...session("talk", PLANNED_FIRST_CALM, { spoken: false, corrections: 1, wordsPerTurn: 50, speechRate: 100, at: day(1) }),
+    ...session("talk", UNPLANNED_THIRD_INTERRUPTED, { spoken: true, corrections: 1, wordsPerTurn: 50, speechRate: 90, at: day(2) }),
+    ...session("talk", UNPLANNED_THIRD_INTERRUPTED, { spoken: true, corrections: 1, wordsPerTurn: 50, speechRate: 90, at: day(3) }),
+  ]);
+  assert.equal(new Set(real.map((x) => x.activityId)).size, 1, "the premise: four sessions, one activityId — what the app really writes");
+  assert.deepEqual(
+    monitorProfile(real).map((r) => r.id),
+    ["writtenVsSpoken", "plannedVsUnplanned", "firstVsThird", "calmVsInterrupted"],
+    "fluency ledger 9: four sessions under one activityId produce all four rows — the profile must survive the ids the app actually writes",
+  );
+  const six = recentFirst([
+    ...session("talk", PLANNED_FIRST_CALM, { spoken: true, corrections: 1, wordsPerTurn: 50, speechRate: 100, at: day(0) }),
+    ...session("talk", PLANNED_FIRST_CALM, { spoken: true, corrections: 1, wordsPerTurn: 50, speechRate: 100, at: day(1) }),
+    ...session("talk", PLANNED_FIRST_CALM, { spoken: true, corrections: 1, wordsPerTurn: 50, speechRate: 100, at: day(2) }),
+    ...session("talk", PLANNED_FIRST_CALM, { spoken: true, corrections: 1, wordsPerTurn: 50, speechRate: 100, at: day(3) }),
+  ]);
+  assert.equal(earnedPraise(six), null, "four sessions with a flat pause ratio earn nothing — praise is measured, not handed out");
+}
+
+// --- 11. rowComment says the difference in the row's own terms (PLAN-046 review)
+// Row 1 is counted in corrections per 100 words: the higher number is the
+// condition that was corrected *more*. Calling it "faster" was both meaningless
+// and backwards — it read as the good end of the difference on the one row the
+// whole reading is built on.
+{
+  const row1: ProfileRow = {
+    id: "writtenVsSpoken",
+    question: "q",
+    a: { label: "Written", value: 2.0, sessions: 2 },
+    b: { label: "Spoken", value: 5.0, sessions: 2 },
+    unit: "corrections per 100 words",
+    definition: "d",
+  };
+  const s1 = rowComment(row1);
+  assert(!/fast/.test(s1), `an accuracy row may not talk about speed: "${s1}"`);
+  assert(/Spoken carried more corrections than Written/.test(s1), `an accuracy row names which condition was corrected more: "${s1}"`);
+  // The direction is not decorative: swapping the sides swaps the sentence.
+  const swapped = rowComment({ ...row1, a: { ...row1.a, value: 5.0 }, b: { ...row1.b, value: 2.0 } });
+  assert(/Written carried more corrections than Spoken/.test(swapped), `…and it follows the numbers: "${swapped}"`);
+  // A rate row still talks about speed, because there the higher number is faster.
+  const row3: ProfileRow = {
+    id: "firstVsThird",
+    question: "q",
+    a: { label: "First pass", value: 80, sessions: 2 },
+    b: { label: "Third pass", value: 110, sessions: 2 },
+    unit: "words per minute",
+    definition: "d",
+  };
+  assert(/Third pass was faster than First pass/.test(rowComment(row3)), "a rate row names the faster condition");
 }
 
 console.log("profile.check OK");

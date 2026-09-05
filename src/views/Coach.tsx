@@ -11,7 +11,7 @@ import { coachPanel, measured, wins, daySeries, type Metric, type MetricPair } f
 import { recentMemories, recentMetricScores, weekStats, signalsSince, recentSignals } from "../lib/db";
 import { absolute, humanError } from "../lib/fmt";
 import { inventoryFrom, direction, directionSentence, targetSentence, nextTarget, categoryTitle, REPAIR_CATEGORIES } from "../lib/repair";
-import { monitorProfile, profileReading, readingSentence, type ProfileRow, type Reading } from "../lib/profile";
+import { monitorProfile, profileReading, readingSentence, rowComment, pauseSentence, earnedPraise, type ProfileRow, type Reading } from "../lib/profile";
 import { Generating, Nothing, Failed, Unusable } from "./States";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -35,6 +35,11 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
   // here. No cache, no memo: it is a group-by over a few hundred rows.
   const [profile, setProfile] = useState<ProfileRow[]>([]);
   const [reading, setReading] = useState<Reading | null>(null);
+  // PLAN-046: the pause sentence and the praise line, both derived from the same
+  // recent record the profile reads. Either may be null and usually will be;
+  // nothing is rendered for a null.
+  const [pauseLine, setPauseLine] = useState<string | null>(null);
+  const [praiseLine, setPraiseLine] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   // A reply that came back with no usable report — the `Unusable` state. Distinct
@@ -73,6 +78,11 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
         const rows = monitorProfile(recent);
         setProfile(rows);
         setReading(profileReading(rows));
+        // PLAN-046: the pause sentence and the praise line read the same recent
+        // record, so the kill switch covers them for free — with the measurement
+        // off, no session qualifies and both are null.
+        setPauseLine(pauseSentence(recent));
+        setPraiseLine(earnedPraise(recent));
 
         // The written report is the only AI call here; the numbers above are measured.
         const raw = await getProvider(settings).chat(
@@ -422,6 +432,21 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
               {readingSentence(reading)}
             </div>
           )}
+          {/* PLAN-046: the pause sentence and the praise line sit under the
+              reading sentence. Both may be null and usually will be; nothing is
+              rendered for a null — no heading, no placeholder. The praise line
+              is §6.2's earned praise, and it is the only thing in this milestone
+              that congratulates anybody. */}
+          {pauseLine && (
+            <div style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 8, maxWidth: 560 }}>
+              {pauseLine}
+            </div>
+          )}
+          {praiseLine && (
+            <div style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 20, maxWidth: 560 }}>
+              {praiseLine}
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
             {profile.map((row) => {
               // A row that survived the gate always has both sides measured —
@@ -438,6 +463,11 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
                   </p>
                   <p className="ev" style={{ color: "var(--ink3)" }}>
                     Difference: {diff.toFixed(1)} {row.unit}
+                  </p>
+                  {/* PLAN-046: §7.3's fourth element — one plain sentence about
+                      *that* comparison. The arrow is direction, not valence. */}
+                  <p className="ev" style={{ color: "var(--ink2)" }}>
+                    {rowComment(row)}
                   </p>
                   <p>{row.definition}</p>
                 </div>

@@ -246,6 +246,22 @@ export function timingRate(s: Signal): number | null {
 }
 
 /**
+ * The mid-clause pause ratio a `timing` signal measured (§2.1's
+ * `midClausePauseRatio`). `null` for a signal that is not a timing signal, and
+ * for a timing signal whose recording held no pause at all — a recording with
+ * nothing to measure reads as absent, never as a 0 % that means "we did not
+ * look". PLAN-046 reads this for the pause sentence and the praise rule, the
+ * two places the monitor's own evidence reaches the learner directly.
+ */
+export function timingPauseRatio(s: Signal): number | null {
+  if (s.kind !== "timing") return null;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { midClausePauseRatio } = p as { midClausePauseRatio?: unknown };
+  return typeof midClausePauseRatio === "number" ? midClausePauseRatio : null;
+}
+
+/**
  * The fifth structural payload reader: what a produced turn itself carried as
  * breakdown signals (PLAN-028 → PLAN-031). `null` for a signal that is not a
  * produced turn — a correction, a card, an axis marker. PLAN-031 reads this to

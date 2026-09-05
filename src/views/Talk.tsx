@@ -11,7 +11,7 @@ import { sessionGroups, sessionMessages, addVocab, type SessionDay, type Session
 import { PROVIDERS } from "../lib/models";
 import { when } from "../lib/fmt";
 import type { CorrectionCategory } from "../lib/prompts";
-import { accuracyContext, closingItems as computeClosingItems, FLUENCY_MINUTES, fourThreeTwoContext, nextPlanningSec, roundTimingOf, rungContext, FREE_CONTEXT, FOUR_THREE_TWO_MINUTES, type MonitorContext } from "../lib/fluency";
+import { accuracyContext, closingItems as computeClosingItems, FLUENCY_MINUTES, fourThreeTwoContext, nextPlanningSec, roundTimingOf, rungContext, FREE_CONTEXT, FOUR_THREE_TWO_MINUTES, longestRunMs, sessionChange, type MonitorContext } from "../lib/fluency";
 import type { RoundTiming } from "../lib/fluency";
 import { monitorContext } from "../lib/model";
 import { recentSignals } from "../lib/db";
@@ -155,6 +155,10 @@ export default function Talk({
   // `exercising` carries them only while the runner is alive).
   const [roundCard, setRoundCard] = useState<{ rounds: (RoundTiming | null)[] } | null>(null);
   const [, bump] = useState(0); // scenarios live in localStorage — re-read after a change
+  // PLAN-046 §7.2: the "What changed" section's two signals against the previous
+  // session, loaded from the stored record when the reflection lands. `null`
+  // until loaded; an empty change (no previous session) renders no section.
+  const [change, setChange] = useState<ReturnType<typeof sessionChange> | null>(null);
 
   // The picker is also the archive — reload it whenever we come back to it.
   useEffect(() => {
@@ -275,9 +279,43 @@ export default function Talk({
   // No activity to hang them on means no signals: an invented ActivityId would quietly
   // cut the evidence loose from the plan that produced it.
   const closing = (day.plan?.activities ?? []).find((b) => b.kind === closes);
+  // One reflection writes its signals exactly once. This used to be guarded by
+  // `!day.isDone(closes)`, which was wrong in both directions: it let StrictMode's
+  // double-invoked effect write the batch twice on a first mount, and — because
+  // 4/3/2's three rounds all close the same `talk` block — it silently dropped
+  // rounds 2 and 3, so `taskRepetition` 2 and 3 never reached the record at all
+  // and the profile's first-vs-third row had no third side to compare.
+  const wroteFor = useRef<object | null>(null);
   useEffect(() => {
-    if (talk.reflection && closes && !day.isDone(closes))
-      void day.complete(closes, closing ? talkSignals(closing.id, talk.reflection, getPack(settings.packId)?.speech.locale ?? "en", settings.packId) : []);
+    const r = talk.reflection;
+    if (!r) {
+      setChange(null);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      // A finished conversation closes out that block even if the learner walks away from
+      // the reflection without pressing anything — and hands over what it observed on the
+      // way out. No activity to hang them on means no signals: an invented ActivityId
+      // would quietly cut the evidence loose from the plan that produced it.
+      if (closes && wroteFor.current !== r) {
+        wroteFor.current = r;
+        await day.complete(closes, closing ? talkSignals(closing.id, r, getPack(settings.packId)?.speech.locale ?? "en", settings.packId) : []);
+      }
+      // PLAN-046 §7.2: "What changed" reads this session and the one before it
+      // back off the record — so it must run *after* the write above, not beside
+      // it. Two effects racing meant the read almost always won and the section
+      // could never render. `sessionChange` takes no activity id: an id is a slot
+      // in the day's plan, so "the signals that are not this activity's" meant the
+      // reading exercise, never the previous conversation.
+      const signals = await recentSignals(settings.profile.targetLanguage);
+      if (live) setChange(sessionChange(signals));
+    })().catch(() => {
+      if (live) setChange(null);
+    });
+    return () => {
+      live = false;
+    };
   }, [talk.reflection]);
 
   // 4/3/2's runner (PLAN-044 §2): each finished round measures what the mic
@@ -861,19 +899,94 @@ export default function Talk({
               )}
             </div>
 
+            {/* PLAN-046 §7.2: the session-end card, three sections in the spec's
+                order. 1 · What happened — the spoken time we can actually measure
+                (labelled as what it is, not wall-clock length), the word count,
+                and the longest uninterrupted moment of speech. A typed session has
+                no voice and therefore no such number — the line is absent, not
+                zero. */}
+            {(() => {
+              const longest = longestRunMs(r.voice ?? []);
+              return (
+                <div style={{ marginBottom: 36 }}>
+                  <div className="eyebrow" style={{ marginBottom: 16 }}>
+                    What happened
+                  </div>
+                  <div className="stats">
+                    <div>
+                      <b>{mmss((r.voice ?? []).reduce((a, v) => a + v.ms, 0))}</b>
+                      <span>time speaking</span>
+                    </div>
+                    <div>
+                      <b>{r.words.length}</b>
+                      <span>words captured</span>
+                    </div>
+                    {longest !== null && (
+                      <div>
+                        <b>{mmss(longest)}</b>
+                        <span>longest stretch of speech</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* PLAN-046 §7.2: 2 · What changed — two signals against the previous
+                session, with an arrow. The arrow is direction, not valence: no
+                colour, no "+", no warn tint. Either signal may be absent on
+                either side; an absent one produces no row. No previous session
+                produces no section at all. */}
+            {change && (change.rate !== null || change.pause !== null) && (
+              <div style={{ marginBottom: 36 }}>
+                <div className="eyebrow" style={{ marginBottom: 16 }}>
+                  What changed
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {change.rate !== null && (
+                    <div className="fix-row">
+                      <span className="d" />
+                      <div style={{ flex: 1 }}>
+                        <div className="meta" style={{ fontSize: 11, color: "var(--ink3)", marginBottom: 3 }}>
+                          speech rate
+                        </div>
+                        <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+                          {change.rate.current.toFixed(0)} wpm {change.rate.current >= change.rate.previous ? "→" : "←"} {change.rate.previous.toFixed(0)} wpm
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {change.pause !== null && (
+                    <div className="fix-row">
+                      <span className="d" />
+                      <div style={{ flex: 1 }}>
+                        <div className="meta" style={{ fontSize: 11, color: "var(--ink3)", marginBottom: 3 }}>
+                          mid-clause pauses
+                        </div>
+                        <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+                          {Math.round(change.pause.current * 100)}% {change.pause.current <= change.pause.previous ? "→" : "←"} {Math.round(change.pause.previous * 100)}%
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* PLAN-043 rule 6: "the three things" a fluency session promised.
                 At most three, in the fixed order meaning, pattern, strength —
                 computed deterministically by `closingItems` off the corrections
                 and strengths already on the reflection. No backfill: a slot with
                 nothing in it stays empty, and a fluency session ends with at most
-                three things, never a random list. */}
+                three things, never a random list. PLAN-046 §7.2 moves it under
+                the "Three notes" heading. */}
             {talk.mode === "fluency" && r && (
               (() => {
                 const items = computeClosingItems(r.corrections, r.strengths ?? []);
                 return items.length > 0 ? (
                   <>
                     <div className="eyebrow" style={{ marginBottom: 16 }}>
-                      The three things
+                      Three notes
                     </div>
                     <div style={{ marginBottom: 36 }}>
                       {items.map((it, i) => (
@@ -922,42 +1035,61 @@ export default function Talk({
 
             {/* PLAN-043: the full correction list is the ordinary reflection's. In
                 fluency mode the session promised "at most three things", so the
-                reflection delivers exactly the three computed above and hides the
-                categorised list the mode's contract promised not to surface. */}
-            {r.corrections.length > 0 && talk.mode !== "fluency" && (
-              <>
-                <div className="eyebrow" style={{ marginBottom: 16 }}>
-                  Worth revisiting
-                </div>
-                <div style={{ marginBottom: 36 }}>
-                  {/* Corrections are grouped by category, in a fixed order, with a
-                      count per group. An empty group is not rendered — the count is
-                      the group's headline, so a learner sees what there is to work
-                      on and how much of it. */}
-                  {CORRECTION_GROUPS.map(({ category, label }) => {
-                    const group = r.corrections.filter((c) => c.category === category);
-                    if (group.length === 0) return null;
-                    return (
-                      <div key={category} style={{ marginBottom: 22 }}>
-                        <div className="meta" style={{ fontSize: 12, color: "var(--ink3)", margin: "0 0 8px" }}>
-                          {label} · {group.length}
-                        </div>
-                        {group.map((c, i) => (
-                          <div className="fix-row" key={i}>
-                            <span className={`d ${c.severity === "severe" ? "severe" : ""}`} />
-                            <div style={{ flex: 1 }}>
-                              <div className="l">
-                                <s>{c.original}</s> → <b>{c.fixed}</b>
-                              </div>
-                              {c.note && <div className="n">{c.note}</div>}
-                            </div>
+                reflection delivers exactly the three computed above. PLAN-046 §7.2:
+                the categorised list is *reachable and closed* — a native `<details>`
+                disclosure, keyboard-operable and screen-reader-labelled without a
+                line of JavaScript — rather than hidden outright. */}
+            {r.corrections.length > 0 && (
+              (() => {
+                const list = (
+                  <div style={{ marginBottom: 36 }}>
+                    {/* Corrections are grouped by category, in a fixed order, with a
+                        count per group. An empty group is not rendered — the count is
+                        the group's headline, so a learner sees what there is to work
+                        on and how much of it. */}
+                    {CORRECTION_GROUPS.map(({ category, label }) => {
+                      const group = r.corrections.filter((c) => c.category === category);
+                      if (group.length === 0) return null;
+                      return (
+                        <div key={category} style={{ marginBottom: 22 }}>
+                          <div className="meta" style={{ fontSize: 12, color: "var(--ink3)", margin: "0 0 8px" }}>
+                            {label} · {group.length}
                           </div>
-                        ))}
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
+                          {group.map((c, i) => (
+                            <div className="fix-row" key={i}>
+                              <span className={`d ${c.severity === "severe" ? "severe" : ""}`} />
+                              <div style={{ flex: 1 }}>
+                                <div className="l">
+                                  <s>{c.original}</s> → <b>{c.fixed}</b>
+                                </div>
+                                {c.note && <div className="n">{c.note}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+                if (talk.mode === "fluency") {
+                  return (
+                    <details style={{ marginBottom: 36 }}>
+                      <summary className="eyebrow" style={{ cursor: "pointer" }}>
+                        See all corrections
+                      </summary>
+                      {list}
+                    </details>
+                  );
+                }
+                return (
+                  <>
+                    <div className="eyebrow" style={{ marginBottom: 16 }}>
+                      Worth revisiting
+                    </div>
+                    {list}
+                  </>
+                );
+              })()
             )}
 
             {r.words.length > 0 && (

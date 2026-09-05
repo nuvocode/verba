@@ -5,13 +5,13 @@
 // process.
 //
 // Spec: docs/plans/5-verba-akicilik-ve-monitor-katmani-spec.md §2.4, §7.4, §9.
-import { signalLabel, type ActivityId, type Signal, type SignalDraft, type SignalKind } from "./model.ts";
+import { signalLabel, monitorContext, timingRate, timingPauseRatio, type ActivityId, type Signal, type SignalDraft, type SignalKind } from "./model.ts";
 import type { VoiceTurn } from "./useTalk.ts";
 import type { Correction, CorrectionCategory, SelfRepairReport, Severity } from "./prompts.ts";
 import { shouldShowInline } from "./prompts.ts";
 import { scriptOf } from "./langs.ts";
 import { words, clauseCount } from "./text.ts";
-import { pauseLengths, leadingSilence, speechRuns, speechRatio, fromFirstSpeech } from "./breakdown.ts";
+import { pauseLengths, leadingSilence, speechRuns, speechRatio, fromFirstSpeech, SPEECH_FLOOR } from "./breakdown.ts";
 
 /**
  * The conditions one session ran under (§2.4). Written once per session, not
@@ -759,4 +759,167 @@ export function goalToName(signals: Signal[]): string | null {
     if (set.size >= 3) return label;
   }
   return null;
+}
+
+// --- §7.2: the session-end card (PLAN-046 §5) ----------------------------------
+
+/**
+ * The longest unbroken run of speech in a session, in ms. Null when nothing
+ * measurable was spoken.
+ *
+ * Built the way `roundTimingOf` is: slice with `fromFirstSpeech`, split on the
+ * same 0.25 s threshold, take the longest run in frames and scale it by the
+ * recording's own `v.ms / v.levels.length`. A typed session has no voice and
+ * therefore no such number — the line is **absent**, not zero.
+ */
+export function longestRunMs(voice: VoiceTurn[]): number | null {
+  let longest = 0;
+  for (const v of voice) {
+    if (v.ms < 1500 || !v.text.trim() || !v.levels.length) continue;
+    const spoke = fromFirstSpeech(v.levels);
+    if (!spoke.length) continue;
+    const frameMs = v.ms / v.levels.length;
+    let run = 0;
+    let quiet = 0;
+    for (const l of spoke) {
+      if (l > SPEECH_FLOOR) {
+        run += 1;
+        quiet = 0;
+      } else {
+        quiet += 1;
+        if (quiet > 0.25 / (1 / 20)) {
+          if (run * frameMs > longest) longest = run * frameMs;
+          run = 0;
+        }
+      }
+    }
+    if (run * frameMs > longest) longest = run * frameMs;
+  }
+  return longest > 0 ? longest : null;
+}
+
+/**
+ * Signals further apart than this belong to different sessions.
+ *
+ * One session's signals are written in a single `recordSignals` batch, stamped
+ * within the same millisecond or two. Two sessions are minutes apart at the very
+ * least: 4/3/2's rounds are the closest pair the product can produce and the
+ * shortest of them is two minutes. A minute is comfortably between the two.
+ */
+const SESSION_GAP_MS = 60_000;
+
+/** One session the monitor layer may read: its conditions and its signals. */
+export interface MeasuredSession {
+  activityId: ActivityId;
+  ctx: MonitorContext;
+  sigs: Signal[];
+}
+
+/**
+ * The sessions the monitor layer may read — **oldest first**, and only those
+ * carrying a readable `sessionContext`.
+ *
+ * `activityId` is not a session id. `db.ts` stores it as "the ActivityId within
+ * that day's plan", and `learn.ts` draws it from a fixed set — `"talk"`,
+ * `"read"`, `"roleplay"`, … — so every conversation the learner has ever had
+ * shares one. Grouping by it collapsed the whole record into a single "session":
+ * `monitorProfile`'s three-session bar could never be cleared, because at most
+ * two ids (`talk` and `roleplay`) can carry a context at all. So a session is a
+ * **run of one activity's signals**, split wherever the gap to the next exceeds
+ * `SESSION_GAP_MS`.
+ *
+ * Requiring a readable context is the kill switch, structurally: with
+ * `monitorLoad` off no `sessionContext` signal is written, so no session
+ * qualifies and everything downstream is empty by construction. It is also §2.4's
+ * rule — a measurement without its context cannot be compared, and every reading
+ * built on this is a comparison between conditions.
+ *
+ * Input order does not matter; the output is sorted. **Oldest first** is the
+ * contract, because two of the three callers want a chronology and one wants
+ * "the last two" — `recentSignals` hands its rows recent-first and that ordering
+ * has produced three defects in this milestone, so this function does not pass
+ * it on.
+ */
+export function measuredSessions(signals: Signal[]): MeasuredSession[] {
+  const byActivity = new Map<ActivityId, Signal[]>();
+  for (const s of signals) {
+    const list = byActivity.get(s.activityId);
+    if (list) list.push(s);
+    else byActivity.set(s.activityId, [s]);
+  }
+
+  const out: MeasuredSession[] = [];
+  for (const [activityId, list] of byActivity) {
+    const sorted = [...list].sort((a, b) => a.observedAt - b.observedAt);
+    let group: Signal[] = [];
+    const flush = () => {
+      if (!group.length) return;
+      const ctxSig = group.find((s) => s.kind === "sessionContext");
+      const ctx = ctxSig ? monitorContext(ctxSig) : null;
+      // An unreadable context is *no* context, never a default one: a default
+      // would file an interrupted session as an unpressured one.
+      if (ctx) out.push({ activityId, ctx, sigs: group });
+      group = [];
+    };
+    for (const s of sorted) {
+      if (group.length && s.observedAt - group[group.length - 1].observedAt > SESSION_GAP_MS) flush();
+      group.push(s);
+    }
+    flush();
+  }
+  return out.sort((a, b) => a.sigs[0].observedAt - b.sigs[0].observedAt);
+}
+
+/** One number, this session against the one before it. Direction only — see below. */
+export interface Change {
+  current: number;
+  previous: number;
+}
+
+/**
+ * §7.2's "What changed" — two signals, this session against the previous one.
+ *
+ * Both sides come from the same place and are computed the same way: the mean of
+ * the session's per-recording `timing` signals, through `timingRate` /
+ * `timingPauseRatio`. Never `roundTimingOf`, which pools words over total time —
+ * a pooled rate against a mean of rates is two different measurements wearing
+ * one arrow.
+ *
+ * There is no `currentActivityId` parameter, and there must not be: an id is a
+ * slot in the day's plan, so "the signals that are not the current activity's"
+ * meant *the reading exercise*, not the previous conversation. The current
+ * session is simply the most recent measured session on the record and the
+ * previous is the one before it, both from `measuredSessions`. The caller's job
+ * is to make sure this session is **written** before reading — Talk awaits
+ * `day.complete` first.
+ *
+ * The arrow the caller draws is direction, not valence: faster is not
+ * automatically better and this layer of all layers may not imply it.
+ *
+ * Either signal may be absent on either side; an absent one yields `null` for
+ * that row, not a dash and not a zero. Fewer than two measured sessions yields
+ * both null and the caller renders no section at all.
+ */
+export function sessionChange(signals: Signal[]): { rate: Change | null; pause: Change | null } {
+  const sessions = measuredSessions(signals);
+  if (sessions.length < 2) return { rate: null, pause: null };
+  const current = sessions[sessions.length - 1];
+  const previous = sessions[sessions.length - 2];
+
+  const mean = (session: MeasuredSession, read: (s: Signal) => number | null): number | null => {
+    const values: number[] = [];
+    for (const s of session.sigs) {
+      const v = read(s);
+      if (v !== null) values.push(v);
+    }
+    return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+  };
+
+  const pair = (read: (s: Signal) => number | null): Change | null => {
+    const c = mean(current, read);
+    const p = mean(previous, read);
+    return c !== null && p !== null ? { current: c, previous: p } : null;
+  };
+
+  return { rate: pair(timingRate), pause: pair(timingPauseRatio) };
 }

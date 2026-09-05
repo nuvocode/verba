@@ -331,8 +331,8 @@ assert.deepEqual(
 // M7 introduces a third spec (docs/plans/5-verba-akicilik-ve-monitor-katmani-spec.md
 // §10) with its own list of claims. One ledger file, three specs. Rows are
 // `assertedIn` a *.check.ts marker, or `pending` until the plan that builds them
-// lands. Twelve rows are asserted here; row 10 belongs to PLAN-046, which closes
-// the ledger.
+// lands. All thirteen rows are asserted here — PLAN-046 closed row 10 and with
+// it the ledger.
 type FluencyRow =
   | { id: number; claim: string; assertedIn: { file: string; marker: string }[] }
   | { id: number; claim: string; pending: string }; // "#<issue> — <what builds it>"
@@ -386,7 +386,7 @@ const FLUENCY_LEDGER: FluencyRow[] = [
   {
     id: 10,
     claim: "§6.3's prohibitions are enforced at prompt level and tested",
-    pending: "#75 — PLAN-046",
+    assertedIn: [{ file: "src/lib/prompts.check.ts", marker: "fluency ledger 10" }],
   },
   {
     id: 11,
@@ -569,7 +569,8 @@ console.log(`repair ledger: ${repairAsserted} asserted, ${repairPending} pending
 
 // The fluency ledger's bill — computed, never hardcoded. PLAN-039 closes rows 12
 // and 13; every later M7 plan moves its rows from pending to asserted. PLAN-045
-// closes row 9; row 10 belongs to PLAN-046, which closes the ledger.
+// closed row 9; PLAN-046 closed row 10 and with it the ledger — 13 asserted, 0
+// pending.
 const fluencyAsserted = FLUENCY_LEDGER.filter((r) => "assertedIn" in r).length;
 const fluencyPending = FLUENCY_LEDGER.filter((r): r is Extract<FluencyRow, { pending: string }> => "pending" in r).length;
 console.log(`fluency ledger: ${fluencyAsserted} asserted, ${fluencyPending} pending`);

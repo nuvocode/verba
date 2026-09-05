@@ -20,9 +20,14 @@ import {
   styleGuidance,
   SPOKEN_PROMPTS,
   STRUCTURED_PROMPTS,
+  COACH_PROHIBITIONS,
+  ABOUT_THE_LEARNER,
+  rewindOwnPrompt,
+  summaryPrompt,
   type CorrectionCategory,
   type Memory,
 } from "./prompts.ts";
+import { weeklyReportPrompt } from "./coach.ts";
 
 // --- parseSummary: the four null cases (PLAN-020 §2.2) ----------------------
 // A failed summary writes nothing. `null` is the value that means "no usable
@@ -369,6 +374,103 @@ function allPromptNames(root: string): string[] {
   if (sawRehearsal) names.push("rehearsal.ts:rehearsalSystem");
   if (sawBrought) names.push("brought.ts:discussionSystem");
   return names;
+}
+
+// ============================================================================
+// PLAN-046: §6.3's five prohibitions — requested of the model, enforced on
+// ourselves. fluency ledger 10.
+// ============================================================================
+
+// --- 1. COACH_PROHIBITIONS carries five lines, each findable by its marker ----
+// A constant that lost a line while staying non-empty is the regression this
+// shape is built to catch.
+{
+  const lines = COACH_PROHIBITIONS.split("\n");
+  assert.equal(lines.length, 5, "fluency ledger 10: COACH_PROHIBITIONS is exactly five lines, one per §6.3 prohibition");
+  const markers = [
+    "anxiety", // 1: never describe the learner in terms of anxiety/confidence/self-esteem/perfectionism
+    "relax", // 2: no empty encouragement
+    "combined score", // 3: no single combined score
+    "breathing", // 4: no therapeutic technique
+    "genuinely hard", // 5: answer as a person would and stop
+  ];
+  for (const m of markers) {
+    assert(COACH_PROHIBITIONS.includes(m), `fluency ledger 10: prohibition marker "${m}" is findable in COACH_PROHIBITIONS`);
+  }
+}
+
+// --- 2. each ABOUT_THE_LEARNER prompt carries the whole constant ----------------
+// Built with real settings, not a stub, so a builder that drops it under some
+// branch is caught.
+{
+  const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "English" } };
+  const scenario = { id: "free", title: "Free talk", emoji: "💬", setup: "Talk about anything.", persona: { name: "Marta", role: "a friendly conversation partner", emoji: "🧑‍🏫" } };
+  const built = {
+    "prompts.ts:buildSystem": buildSystem(s, scenario, scenario.persona),
+    "prompts.ts:summaryPrompt": summaryPrompt(s),
+    "coach.ts:weeklyReportPrompt": weeklyReportPrompt(s, {
+      sessions: 3,
+      messages: 20,
+      wordsPracticed: 300,
+      vocabLearned: 4,
+      vocabReviewed: 6,
+      avgLevelScore: 87,
+      focusAreas: [],
+    }),
+  };
+  for (const [key, prompt] of Object.entries(built)) {
+    assert(ABOUT_THE_LEARNER[key] === true, `fluency ledger 10: ${key} is classified true in ABOUT_THE_LEARNER`);
+    assert(prompt.includes(COACH_PROHIBITIONS), `fluency ledger 10: ${key} carries the whole COACH_PROHIBITIONS constant`);
+  }
+}
+
+// --- 3. ABOUT_THE_LEARNER is complete over SPOKEN_PROMPTS ----------------------
+// Every entry classified, no entry that is not in SPOKEN_PROMPTS. The probe runs
+// the *same* predicate on a fabricated list rather than re-implementing it — a
+// probe that computes the answer a second way proves only that it can count.
+{
+  const classified = Object.keys(ABOUT_THE_LEARNER);
+  const unclassified = (list: readonly string[]): string[] => list.filter((k) => !classified.includes(k));
+
+  assert.deepEqual(unclassified(SPOKEN_PROMPTS), [], "fluency ledger 10: every SPOKEN_PROMPTS entry is classified in ABOUT_THE_LEARNER");
+  for (const key of classified) {
+    assert((SPOKEN_PROMPTS as readonly string[]).includes(key), `fluency ledger 10: ${key} is classified but is not a real SPOKEN_PROMPTS entry`);
+  }
+  // Probe: a prompt added to SPOKEN_PROMPTS and left unclassified is caught by
+  // the very assertion above — so a prompt added later cannot reach the learner
+  // without someone deciding about §6.3.
+  assert.deepEqual(
+    unclassified([...SPOKEN_PROMPTS, "prompts.ts:fabricatedPrompt"]),
+    ["prompts.ts:fabricatedPrompt"],
+    "fluency ledger 10 probe: an unclassified prompt is caught by the completeness assertion",
+  );
+}
+
+// --- 4. a false prompt does NOT carry the constant -----------------------------
+// The rule is targeted, and a check that passed either way would be no check.
+{
+  const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "English" } };
+  // buildSystem is true; a false prompt is one of the others. Rebuild a false
+  // one through its own builder to prove the rule is targeted.
+  const rewind = rewindOwnPrompt(s);
+  assert(!rewind.includes(COACH_PROHIBITIONS), "fluency ledger 10: a false prompt (rewindOwnPrompt) does not carry the constant — the rule is targeted");
+}
+
+// --- 5. the composite never reaches the model ---------------------------------
+// weeklyReportPrompt bands the 0–100 composite through scoreBand rather than
+// printing it — a WeekStats with avgLevelScore 87 must not contain "87".
+{
+  const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "English" } };
+  const prompt = weeklyReportPrompt(s, {
+    sessions: 3,
+    messages: 20,
+    wordsPracticed: 300,
+    vocabLearned: 4,
+    vocabReviewed: 6,
+    avgLevelScore: 87,
+    focusAreas: [],
+  });
+  assert(!prompt.includes("87"), "fluency ledger 10: weeklyReportPrompt must not hand the model the raw composite — 87 is banded, never printed");
 }
 
 console.log("prompts.check: ok");

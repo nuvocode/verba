@@ -83,6 +83,10 @@ export function buildSystem(
     corrections.length
       ? `Things this learner has been corrected on before (the record you may cite): ${corrections.join("; ")}.`
       : `This learner has no correction record yet — so there is nothing to cite, and no praise is allowed.`,
+    // PLAN-046: §6.3's five prohibitions ride on the prompts that produce prose
+    // about the learner. This is the conversation — where distress is actually
+    // voiced, so prohibition 5 has nowhere else to live.
+    COACH_PROHIBITIONS,
     `You MUST answer with ONLY a valid JSON object, no prose outside it, in this exact shape:`,
     `{`,
     `  "reply": "your natural conversational reply in ${s.profile.targetLanguage} (1-3 sentences)",`,
@@ -144,6 +148,27 @@ export const REPETITION_RULE =
  */
 export const INTERRUPTING_RULE =
   "The learner chose the hardest rung: you speak at a brisk pace and may politely interrupt to keep the conversation moving. Do not apologise for it and do not slow down.";
+
+/**
+ * §6.3's five prohibitions, as one constant (PLAN-046). Five lines, one per
+ * prohibition, in §6.3's order — a constant that lost a line while staying
+ * non-empty is the regression this shape is built to catch.
+ *
+ * The claim is split, and each half is stated for what it is. Four of the five
+ * are addressed to a **model**, and a model is not bound by an instruction — it
+ * is asked. So this constant is *requested* of the model, in every prompt that
+ * produces prose about the learner (`ABOUT_THE_LEARNER`), and the check proves
+ * no such prompt escapes the list. What Verba itself writes is *enforced* by a
+ * source scan over our own strings (profile.check.ts §8, check 6). Requested of
+ * the model, enforced on ourselves — the plan says out loud which is which.
+ */
+export const COACH_PROHIBITIONS = [
+  "Never describe the learner in terms of anxiety, confidence, self-esteem, or perfectionism. You measure what they did, not who they are.",
+  "Never offer encouragement with nothing in it — no \"relax\", no \"believe in yourself\", no \"don't be afraid of mistakes\".",
+  "Never give a single combined score of any kind — no fluency score, no monitor score, no rating out of ten, no percentage standing for the whole.",
+  "Never suggest breathing exercises, meditation, or any therapeutic technique. That is not what this is.",
+  "If the learner says something is genuinely hard for them, answer as a person would and stop there. Do not turn it into a measurement, a number, or a plan.",
+].join("\n");
 
 /**
  * The §5.4 naming sentence, with §6.3's shape rules on it (PLAN-044 §5): it names
@@ -638,6 +663,9 @@ export function summaryPrompt(s: Settings, pack?: LanguagePack): string {
     // name. Old and new records must read alike.
     `Write the "summary" in the second person singular ("you"), in the past tense, as one paragraph.`,
     `Praise only what the transcript actually shows — never a general compliment, and never the learner's name.`,
+    // PLAN-046: §6.3's prohibitions ride on the prompts that produce prose about
+    // the learner. The reflection's prose is read at the end of every session.
+    COACH_PROHIBITIONS,
   ]
     .filter(Boolean)
     .join("\n");
@@ -833,6 +861,36 @@ export const STRUCTURED_PROMPTS = [
   // and the other party's own voice. Spoken, but deliberately not styled.
   "rehearsal.ts:rehearsalSystem",
 ] as const;
+
+/**
+ * The prompts that produce prose *about the learner* — §6.3's prohibitions ride
+ * on exactly these (PLAN-046). `true` for the three that describe the learner to
+ * themselves; `false` for the rest, each with its reason in one clause. Every
+ * entry of `SPOKEN_PROMPTS` is classified here, so a new spoken prompt cannot be
+ * added without a decision about §6.3 — and because `SPOKEN_PROMPTS`' own
+ * completeness is already asserted against the source, a prompt added later
+ * cannot reach the learner without someone deciding. That is the whole
+ * guarantee, and it is a guarantee about our code, which is the only kind
+ * available here.
+ */
+export const ABOUT_THE_LEARNER: Record<string, boolean> = {
+  // The conversation — where distress is actually voiced, so prohibition 5 has
+  // nowhere else to live.
+  "prompts.ts:buildSystem": true,
+  // The reflection's prose, read at the end of every session.
+  "prompts.ts:summaryPrompt": true,
+  // §6.1's paragraph, the most exposed surface in the app.
+  "coach.ts:weeklyReportPrompt": true,
+  // The rest talk about a sentence, an exercise, or language — never the learner.
+  "prompts.ts:rewindOwnPrompt": false, // about a sentence, not the learner
+  "prompts.ts:rewindUnpackPrompt": false, // about a sentence, not the learner
+  "coach.ts:drillPrompt": false, // about an exercise, not the learner
+  "learn.ts:recapPrompt": false, // about the day's work, not the learner
+  "reading.ts:notesPrompt": false, // about a passage, not the learner
+  "reading.ts:explainWordPrompt": false, // about a word, not the learner
+  "rehearsal.ts:debriefPrompt": false, // about the rehearsal, not the learner
+  "brought.ts:discussionSystem": false, // about the learner's text, not the learner
+};
 
 /** The date as the record carries it, and as Settings shows it: "14 Jul 2026". */
 export const memoryDate = (ts: number): string =>

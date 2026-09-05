@@ -13,16 +13,21 @@
 // feel assessed, which grows the very problem being measured. So the type cannot
 // hold one: ProfileRow carries exactly two sides and nothing else numeric, and
 // profile.check.ts scans this file for the words that would smuggle one in.
+//
+// Every reading here reads its sessions through `fluency.ts`'s `measuredSessions`
+// — one place that knows what a session is (an `activityId` is a slot in the
+// day's plan, not a session) and one place the kill switch acts, since a session
+// with no readable `sessionContext` does not qualify at all.
 import type { Signal } from "./model.ts";
-import { turnSpoken, turnStats, monitorContext, timingRate } from "./model.ts";
+import { turnSpoken, turnStats, timingRate, timingPauseRatio } from "./model.ts";
 import type { MonitorContext } from "./fluency.ts";
-import { FALSE_ALARM_ON_SCREEN } from "./fluency.ts";
+import { FALSE_ALARM_ON_SCREEN, measuredSessions } from "./fluency.ts";
 
 /** One side of one comparison — a condition, its value, and what it stands on. */
 export interface Side {
   label: string; // the condition, as the learner reads it
   value: number | null; // null = this side was never measured
-  sessions: number; // distinct activityIds behind it (§3.2's "at least 2")
+  sessions: number; // measured sessions behind it (§3.2's "at least 2")
 }
 
 /** One of §3.1's four differences. Never summed with the others. */
@@ -50,38 +55,10 @@ export type Reading = "monitorDominant" | "slowAccess" | "knowledgeGap" | "noPro
 export const SMALL_ACCURACY_DIFF = 1.0; // corrections per 100 words
 export const SMALL_RATE_DIFF = 10; // words per minute
 export const LOW_ACCURACY = 4.0; // corrections per 100 words — §3.3's "written accuracy is low too"
-
-/**
- * The sessions this profile may read: grouped by `activityId`, and **only those
- * carrying a readable `sessionContext`**.
- *
- * That condition is the kill switch, structurally. §3.2's third bullet is that
- * turning the profile off stops the *measurement*, not just the display — and
- * with `monitorLoad` off no `sessionContext` signal is written, so no session
- * qualifies and every row is empty by construction. Gating only rows 2–4 on the
- * context would leave row 1 standing: corrections and turns are ordinary
- * signals, written whatever the switch says, so a learner who had turned the
- * measurement off would still be handed a written-vs-spoken comparison.
- *
- * It is also the rule §2.4 already states: a measurement without its context
- * cannot be compared, and every row here is a comparison between conditions. A
- * session whose conditions are unknown does not belong on either side of one.
- */
-function measuredSessions(signals: Signal[]): Map<string, { ctx: MonitorContext; sigs: Signal[] }> {
-  const grouped = new Map<string, Signal[]>();
-  for (const s of signals) {
-    const list = grouped.get(s.activityId);
-    if (list) list.push(s);
-    else grouped.set(s.activityId, [s]);
-  }
-  const out = new Map<string, { ctx: MonitorContext; sigs: Signal[] }>();
-  for (const [id, sigs] of grouped) {
-    const ctxSig = sigs.find((s) => s.kind === "sessionContext");
-    const ctx = ctxSig ? monitorContext(ctxSig) : null;
-    if (ctx) out.set(id, { ctx, sigs });
-  }
-  return out;
-}
+// PLAN-046: how far the mid-clause pause ratio must fall (as a 0–1 fraction)
+// before §6.2's praise is earned — ten percentage points. A smaller drop is
+// noise, not a trend.
+export const PAUSE_DROP = 0.1;
 
 /**
  * One side of row 1 — written or spoken accuracy, as corrections per 100 words.
@@ -100,7 +77,7 @@ function accuracySide(signals: Signal[], which: "written" | "spoken"): Side {
   let corrections = 0;
   let words = 0;
   let sessions = 0;
-  for (const [, { sigs }] of measuredSessions(signals)) {
+  for (const { sigs } of measuredSessions(signals)) {
     const turns = sigs.filter((s) => s.kind === "unpromptedTurn" || s.kind === "suggestionUsed");
     if (turns.length === 0) continue; // no measured turns → neither side
     const flags = turns.map((t) => turnSpoken(t));
@@ -138,7 +115,7 @@ function accuracySide(signals: Signal[], which: "written" | "spoken"): Side {
  */
 function rateSide(signals: Signal[], match: (ctx: MonitorContext) => boolean, label: string): Side {
   const sessionRates: number[] = [];
-  for (const [, { ctx, sigs }] of measuredSessions(signals)) {
+  for (const { ctx, sigs } of measuredSessions(signals)) {
     if (!match(ctx)) continue;
     const rates = sigs
       .filter((s) => s.kind === "timing")
@@ -173,7 +150,7 @@ export function monitorProfile(signals: Signal[]): ProfileRow[] {
   // §3.2's first bar counts *measured* sessions — the ones carrying a context.
   // With the measurement off there are none, and the profile is empty here
   // rather than one row further down.
-  if (measuredSessions(signals).size < 3) return [];
+  if (measuredSessions(signals).length < 3) return [];
 
   const rows: ProfileRow[] = [];
 
@@ -313,6 +290,147 @@ export function readingSentence(reading: Reading): string {
     case "knowledgeGap":
       return "Your written accuracy is low too, so this is a knowledge gap rather than a production one.";
     case "noProblem":
-      return "We measured it — you're genuinely fine.";
+      // PLAN-046: the one sentence in the layer that could be read as a verdict.
+      // It names what was measured rather than pronouncing on the learner — the
+      // differences are small, and that is the fact, not a judgement about them.
+      return "We measured your written and spoken accuracy and your speaking rate across conditions, and the differences are all small.";
   }
+}
+
+/**
+ * §6.1's mirror, one row at a time (PLAN-046 §3): the one plain sentence about
+ * *that* comparison that §7.3 asks each profile row to carry. Four rules, all
+ * from §6.1:
+ *   1. The sentence carries the difference as a number, with its unit.
+ *   2. No adjective of judgement — the difference is stated and what it *means*
+ *      is stated; how the learner should feel about it is not.
+ *   3. The comparison is to themselves — no band norm, no "typical learner".
+ *   4. A threshold crossing is named as a threshold, not as a verdict: the
+ *      sentence says the difference is under or over the small-difference line.
+ *
+ * Two forms per row — under the line and over it — chosen against
+ * `SMALL_ACCURACY_DIFF` (row 1) and `SMALL_RATE_DIFF` (rows 2–4). Both sides of
+ * a surviving row are always measured, so both values are numbers here.
+ */
+export function rowComment(row: ProfileRow): string {
+  const a = row.a.value!;
+  const b = row.b.value!;
+  const diff = Math.abs(a - b);
+  const accuracy = row.id === "writtenVsSpoken";
+  const line = accuracy ? SMALL_ACCURACY_DIFF : SMALL_RATE_DIFF;
+  const small = diff < line;
+  const head = `The difference is ${diff.toFixed(1)} ${row.unit} — ${small ? "under" : "over"} the small-difference line of ${line.toFixed(1)}`;
+  if (small) return `${head}, so the two conditions are close.`;
+  // Which way the difference runs, said in the row's own terms. Row 1 is counted
+  // in corrections per 100 words, where the *higher* number is the condition
+  // that was corrected more — calling it "faster" would be meaningless there and,
+  // worse, would read as the good end of the difference. Rows 2-4 are words per
+  // minute, where the higher number really is the faster condition.
+  const high = a > b ? row.a.label : row.b.label;
+  const low = a > b ? row.b.label : row.a.label;
+  return accuracy
+    ? `${head}, and ${high} carried more corrections than ${low}.`
+    : `${head}, and ${high} was faster than ${low}.`;
+}
+
+/**
+ * The pause sentence (PLAN-046 §3): the one piece of direct evidence about the
+ * monitor that is not behind `FALSE_ALARM_ON_SCREEN`. The mean mid-clause pause
+ * ratio across the measured sessions, as a percentage, with what a mid-clause
+ * pause means. `null` when no measured session carried a `midClausePauseRatio` —
+ * absent, never zero, and never a 0 % that means "we did not look".
+ *
+ * It reads `measuredSessions` like everything else in the file, so the kill
+ * switch covers it for free: with `monitorLoad` off no `sessionContext` signal
+ * is written, no session qualifies, and the sentence is null.
+ */
+export function pauseSentence(signals: Signal[]): string | null {
+  const ratios: number[] = [];
+  for (const { sigs } of measuredSessions(signals)) {
+    for (const s of sigs) {
+      const r = timingPauseRatio(s);
+      if (r !== null) ratios.push(r);
+    }
+  }
+  if (ratios.length === 0) return null;
+  const mean = ratios.reduce((a, b) => a + b, 0) / ratios.length;
+  const pct = Math.round(mean * 100);
+  return `${pct}% of your pauses were mid-clause — you were checking yourself as you built the sentence.`;
+}
+
+/**
+ * §6.2's earned praise (PLAN-046 §4): the layer's own thesis turned into a
+ * condition — `midClausePauseRatio` falling while accuracy holds. Nothing else
+ * in this milestone congratulates anybody.
+ *
+ * Takes `measuredSessions` (oldest first) and splits it into an older and a
+ * newer half. Requires **at least four** measured sessions — two a
+ * side; fewer returns `null`, silently, like every other thin-data path in this
+ * layer. Praise **only** when the pause ratio fell by at least `PAUSE_DROP`
+ * **and** accuracy did not worsen by more than `SMALL_ACCURACY_DIFF`. Both
+ * halves, or nothing.
+ *
+ * The sentence states both numbers and says what it means: they paused
+ * mid-clause less and their accuracy did not pay for it. No exclamation mark, no
+ * "great job", no adjective — the scan in profile.check.ts covers this sentence
+ * too.
+ *
+ * `falseAlarmRepair`'s half of §6.2 stays behind `FALSE_ALARM_ON_SCREEN` with
+ * the others — written, unreachable, and commented as such.
+ *
+ * ponytail: two halves of the record is not a trend line, and the comment says
+ * so — two halves, not a trend; a real slope needs the sessions we do not have
+ * yet. Four sessions split down the middle is the smallest thing that can tell
+ * "falling" from "noisy", and it is the honest ceiling until the record is long
+ * enough to fit anything better.
+ */
+export function earnedPraise(signals: Signal[]): string | null {
+  // `measuredSessions` is oldest-first by contract, so the halves below are a
+  // chronology and not whatever order the caller's query happened to return.
+  const sessions = measuredSessions(signals);
+  if (sessions.length < 4) return null;
+  const half = Math.floor(sessions.length / 2);
+  const older = sessions.slice(0, half);
+  const newer = sessions.slice(half);
+
+  const meanPause = (list: { sigs: Signal[] }[]): number | null => {
+    const ratios: number[] = [];
+    for (const { sigs } of list)
+      for (const s of sigs) {
+        const r = timingPauseRatio(s);
+        if (r !== null) ratios.push(r);
+      }
+    return ratios.length ? ratios.reduce((a, b) => a + b, 0) / ratios.length : null;
+  };
+  const olderPause = meanPause(older);
+  const newerPause = meanPause(newer);
+  if (olderPause === null || newerPause === null) return null;
+
+  // Accuracy, pooled the same way `accuracySide` pools it: corrections over
+  // words, times 100, across the half's sessions.
+  const accuracy = (list: { sigs: Signal[] }[]): number | null => {
+    let corrections = 0;
+    let words = 0;
+    for (const { sigs } of list) {
+      for (const s of sigs) {
+        if (s.kind === "correction") corrections += 1;
+        else if (s.kind === "unpromptedTurn" || s.kind === "suggestionUsed") {
+          const stats = turnStats(s);
+          if (stats) words += stats.words;
+        }
+      }
+    }
+    return words > 0 ? (corrections / words) * 100 : null;
+  };
+  const olderAcc = accuracy(older);
+  const newerAcc = accuracy(newer);
+  if (olderAcc === null || newerAcc === null) return null;
+
+  const pauseDrop = olderPause - newerPause;
+  const accWorsened = newerAcc - olderAcc;
+  if (pauseDrop < PAUSE_DROP) return null;
+  if (accWorsened > SMALL_ACCURACY_DIFF) return null;
+
+  const dropPct = Math.round(pauseDrop * 100);
+  return `Your mid-clause pauses fell by ${dropPct} percentage points, and your accuracy did not pay for it — you checked yourself less and it cost nothing.`;
 }

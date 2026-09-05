@@ -9,10 +9,10 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, roundTimingOf, timingSignal, FILLERS, verifySelfRepairs, selfRepairSignal, saidAt, saidInOrder, verifyAbandoned, verifyL1Fallback, verifyAvoidance, abandonedUtteranceSignal, l1FallbackSignal, avoidanceSignal, showInline, closingItems, fluencyContext, accuracyContext, FLUENCY_MINUTES, CONTRACT_TEXT, nextPlanningSec, rungContext, fourThreeTwoContext, goalToName, FALSE_ALARM_ON_SCREEN, FOUR_THREE_TWO_MINUTES } from "./fluency.ts";
+import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, roundTimingOf, timingSignal, FILLERS, verifySelfRepairs, selfRepairSignal, saidAt, saidInOrder, verifyAbandoned, verifyL1Fallback, verifyAvoidance, abandonedUtteranceSignal, l1FallbackSignal, avoidanceSignal, showInline, closingItems, fluencyContext, accuracyContext, FLUENCY_MINUTES, CONTRACT_TEXT, nextPlanningSec, rungContext, fourThreeTwoContext, goalToName, FALSE_ALARM_ON_SCREEN, FOUR_THREE_TWO_MINUTES, longestRunMs, sessionChange, measuredSessions } from "./fluency.ts";
 import { scriptOf, languageScript } from "./langs.ts";
 import { shouldShowInline, parseProduction, FLUENCY_RULE4, REPETITION_RULE, INTERRUPTING_RULE, NAME_STRUCTURE_PROMPT } from "./prompts.ts";
-import { monitorContext, signalMiss, type Signal, type SignalKind } from "./model.ts";
+import { monitorContext, signalMiss, timingRate, type Signal, type SignalKind } from "./model.ts";
 import { talkSignals } from "./signals.ts";
 import type { Correction, CorrectionCategory, Severity } from "./prompts.ts";
 import type { VoiceTurn } from "./useTalk.ts";
@@ -868,14 +868,21 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
   // exactly them. The same source-scan treatment rule 3 got: nothing else in the
   // fluency reflection may surface the correction list or count, or it would
   // silently come back as the random list the mode's contract refused.
+  // PLAN-046 §7.2: the categorised list is *reachable and closed* — a native
+  // `<details>` disclosure, closed by default — rather than hidden outright. The
+  // correction counter in the stats stays gated off in fluency mode.
   assert(closingItems([], []).length === 0, "rule 6: closingItems is exercised (see 18)");
   assert(
     /talk\.mode !== "fluency" && \(\s*<div>\s*<b>\{r\.corrections\.length\}/.test(talkView),
     "rule 6: the correction counter in the reflection's stats is gated off in fluency mode",
   );
   assert(
-    /r\.corrections\.length > 0 && talk\.mode !== "fluency"/.test(talkView),
-    "rule 6: the 'Worth revisiting' block is gated off in fluency mode",
+    /<details style=\{\{ marginBottom: 36 \}\}>\s*<summary className="eyebrow" style=\{\{ cursor: "pointer" \}\}>\s*See all corrections/.test(talkView),
+    "rule 6: in fluency mode the correction list is reachable and closed — a <details> disclosure, not hidden outright",
+  );
+  assert(
+    /r\.corrections\.length > 0 && talk\.mode !== "fluency"/.test(talkView) === false,
+    "rule 6: the 'Worth revisiting' block is no longer gated on non-fluency — the list is reachable in both modes",
   );
 
   // Rule 7 — the timer closes the mode and the extension is the learner's.
@@ -1359,6 +1366,131 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
   assert(/wrong is fine/.test(sentence), "it says getting it wrong is fine");
   assert(!/you tend to|you are|you're/.test(sentence), "it never characterises the learner");
   assert(!/(compared|average|better|worse)/.test(sentence), "it makes no comparison");
+}
+
+// --- §7.2's session-end card (PLAN-046 §5) ------------------------------------
+// fluency ledger 10 — longestRunMs and sessionChange, the two numbers the
+// "What happened" and "What changed" sections of the session-end card are built
+// from.
+{
+  // 1. longestRunMs on a synthetic envelope with two runs returns the longer
+  //    one, scaled by the recording's frame duration. At 20 frames/s, a 3 s
+  //    recording is 60 frames; a run of 20 frames is 1 s, a run of 40 frames
+  //    is 2 s.
+  const twoRuns = [
+    ...Array.from({ length: 20 }, () => 0.3), // 1 s of speech
+    ...Array.from({ length: 20 }, () => 0), // 1 s of silence
+    ...Array.from({ length: 40 }, () => 0.3), // 2 s of speech
+  ];
+  const v = { text: "one two three four five six", ms: 4000, levels: twoRuns, locale: "en", initiationMs: 0 };
+  assert.equal(longestRunMs([v]), 2000, "longestRunMs returns the longer run, scaled by the frame duration");
+  assert.equal(longestRunMs([]), null, "longestRunMs is null on an empty array");
+  const silent = Array.from({ length: 60 }, () => 0);
+  assert.equal(longestRunMs([{ ...v, levels: silent }]), null, "longestRunMs is null on a silent envelope");
+  assert.equal(longestRunMs([{ ...v, text: "" }]), null, "longestRunMs is null with no words");
+
+  // 2. `measuredSessions` — what a session actually is. `activityId` is the slot
+  //    in the day's plan ("talk", "roleplay", …), repeated every day, so grouping
+  //    by it collapsed the whole record into one session and the profile's
+  //    three-session bar could never be cleared. The fixture is the real shape:
+  //    one activityId, six sessions, a day apart.
+  const sig = (activityId: string, kind: Signal["kind"], payload: unknown, at: number): Signal => ({
+    id: `${activityId}-${kind}-${at}`,
+    activityId,
+    kind,
+    observedAt: at,
+    payload,
+  });
+  const CTX = { mode: "free", planningTimeSec: 0, taskRepetition: 1, interlocutorPressure: "none", topicFamiliarity: "novel" };
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  /** One session's batch, written the way `recordSignals` writes it — one activity
+   *  id, one instant. `rate`/`pause` ride a timing signal, as `talkSignals` writes. */
+  const session = (at: number, rate: number, pause: number | null, activityId = "talk"): Signal[] => [
+    sig(activityId, "sessionContext", CTX, at),
+    sig(activityId, "timing", pause === null ? { label: "spoken timing", speechRate: rate } : { label: "spoken timing", speechRate: rate, midClausePauseRatio: pause }, at),
+  ];
+  // Six conversations on six days, all on the id the app really writes.
+  const sixDays = [0, 1, 2, 3, 4, 5].flatMap((d) => session(1_000_000 + d * DAY_MS, 90 + d, 0.6 - d * 0.05));
+  // Fed recent-first, the order `recentSignals` really returns.
+  const recentFirst = [...sixDays].sort((a, b) => b.observedAt - a.observedAt);
+  assert.equal(
+    measuredSessions(recentFirst).length,
+    6,
+    "fluency ledger 10: six conversations on six days are six sessions — an activityId is a slot in the day's plan, not a session id",
+  );
+  assert.deepEqual(
+    measuredSessions(recentFirst).map((m) => m.sigs[0].observedAt),
+    [0, 1, 2, 3, 4, 5].map((d) => 1_000_000 + d * DAY_MS),
+    "measuredSessions is oldest-first whatever order it was fed",
+  );
+  // Probe: the old grouping — by activityId alone — sees one session, not six.
+  // Without this the fixture could drift back to inventing an id per session and
+  // the check would agree with the bug again.
+  assert.equal(new Set(recentFirst.map((s) => s.activityId)).size, 1, "the probe's premise: the six sessions share one activityId");
+  // A session with no readable context is no session — the kill switch, structurally.
+  const noCtx = sixDays.filter((s) => s.kind !== "sessionContext");
+  assert.equal(measuredSessions(noCtx).length, 0, "with no sessionContext written, nothing is a measured session");
+
+  // 3. sessionChange compares the last two measured sessions, not the last two
+  //    activity ids. Day 5 (95 wpm) against day 4 (94 wpm).
+  const change = sessionChange(recentFirst);
+  assert(change.rate !== null, "sessionChange finds a previous session on the real shape");
+  assert.equal(change.rate!.current, 95, "the current session is the most recent one");
+  assert.equal(change.rate!.previous, 94, "the previous session is the one before it, not the oldest");
+  assert(change.pause !== null, "sessionChange reads the pause ratio too");
+  assert.equal(Math.round(change.pause!.previous * 100), 40, "the previous pause is day 4's");
+  // Probe: taking the *oldest* session as the previous would give 90 wpm and point
+  // the arrow the other way — the assertion above is not true by construction.
+  assert.notEqual(measuredSessions(recentFirst)[0].sigs[1].payload, null, "the probe's premise: the oldest session exists");
+  assert.equal(timingRate(measuredSessions(recentFirst)[0].sigs[1]), 90, "…and it reads 90 wpm, which is not what sessionChange returned");
+
+  // 4. A signal absent on one side yields no row for it; fewer than two measured
+  //    sessions yields both null and the caller renders no section.
+  const noPause = [...session(2_000_000, 100, null), ...session(2_000_000 + DAY_MS, 110, null)];
+  const noPauseChange = sessionChange(noPause);
+  assert(noPauseChange.rate !== null, "the rate row survives when the pause is absent");
+  assert.equal(noPauseChange.pause, null, "an absent pause on either side yields no pause row");
+  assert.deepEqual(sessionChange(session(3_000_000, 100, 0.4)), { rate: null, pause: null }, "one session alone yields an empty change");
+  assert.deepEqual(sessionChange([]), { rate: null, pause: null }, "no record at all yields an empty change");
+
+  // 5. Two sessions minutes apart on the same id are two sessions — 4/3/2's three
+  //    rounds share `talk` and land within one day, and the profile's
+  //    first-vs-third row depends on them staying apart.
+  const rounds = [
+    ...session(5_000_000, 90, 0.6),
+    ...session(5_000_000 + 4 * 60_000, 100, 0.5),
+    ...session(5_000_000 + 7 * 60_000, 110, 0.4),
+  ];
+  assert.equal(measuredSessions(rounds).length, 3, "three 4/3/2 rounds on one activityId, minutes apart, are three sessions");
+
+}
+
+// --- the reflection writes before it reads (PLAN-046 review) -------------------
+// Two failures lived in one effect pair. §7.2's "What changed" reads this session
+// and the one before it back off the record, and it used to run *beside* the
+// write rather than after it — a single SELECT racing a batch of INSERTs, which
+// the SELECT wins, so the section could never render. And the write was gated on
+// `!day.isDone(closes)`, which meant 4/3/2's rounds 2 and 3 — all closing the same
+// `talk` block — wrote nothing at all, so `taskRepetition` 2 and 3 never reached
+// the record and the profile's first-vs-third row had no third side.
+{
+  const talkView = readFileSync(join(ROOT, "src/views/Talk.tsx"), "utf8");
+  assert(
+    /await day\.complete\(closes,[\s\S]{0,900}?await recentSignals\(/.test(talkView),
+    "the reflection awaits its own signal write before reading the record back — the read must not race the write",
+  );
+  assert(
+    !/talk\.reflection && closes && !day\.isDone\(closes\)/.test(talkView),
+    "the signal write is no longer gated on `!day.isDone` — 4/3/2's rounds 2 and 3 close the same block and must still be recorded",
+  );
+  assert(
+    /wroteFor\.current !== r/.test(talkView),
+    "…and it is written exactly once per reflection instead, so StrictMode's double-invoked effect does not file the batch twice",
+  );
+  assert(
+    !/sessionChange\(closing\.id/.test(talkView),
+    "sessionChange takes no activity id — an id is a slot in the day's plan, so 'not this activity' meant the reading exercise",
+  );
 }
 
 console.log("fluency.check OK");
