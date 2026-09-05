@@ -190,6 +190,22 @@ export function turnTiming(s: Signal): { latencyMs: number; speakMs: number; spe
 }
 
 /**
+ * Whether a produced turn was spoken rather than typed (§3.1's first comparison:
+ * written accuracy against spoken accuracy). `null` for a signal that is not a
+ * produced turn — a correction, a card, a repair move. A picked suggestion is
+ * never spoken (the builder forces `false`), so this reads the fact the builder
+ * wrote, and a mixed session — some turns spoken, some typed — is exactly what
+ * the profile's row-1 honesty rule needs to see.
+ */
+export function turnSpoken(s: Signal): boolean | null {
+  if (s.kind !== "unpromptedTurn" && s.kind !== "suggestionUsed") return null;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { spoken } = p as { spoken?: unknown };
+  return typeof spoken === "boolean" ? spoken : null;
+}
+
+/**
  * The third structural payload door: the conditions a session ran under.
  * Returns null for anything that is not a well-formed `sessionContext` signal —
  * an unreadable context is *no* context, never a default one, because a default
@@ -213,6 +229,20 @@ export function monitorContext(s: Signal): MonitorContext | null {
   if (interlocutorPressure !== "none" && interlocutorPressure !== "paced" && interlocutorPressure !== "interrupting") return null;
   if (topicFamiliarity !== "prepared" && topicFamiliarity !== "novel") return null;
   return { mode, planningTimeSec, taskRepetition, interlocutorPressure, topicFamiliarity };
+}
+
+/**
+ * The words per minute a `timing` signal measured (§2.1's `speechRate`). `null`
+ * for a signal that is not a timing signal. Rows 2–4 of the monitor profile all
+ * read this one number — the three conditions act on the same thing, how fast
+ * the learner can get language out.
+ */
+export function timingRate(s: Signal): number | null {
+  if (s.kind !== "timing") return null;
+  const p = s.payload;
+  if (p === null || typeof p !== "object") return null;
+  const { speechRate } = p as { speechRate?: unknown };
+  return typeof speechRate === "number" ? speechRate : null;
 }
 
 /**
