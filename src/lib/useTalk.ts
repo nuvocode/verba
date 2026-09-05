@@ -1993,6 +1993,25 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
           );
           const locale = pack?.speech.locale ?? "en";
           selfRepairs = verifySelfRepairs(report.repairs, spokenTexts, corrections, locale);
+          // ponytail: hand sample only — delete when PLAN-041's `## Hand sample`
+          // is filled in. Three of that table's four counts cannot be recovered
+          // afterwards: gate 1's drops and gate 2's downgrades happen inside
+          // `verifySelfRepairs` and leave no trace, and only survivors reach
+          // SQLite. So the sample is read off this log, with the transcript
+          // beside it, while the twenty turns are being spoken.
+          console.log("[hand-sample] transcript:", spokenTexts);
+          console.log("[hand-sample] reported:", report.repairs);
+          console.log("[hand-sample] kept:", selfRepairs);
+          console.log(
+            "[hand-sample] dropped by gate 1 (not in transcript):",
+            report.repairs.filter((r) => !selfRepairs.some((k) => k.before === r.before && k.after === r.after)),
+          );
+          console.log(
+            "[hand-sample] falseAlarm downgraded by gate 2 (coach corrected it):",
+            selfRepairs.filter(
+              (k) => k.type !== "falseAlarm" && report.repairs.some((r) => r.before === k.before && r.after === k.after && r.type === "falseAlarm"),
+            ),
+          );
           const targetScript = languageScript(settings.profile.targetLanguage);
           const nativeScript = languageScript(settings.profile.nativeLanguage);
           completion = {
