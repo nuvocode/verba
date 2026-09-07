@@ -2010,8 +2010,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
             const log = JSON.parse(localStorage.getItem("handSample.log") ?? "[]");
             log.push({ at: Date.now(), transcript: spokenTexts, reported: report.repairs, kept: selfRepairs });
             localStorage.setItem("handSample.log", JSON.stringify(log));
-          } catch {
-            /* scaffolding never fails a session */
+          } catch (e) {
+            // Loud on purpose: a silent catch here cost a whole sampling round —
+            // the log simply was not there and nothing said why.
+            console.warn("[hand-sample] localStorage write failed:", e);
           }
           const targetScript = languageScript(settings.profile.targetLanguage);
           const nativeScript = languageScript(settings.profile.nativeLanguage);
