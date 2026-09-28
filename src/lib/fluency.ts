@@ -279,6 +279,13 @@ export function saidInOrder(transcript: string[], before: string, after: string,
  *    order did not happen, was authored by the model, and it is dropped — not
  *    softened, dropped.
  *
+ *    And something was abandoned: an `after` that opens with the whole of
+ *    `before` changed nothing — the learner said it again and kept going. That is
+ *    a restart, the repetition the prompt already calls hesitation, and it is
+ *    dropped. The PLAN-041 hand sample's one `falseAlarm` was exactly this ("we
+ *    need" → "we need and pick new one"), and a model that ignores the prompt's
+ *    rule is caught here rather than on the learner's screen.
+ *
  * 2. **It was a false alarm.** A `falseAlarm` claim is downgraded to `A` when the
  *    coach corrected that same fragment in the same session: the coach saying it
  *    was wrong and the reporter saying it was right cannot both stand, and the
@@ -306,6 +313,8 @@ export function verifySelfRepairs(
     // ahead of `after` — the learner rebuilt forwards, or the model described
     // something that did not happen.
     if (!saidInOrder(transcript, before, after, locale)) continue;
+    // Gate 1, second half: nothing was abandoned if `after` opens with `before`.
+    if (foldText(after, locale).startsWith(foldText(before, locale))) continue;
     // Gate 2: a falseAlarm on a phrase the coach corrected in the same session
     // is downgraded to A — the coach's correction is the one the learner saw.
     if (r.type === "falseAlarm" && corrected.includes(foldText(before, locale))) {

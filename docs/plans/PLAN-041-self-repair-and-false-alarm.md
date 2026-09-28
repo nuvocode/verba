@@ -320,6 +320,71 @@ number out loud to the learner as evidence about themselves, and a metric that i
 wrong one time in four is worse than no metric. Record the outcome here either
 way — a failed sample that is written down is how PLAN-046 knows not to render it.
 
+### Result — 2026-09-28
+
+**Setup.** Deepgram `nova-3` with `filler_words=true` and `smart_format=true`;
+English, learner's L1 Turkish. Two sessions (62, 63), one learner, natural
+conversation — no repairs were staged. The raw report came from the
+`handSample.log` scaffolding; session 63 was then re-run offline through the
+same `productionPrompt` → `parseProduction` → `verifySelfRepairs` path, against
+two models, so the two could be compared on one transcript.
+
+Session 60 is not in the sample. It was the six-turn session that found the
+`closing` defect: "New scenario" was live during the wrap-up, a new session
+reset `voice` under `end()`, and the self-repair pass never ran (fixed in
+`9c80d3b`, `closing.check.ts`).
+
+| | qwen3.5:4b (in app, first prompt) | deepseek-v4-pro (final prompt, temp 0) |
+|---|---|---|
+| Turns sampled | 17 | 16 (session 63) |
+| Repairs reported | 3 | 5 |
+| Repairs dropped by gate 1 | 1 | 2 |
+| `falseAlarm` downgraded by gate 2 | 0 | 0 † |
+| Surviving `falseAlarm`, human agrees | 0 | 0 |
+| Surviving `falseAlarm`, human disagrees | 0 | 0 ‡ |
+
+† The offline re-run passes no corrections, so gate 2 was not exercised there.
+‡ Before the restart gate below, one `falseAlarm` survived — "we need" → "we need
+and pick new one" — and a human disagrees: nothing was abandoned, and "we need"
+had matched an *earlier* turn. 1 of 1 wrong.
+
+**What the sample taught, and what changed because of it.**
+
+- *At 0.7 the same transcript gave one repair on one run and six on the next,*
+  the same repair typed D, C, D. The call now runs at temperature 0; three
+  deepseek runs were then identical. (`prompts.check.ts`)
+- *Repetition was filed as repair* ("she she", "it's it's"), *two distant places
+  were fused into one*, and *the model wrote its own correction into `after`*.
+  The prompt now says each of these in a line of its own, defines the five types
+  with one example each — none taken from this transcript — and gives the order
+  the type is decided in. (`prompts.check.ts`)
+- *A restart passed gate 1.* An `after` that opens with the whole of `before`
+  now fails it: nothing was abandoned. (`fluency.check.ts`, item 6)
+- *qwen3.5:4b finds nothing* under the stricter prompt — three runs, three empty
+  lists — where before it found repairs that were not there. Silence is the
+  right failure, but it is still a failure: a 4B local model does not measure
+  this layer.
+
+**Type agreement** on the three deepseek repairs that survive: detection 2 of 3
+right ("we are openly → we open", "it's a little → takes a little bit more");
+type 0 of 3 clearly right — the first is an E typed D, the second is arguable,
+the third ("my if my wife do it → it's it's better…") is still two places fused.
+
+**Outcome: `falseAlarmRepair` does not reach a screen.** No surviving
+`falseAlarm` from either model on these 17 turns, and the only one the pipeline
+ever produced was wrong. The bar cannot be met on evidence that does not exist, and
+the types it would be read out of are not yet reliable on either model.
+`FALSE_ALARM_ON_SCREEN` stays `false`; PLAN-046's four dependents stay
+unreachable, as written.
+
+**Open.**
+- Gate 1 still accepts a pair split across turns (`saidInOrder`: "same line, or
+  any later line"). A self-repair lives inside one recording; the item-4 checks
+  rely on the cross-line case, so tightening it is its own change.
+- A staged session — the learner deliberately swapping a correct phrase for an
+  equivalent one — is the only way to get surviving `falseAlarm`s to judge.
+  Until one is run the `handSample.log` scaffolding in `useTalk.ts` stays.
+
 ## Do not touch
 
 - `repair.ts`, `RepairObservation`, `verifyRepair`, the repair inventory. That is

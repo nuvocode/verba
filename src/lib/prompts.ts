@@ -569,7 +569,21 @@ export function productionPrompt(s: Settings, turns: string[], pack?: LanguagePa
     `Find the places where the learner interrupted themselves and rebuilt a phrase.`,
     `Return ONLY repairs that are present in the text above, copied character for character — never a paraphrase, never a correction of your own.`,
     `For each repair, give the abandoned fragment ("before") and what the learner said instead ("after"), both copied verbatim from the text.`,
-    `Classify each as one of: "E" (a real error was fixed), "A" (no error, a better phrasing was sought), "D" (the idea changed, rebuilt from scratch), "C" (cut mid-word), or "falseAlarm" (the abandoned fragment was already correct in ${s.profile.targetLanguage} and the learner changed it anyway).`,
+    // PLAN-041 hand sample: both models fused two distant places into one
+    // repair, and wrote their own fix into "after". Adjacency is what makes a
+    // repair a repair, and gate 1 can only check that the words exist.
+    `"after" starts where "before" stops: nothing but a filler ("uh", "um"), a dash or a comma lies between them in the text. Keep each fragment short — the few words that were abandoned, and the few that replaced them.`,
+    `If "after" contains a word the learner did not say, it is your correction, not theirs — leave that repair out.`,
+    // The same sample: "she she" and "it's it's" were filed as repairs. A word
+    // said twice is a hesitation — nothing was changed, so nothing was repaired.
+    `Saying the same words again unchanged ("she she", "it's it's") is hesitation, not a repair. A filler on its own is not a repair either.`,
+    `Classify each as exactly one of:`,
+    `- "E": the abandoned fragment had an error and the replacement fixes it. Example: "he have— he has two kids".`,
+    `- "A": the abandoned fragment was correct, and the replacement is more precise or more fitting. Example: "a big— a huge difference".`,
+    `- "D": the learner dropped the idea and started a different sentence. Example: "I wanted to— let's talk about work".`,
+    `- "C": the learner stopped in the middle of a word. Example: "I bou— I purchased it".`,
+    `- "falseAlarm": the abandoned fragment was already correct in ${s.profile.targetLanguage}, and the replacement is no better — it says the same thing, or it is worse. Example: "she doesn't— she does not like it", "I went— I have went there".`,
+    `Decide the type by asking, in this order: was a word cut in half (C)? did the idea change (D)? was "before" wrong (E)? if "before" was correct, did "after" add precision (A) or not (falseAlarm)?`,
     `An empty list is the expected answer for most turns. Say [] rather than finding something.`,
     ``,
     `In the same text, find any sentence the learner started and did not finish. For each, copy the fragment that got cut off, verbatim, into "abandoned".`,

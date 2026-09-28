@@ -1998,7 +1998,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
           const report = parseProduction(
             await provider.chat(
               [{ role: "user", content: productionPrompt(settings, spokenTexts, pack, completionGoal.current ?? undefined) }],
-              { json: true },
+              // An extraction, not a conversation: at the default 0.7 the same
+              // transcript came back with one repair on one run and six on the
+              // next, the same repair typed D, C and D (PLAN-041 hand sample).
+              { json: true, temperature: 0 },
             ),
           );
           const locale = pack?.speech.locale ?? "en";

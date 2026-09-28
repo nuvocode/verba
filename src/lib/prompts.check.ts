@@ -17,6 +17,7 @@ import {
   parseSummary,
   parseTurn,
   parseProduction,
+  productionPrompt,
   styleGuidance,
   SPOKEN_PROMPTS,
   STRUCTURED_PROMPTS,
@@ -133,6 +134,26 @@ assert.deepEqual(
   assert.equal(half.abandoned.length, 0, "an absent abandoned parses to empty");
   assert.equal(half.l1.length, 0, "an absent l1 parses to empty");
   assert.equal(half.avoidance, null, "an absent avoidance parses to null");
+}
+
+// PLAN-041 hand sample: what the self-repair prompt had to learn from real
+// transcripts. Each line below answers one way two models got a real session
+// wrong — a repetition filed as a repair, two distant places fused into one, the
+// model's own correction in "after", and the same repair typed three ways.
+{
+  const p = productionPrompt({ ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "English", nativeLanguage: "Turkish" } }, ["I go— I went home."]);
+  assert(/same words again unchanged[^\n]*hesitation, not a repair/.test(p), "a word said twice is not a repair");
+  assert(/"after" starts where "before" stops/.test(p), "before and after are adjacent in the text");
+  assert(/word the learner did not say[^\n]*leave that repair out/.test(p), "the model's own correction is not a repair");
+  for (const t of ["E", "A", "D", "C", "falseAlarm"])
+    assert(new RegExp(`- "${t}": [^\n]*Example: `).test(p), `type ${t} is defined with an example`);
+  assert(/already correct in English[^\n]*no better/.test(p), "falseAlarm is told apart from A: correct before, and no better after");
+  assert(/Decide the type by asking, in this order/.test(p), "the types are decided in one fixed order");
+
+  // An extraction runs cold: at 0.7 the same transcript gave one repair, then six.
+  const talk = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
+  const call = talk.slice(talk.indexOf("content: productionPrompt("), talk.indexOf("content: productionPrompt(") + 500);
+  assert(/\{ json: true, temperature: 0 \}/.test(call), "the self-repair call runs at temperature 0");
 }
 
 // ============================================================================

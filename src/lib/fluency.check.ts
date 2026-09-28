@@ -441,6 +441,26 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
   );
   // 5. An empty report list yields an empty signal list — not one signal with a zero.
   assert.equal(verifySelfRepairs([], transcript, noCorrections, "en").length, 0, "an empty report list yields no repairs");
+  // 6. Nothing abandoned, nothing repaired: an `after` that opens with the whole
+  //    of `before` is a restart. The PLAN-041 hand sample's only falseAlarm, on
+  //    its real transcript: "we need" matched an earlier turn, so the order check
+  //    passed and the restart reached the table.
+  assert.equal(
+    verifySelfRepairs(
+      [{ before: "we need", after: "we need and pick new one", type: "falseAlarm" }],
+      ["We prefer comedies because they are, uh, we need to find.", "We watched detective movie, but we need and pick new one."],
+      noCorrections,
+      "en",
+    ).length,
+    0,
+    "an after that repeats before and continues is not a repair",
+  );
+  //    A real rebuild that merely shares a first word still survives.
+  assert.equal(
+    verifySelfRepairs([{ before: "I go", after: "I went home", type: "E" }], ["I go— I went home"], noCorrections, "en").length,
+    1,
+    "a rebuild sharing only a first word survives",
+  );
 }
 
 // --- 11. `falseAlarm` cannot outrank a correction the learner already saw -----
