@@ -387,13 +387,13 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
 
 // --- 10. the model may point, we check (PLAN-041) -----------------------------
 // fluency ledger 2 — a reported repair is believed only when both fragments are
-// in the text the learner produced, `before` ahead of `after`, after the same
-// folding `verifyCorrections` uses. `ahead` is checked *inside the line* too,
+// in one line the learner produced, `before` ahead of `after`, after the same
+// folding `verifyCorrections` uses. `ahead` is checked *inside the line* only,
 // because one recording is one line and a self-repair lives entirely inside it —
 // item 3 is the case real data is made of. A repair the model authored is
 // dropped, not softened.
 {
-  const transcript = ["I go to the doctor yesterday", "I went to the clinic"];
+  const transcript = ["I go to the doctor— I went to the clinic yesterday"];
   const noCorrections: { original: string }[] = [];
 
   // 1. A report whose `before` is not in the transcript is dropped.
@@ -435,9 +435,30 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
     "a punctuation difference survives folding",
   );
   assert.equal(
-    verifySelfRepairs([{ before: "I go to the doctor", after: "I went to the clinic", type: "E" }], ["I go to the doctor yesterday", "I went to the clinic"], noCorrections, "en").length,
+    verifySelfRepairs([{ before: "i GO to the doctor", after: "I went to the CLINIC", type: "E" }], transcript, noCorrections, "en").length,
     1,
     "a case difference survives folding",
+  );
+  // 4b. A pair split across turns is not a self-repair: one recording is one
+  //     line, and a repair lives entirely inside it.
+  assert.equal(
+    verifySelfRepairs([{ before: "I go to the doctor", after: "I went to the clinic", type: "E" }], ["I go to the doctor yesterday", "I went to the clinic"], noCorrections, "en").length,
+    0,
+    "a pair split across two turns is dropped",
+  );
+  // 4c. Every occurrence of `before` is tried, not only the first. PLAN-041's
+  //     staged session, verbatim: "she does not" opens the line and closes it,
+  //     and first-occurrence matching put `after` ahead of `before` and dropped
+  //     the real repair.
+  assert.equal(
+    verifySelfRepairs(
+      [{ before: "she doesn't", after: "she does not", type: "falseAlarm" }],
+      ["Yeah. I will be watching some movies with my wife. She does not she does she doesn't she does not like coffee."],
+      noCorrections,
+      "en",
+    ).length,
+    1,
+    "a repair whose after also occurs earlier in the line survives",
   );
   // 5. An empty report list yields an empty signal list — not one signal with a zero.
   assert.equal(verifySelfRepairs([], transcript, noCorrections, "en").length, 0, "an empty report list yields no repairs");
@@ -469,7 +490,7 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
 // exact after folding — a `before` that merely *contains* a corrected phrase is
 // left as falseAlarm (substring matching would silently erase real false alarms).
 {
-  const transcript = ["I go to the doctor yesterday", "I went to the clinic"];
+  const transcript = ["I go to the doctor yesterday— I went to the clinic"];
   const corrected = [{ original: "I go to the doctor" }];
 
   // 1. A falseAlarm whose `before` matches a Correction.original comes back as A.
@@ -552,8 +573,8 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
 }
 
 // --- 13. the shared gate, and the bug it exists to prevent (PLAN-042) ---------
-// The ordering door every §2.2/§2.3 verification goes through checks *inside*
-// the line as well as across lines, because one recording is one line and a
+// The ordering door every §2.2/§2.3 verification goes through checks inside
+// one line only, because one recording is one line and a
 // self-repair lives entirely inside it.
 {
   // 1. The reversed report, entirely inside one line, is out of order — this is

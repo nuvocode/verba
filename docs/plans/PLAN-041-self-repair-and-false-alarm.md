@@ -377,13 +377,42 @@ the types it would be read out of are not yet reliable on either model.
 `FALSE_ALARM_ON_SCREEN` stays `false`; PLAN-046's four dependents stay
 unreachable, as written.
 
-**Open.**
-- Gate 1 still accepts a pair split across turns (`saidInOrder`: "same line, or
-  any later line"). A self-repair lives inside one recording; the item-4 checks
-  rely on the cross-line case, so tightening it is its own change.
-- A staged session — the learner deliberately swapping a correct phrase for an
-  equivalent one — is the only way to get surviving `falseAlarm`s to judge.
-  Until one is run the `handSample.log` scaffolding in `useTalk.ts` stays.
+### Staged session — 2026-09-28
+
+Session 66, six spoken turns, `gemma4:31b-cloud` in the app. The learner read five
+scripted repairs, each swapping a correct phrase for an equivalent or a worse one
+— the `falseAlarm` the natural sample could not produce. Re-run offline at
+temperature 0 through the same prompt and gates; deepseek-v4-pro alongside.
+
+| Scripted repair | gemma (app) | gemma (re-run) | deepseek ×2 | Human |
+|---|---|---|---|---|
+| she doesn't → she does not | dropped by gate 1 ¶ | — | — | falseAlarm |
+| I'm going to, um → I will watch… | D | D | D, D | falseAlarm |
+| I've lived here → I have lived here for five years | A | A | falseAlarm, A | falseAlarm |
+| We went → We have gone … last week | falseAlarm | falseAlarm | falseAlarm ×2 | falseAlarm |
+| He works → he is working at a bank | falseAlarm | falseAlarm | A, A | A or falseAlarm |
+
+Both models also reported "she does not she does → she doesn't" as falseAlarm;
+right, though `before` swallows the repetition.
+
+¶ Gate 1 found each fragment at its *first* occurrence. "she does not" opens the
+line as well as closing it, so `after` looked as if it came first and the real
+repair was dropped. `saidInOrder` now looks for `after` from the end of `before`,
+and only inside one line — a pair split across turns is no longer a self-repair,
+which closes the hole the natural sample left open. (`fluency.check.ts`, items 4b
+and 4c; each fails under the old rule.) With it, gemma's six reports on session
+66 all survive, and the natural sessions lose nothing.
+
+**Against the bar.** Surviving `falseAlarm`s a human disagrees with: 0 of 3 (gemma
+in the app), 0 of 5 (gemma, re-run under the new gate), 0 of 2 and 0 of 3
+(deepseek). On session 63's natural speech gemma reports no `falseAlarm` at all.
+Precision clears the fifth. Recall does not: of five scripted false alarms two to
+four are found, and a change of frame ("going to" → "will") is always read as D.
+
+**Outcome.** The bar is met, on a staged sample of five. `FALSE_ALARM_ON_SCREEN`
+stays `false` until one more natural session under the new gate shows no wrong
+`falseAlarm`; the `handSample.log` scaffolding stays until then. qwen3.5:4b does not
+measure this layer; gemma4:31b does it best of the three.
 
 ## Do not touch
 

@@ -235,7 +235,7 @@ export function foldText(s: string, locale: string): string {
 /**
  * A span the learner actually said, and where. The one door every §2.2/§2.3
  * verification goes through — fold, find, and (for a pair) check the order
- * *inside* the line as well as across lines, because one recording is one line
+ * inside one line only, because one recording is one line
  * and a self-repair lives entirely inside it.
  *
  * Returns the 0-based line index and the folded character offset where the span
@@ -252,29 +252,34 @@ export function saidAt(transcript: string[], span: string, locale: string): { li
 }
 
 /**
- * True when `after` starts after `before` ends — same line, or any later line.
- * A pair that cannot both be found yields false.
+ * True when, inside one line, `after` starts after `before` ends. A self-repair
+ * lives inside one recording, so a pair split across turns is not one. `after`
+ * is looked for from the end of `before` on, not at its own first occurrence: a
+ * learner who repeats a phrase ("she does not she does she doesn't she does not
+ * like coffee", PLAN-041's staged session) says `after` earlier *and* later,
+ * and first-occurrence matching dropped the real repair. A pair that cannot
+ * both be found yields false.
  */
 export function saidInOrder(transcript: string[], before: string, after: string, locale: string): boolean {
-  const b = saidAt(transcript, before, locale);
-  if (!b) return false;
-  const a = saidAt(transcript, after, locale);
-  if (!a) return false;
-  if (a.line > b.line) return true;
-  if (a.line < b.line) return false;
-  // Same line: `after` must start strictly after `before` *ends* — `after`
-  // overlapping `before` is not a rebuild.
-  return a.at >= b.at + foldText(before, locale).length;
+  if (!before.trim() || !after.trim()) return false;
+  const b = foldText(before, locale);
+  const a = foldText(after, locale);
+  return transcript.some((raw) => {
+    const line = foldText(raw, locale);
+    const at = line.indexOf(b);
+    // `after` must start strictly after `before` *ends* — `after` overlapping
+    // `before` is not a rebuild.
+    return at !== -1 && line.indexOf(a, at + b.length) !== -1;
+  });
 }
 
 /** * The self-repairs we believe, out of what the model reported.
  *
  * Two gates, both local:
  *
- * 1. **It happened.** `before` and `after` must both appear in the transcript,
- *    `before` ahead of `after` — *inside a single recording* when the pair lives
- *    in one line, not just across lines — compared through `saidInOrder`, so the
- *    intra-line ordering PLAN-041's cross-line test missed is checked. A repair
+ * 1. **It happened.** `before` and `after` must both appear in one line of the
+ *    transcript, `before` ahead of `after` — one recording is one line, and a
+ *    self-repair lives entirely inside it — compared through `saidInOrder`. A repair
  *    whose fragments are not in the text the learner produced, or whose reported
  *    order did not happen, was authored by the model, and it is dropped — not
  *    softened, dropped.
@@ -309,7 +314,7 @@ export function verifySelfRepairs(
     const before = r.before;
     const after = r.after;
     if (!before || !after) continue;
-    // Gate 1: both fragments must be in the text the learner produced, `before`
+    // Gate 1: both fragments must be in one line the learner produced, `before`
     // ahead of `after` — the learner rebuilt forwards, or the model described
     // something that did not happen.
     if (!saidInOrder(transcript, before, after, locale)) continue;
