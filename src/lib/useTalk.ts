@@ -325,6 +325,13 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
   const history = useRef<ChatMessage[]>([]); // full provider context, incl. system
   const sessionId = useRef<number | null>(null);
+  // True from the moment `end()` starts closing a session until it has read the
+  // last of that session's refs. `end()` awaits the model several times and
+  // reads `sessionId`, `voice`, `history` and the rest *after* those awaits; a
+  // `start`, `resume` or `reset` landing in between resets them under it — the
+  // summary went to the next session's row and the spoken turns were gone before
+  // the self-repair pass could read them. While closing, those three do nothing.
+  const closing = useRef(false);
   // What the learner produced, and whether it was theirs. `msgs` cannot answer the
   // second question — a picked suggestion and a typed sentence are the same bubble.
   const produced = useRef<ProducedTurn[]>([]);
@@ -820,6 +827,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   /** Open a scenario and let the coach speak first. */
   const start = useCallback(
     async (sc: Scenario, mode: "normal" | "rehearsal" | "brought" = "normal", brief?: RehearsalBrief, goal?: string, broughtText?: BroughtText, context: MonitorContext = FREE_CONTEXT, repeat = false, roundMin?: number | null) => {
+      if (closing.current) return;
       // PLAN-034: the mode is decided from the *parameters*, not from the
       // `rehearsal` state — `setRehearsal` only lands on the next render, so
       // reading it here would make the first call of a rehearsal behave like an
@@ -1153,6 +1161,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
    */
   const resume = useCallback(
     async (sessionIdToResume: number) => {
+      if (closing.current) return;
       setError("");
       setNotice("");
       setReflecting(false);
@@ -1920,6 +1929,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   /** Close the session: capture vocabulary, summarise, and record the level signals. */
   const end = useCallback(async () => {
     if (!scenario || busy) return;
+    closing.current = true;
     // The session is closing — a pending wait must not fire into the reflection
     // (PLAN-032). End it.
     clearWait();
@@ -2157,6 +2167,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         /* calibration is best-effort — a store miss should not fail the wrap-up */
       }
     }
+    // Every await above is inside a try, so this line is always reached; the
+    // calibration read of `produced` just above is the session's last.
+    closing.current = false;
   }, [scenario, busy, msgs, settings, pack, onSettings, clearWait, rehearsal, debrief, brought]);
 
   /**
@@ -2444,7 +2457,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       }
       setReflecting(false);
     },
-    reset: () => setScenario(null),
+    reset: () => {
+      if (!closing.current) setScenario(null);
+    },
     /** The scenario a plan block points at, falling back to free conversation. */
     scenarioById: (id?: string) =>
       listScenarios().find((s) => s.id === id) ?? BUNDLED_SCENARIOS.find((s) => s.id === "free")!,

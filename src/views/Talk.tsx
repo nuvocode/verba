@@ -1204,7 +1204,9 @@ export default function Talk({
           <button className="btn sm ghost" onClick={talk.exitReflection}>
             Back to the conversation
           </button>
-          <button className="btn sm ghost" onClick={talk.reset}>
+          {/* Not while the wrap-up is still being written: a new scenario
+              started now would reset the refs `end()` is still reading. */}
+          <button className="btn sm ghost" onClick={talk.reset} disabled={talk.busy}>
             New scenario
           </button>
         </div>
