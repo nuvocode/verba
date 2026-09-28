@@ -1,9 +1,9 @@
 // The 4/3/2 card (§5.2, PLAN-044 §2): shown after round 3, three rounds side by
 // side. Two measured numbers per round — words per minute (`speechRate`) and
 // words per run (`meanLengthOfRun`) — and the accuracy row is gated on
-// `FALSE_ALARM_ON_SCREEN`: the `falseAlarmRepair` metric is withheld until
-// PLAN-041's hand sample is filled in, so the card says the third claim is the
-// one it cannot show yet rather than inventing it.
+// `FALSE_ALARM_ON_SCREEN`: the `falseAlarmRepair` metric is withheld — PLAN-041's
+// hand sample found it reliable on one model and not another — so the card says
+// the third claim is the one it cannot show yet rather than inventing it.
 //
 // A round whose `timing` signal is missing — nothing spoken, no envelope —
 // renders **empty, not zero**: an unmeasured round did not score nothing, it was
@@ -75,7 +75,7 @@ export default function Rounds({
       </p>
       {!FALSE_ALARM_ON_SCREEN && (
         <p style={{ color: "var(--ink3)", fontStyle: "italic", marginTop: 12 }}>
-          The accuracy row is withheld for now — it will appear once the metric has been hand-verified.
+          The accuracy row is withheld for now — it is not yet reliable enough to show.
         </p>
       )}
       <div style={{ display: "flex", gap: 12, marginTop: 30 }}>

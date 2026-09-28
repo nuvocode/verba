@@ -640,14 +640,20 @@ function noteOf(c: Correction): string {
 
 /**
  * Whether the 4/3/2 card shows its third number, `falseAlarmRepair` (§5.2's
- * accuracy row). **Pinned `false`** — PLAN-041's `## Hand sample` is still blank,
- * and that plan's bar is that a metric does not reach a screen until a human has
- * sat with a real sample and disagreed with no more than a fifth of the
- * surviving `falseAlarm`s. Until the hand sample is filled in, the card says the
- * third column is withheld rather than inventing it — absent, never zero, applied
- * to a whole column. Flipping this constant to `true` is a deliberate act tied
- * to PLAN-041, which is why the reason is written here: the flip is a decision,
- * not a drive-by.
+ * accuracy row). **Pinned `false`, by decision** — PLAN-041's hand sample is
+ * filled in, and the bar (a human disagrees with no more than a fifth of the
+ * surviving `falseAlarm`s) is met by one model and not by another: gemma4:31b,
+ * none wrong across three natural sessions and a staged one; deepseek-v4-pro,
+ * its one `falseAlarm` on natural speech wrong ("it's well" → "it was really
+ * good" is a fix, not a needless one). The model is the learner's to choose and
+ * this constant is not per model, so the bar is not met. A wrong `falseAlarm`
+ * tells the learner their mistake was right, which is worse than no metric.
+ *
+ * The signal is still recorded; only the screen is shut. The card says the third
+ * column is withheld rather than inventing it — absent, never zero, applied to a
+ * whole column. Opening it needs a per-model gate or a model that clears the bar
+ * wherever it runs, and a new sample written into PLAN-041: the flip is a
+ * decision, not a drive-by.
  */
 export const FALSE_ALARM_ON_SCREEN = false;
 

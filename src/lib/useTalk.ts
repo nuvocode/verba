@@ -2006,28 +2006,6 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
           );
           const locale = pack?.speech.locale ?? "en";
           selfRepairs = verifySelfRepairs(report.repairs, spokenTexts, corrections, locale);
-          // ponytail: hand sample only — delete this block when PLAN-041's
-          // `## Hand sample` is filled in. Three of that table's four counts
-          // cannot be recovered afterwards: gate 1's drops and gate 2's
-          // downgrades happen inside `verifySelfRepairs` and leave no trace, and
-          // only survivors reach the signals table. So the raw report and what
-          // survived it are kept somewhere durable — the devtools console is
-          // readable only by the person at the keyboard.
-          //
-          // localStorage, not a table: `backup.check.ts` requires every table in
-          // db.ts to be exportable, restorable and wipeable, and scaffolding has
-          // no business being any of those. The key is deliberately outside the
-          // `verba.` namespace, because backup.ts syncs `verba.*` wholesale.
-          console.log("[hand-sample] transcript:", spokenTexts, "reported:", report.repairs, "kept:", selfRepairs);
-          try {
-            const log = JSON.parse(localStorage.getItem("handSample.log") ?? "[]");
-            log.push({ at: Date.now(), transcript: spokenTexts, reported: report.repairs, kept: selfRepairs });
-            localStorage.setItem("handSample.log", JSON.stringify(log));
-          } catch (e) {
-            // Loud on purpose: a silent catch here cost a whole sampling round —
-            // the log simply was not there and nothing said why.
-            console.warn("[hand-sample] localStorage write failed:", e);
-          }
           const targetScript = languageScript(settings.profile.targetLanguage);
           const nativeScript = languageScript(settings.profile.nativeLanguage);
           completion = {

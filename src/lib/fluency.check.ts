@@ -1075,7 +1075,7 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
 // prompt with nothing to repeat is noise. A round with no timing signal renders
 // empty, not zero (the Rounds view's "—"). And `FALSE_ALARM_ON_SCREEN === false`
 // — pinned with the reason, so flipping it is a deliberate act tied to PLAN-041's
-// hand sample, which is still blank.
+// recorded decision.
 {
   // 1. The three rounds' contexts — the table from §5.2 / PLAN-044 §2.
   const r1 = fourThreeTwoContext(1);
@@ -1114,23 +1114,15 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
   //    change a 3/2/1 variant, and the view's rows read from it.
   assert.deepEqual([...FOUR_THREE_TWO_MINUTES], [4, 3, 2], "the 4/3/2 lengths are 4, 3, 2");
   // 4. FALSE_ALARM_ON_SCREEN is false, pinned with the reason: PLAN-041's hand
-  //    sample is still blank, and a metric does not reach a screen until a human
-  //    has sat with a real sample. Flipping it is a deliberate act, not a drive-by.
-  assert.equal(FALSE_ALARM_ON_SCREEN, false, "the accuracy column is withheld until PLAN-041's hand sample is filled in");
-  const fluSrc = readFileSync(join(ROOT, "src/lib/fluency.ts"), "utf8");
-  // PLAN-041 §10's bar for the hand sample: a metric does not reach a screen
-  // until a human has sat with twenty real turns and disagreed with no more than
-  // a fifth of the surviving falseAlarms. The sample is still unfilled, so
-  // `FALSE_ALARM_ON_SCREEN === false` is the only honest value. The flip is a
-  // decision tied to a filled-in table; the assertion reads the count cell of
-  // "Surviving `falseAlarm`, human disagrees" — a real value there is the
-  // recorded outcome the flip should follow.
-  const handBlank = readFileSync(join(ROOT, "docs/plans/PLAN-041-self-repair-and-false-alarm.md"), "utf8");
-  const sample = handBlank.slice(handBlank.indexOf("## Hand sample"));
-  const disagreeRow = sample.split("\n").find((l: string) => l.trim().startsWith("| Surviving") && l.includes("human disagrees")) ?? "";
+  //    sample met the bar on one model and missed it on another, and the
+  //    constant is not per model. Flipping it is a deliberate act, not a
+  //    drive-by — the plan's decision has to change first.
+  assert.equal(FALSE_ALARM_ON_SCREEN, false, "the accuracy column is withheld — PLAN-041's hand sample did not clear the bar on every model");
+  const plan041 = readFileSync(join(ROOT, "docs/plans/PLAN-041-self-repair-and-false-alarm.md"), "utf8");
+  const decision = plan041.slice(plan041.indexOf("### Decision"), plan041.indexOf("## Do not touch"));
   assert(
-    !/\|\s*\d/.test(disagreeRow),
-    "PLAN-041's hand sample is still unfilled — this is why FALSE_ALARM_ON_SCREEN stays false",
+    plan041.includes("### Decision") && /`FALSE_ALARM_ON_SCREEN` stays `false`/.test(decision),
+    "PLAN-041 records the decision FALSE_ALARM_ON_SCREEN follows — flip the constant only after changing it",
   );
   const talkView = readFileSync(join(ROOT, "src/views/Talk.tsx"), "utf8");
   // 5. `useTalk` reads the repetition rule's flag from `start`'s seventh parameter.

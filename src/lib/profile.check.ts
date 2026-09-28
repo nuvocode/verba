@@ -240,11 +240,11 @@ const recentFirst = (s: Signal[]): Signal[] => [...s].sort((a, b) => b.observedA
 
   // 6. monitorDominant and slowAccess are gated on the same constant the 4/3/2
   //    card's third column is: `falseAlarmRepair` is what §3.3 uses to separate
-  //    them, PLAN-041's hand sample is still blank, and a verdict standing on a
+  //    them, PLAN-041's hand sample did not clear the bar on every model, and a verdict standing on a
   //    metric the learner cannot see is worse than printing the metric. Neither
   //    reading is reachable while the constant is false — and the sentences for
   //    them exist, so flipping it is one edit and not a rewrite.
-  assert.equal(FALSE_ALARM_ON_SCREEN, false, "the hand sample is still blank — the two readings it separates stay shut");
+  assert.equal(FALSE_ALARM_ON_SCREEN, false, "falseAlarmRepair is not on screen — the two readings it separates stay shut");
   const profileSrcGate = readFileSync(join(ROOT, "src/lib/profile.ts"), "utf8");
   assert(
     /if \(!FALSE_ALARM_ON_SCREEN\) return null;/.test(profileSrcGate),

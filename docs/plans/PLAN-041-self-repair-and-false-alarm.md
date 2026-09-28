@@ -409,10 +409,38 @@ in the app), 0 of 5 (gemma, re-run under the new gate), 0 of 2 and 0 of 3
 Precision clears the fifth. Recall does not: of five scripted false alarms two to
 four are found, and a change of frame ("going to" → "will") is always read as D.
 
-**Outcome.** The bar is met, on a staged sample of five. `FALSE_ALARM_ON_SCREEN`
-stays `false` until one more natural session under the new gate shows no wrong
-`falseAlarm`; the `handSample.log` scaffolding stays until then. qwen3.5:4b does not
-measure this layer; gemma4:31b does it best of the three.
+**Outcome.** The bar is met, on a staged sample of five. One more natural session
+under the new gate was run before deciding.
+
+### Natural session under the new gate — 2026-09-28
+
+Session 67, six spoken turns, gemma in the app; re-run twice with gemma and once
+with deepseek, temperature 0.
+
+| Repair heard | gemma (app + 2 re-runs) | deepseek | Human |
+|---|---|---|---|
+| make something → cook something | A | A | A |
+| My week, it's well → it was really good | — | falseAlarm | E — the rebuild is better |
+| How about you → yours | — | — | E, missed by both |
+
+gemma: no `falseAlarm`, none wrong. deepseek: one `falseAlarm`, wrong — with the
+earlier "we need" restart, both `falseAlarm`s deepseek produced on natural speech
+were wrong.
+
+### Decision — 2026-09-28
+
+`FALSE_ALARM_ON_SCREEN` stays `false`. gemma4:31b clears the bar — no surviving
+`falseAlarm` a human disagrees with, across three natural sessions and a staged
+one. deepseek-v4-pro does not: on natural speech it disagreed with a human every
+time it said `falseAlarm`. The model is the learner's to choose, the constant is
+not per model, and a wrong `falseAlarm` tells a learner their mistake was right —
+worse than no metric, which is the bar's own reasoning.
+
+The signal is still recorded; only the screen is shut, and PLAN-046's dependents
+stay unreachable. Opening it is a later milestone's: a per-model gate, or a model
+that clears the bar wherever it runs, and a new sample written here. The
+`handSample.log` scaffolding is removed; `fluency.check.ts` pins the constant to
+this decision.
 
 ## Do not touch
 
