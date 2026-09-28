@@ -3,7 +3,7 @@ id: PLAN-042
 title: The sentence never finished, the slip home, and the sentence never attempted
 branch: plan/m7-fluency
 base: PLAN-041
-status: ready
+status: done
 executor: unassigned
 created: 2026-09-04
 issue: https://github.com/nuvocode/verba/issues/70

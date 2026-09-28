@@ -6,7 +6,7 @@ base: PLAN-044
 issue: "#72"
 spec: docs/plans/5-verba-akicilik-ve-monitor-katmani-spec.md §3
 ledger: FLUENCY_LEDGER row 9
-status: ready
+status: done
 ---
 
 # PLAN-045 — The Monitor Load profile

@@ -6,7 +6,7 @@ base: PLAN-043
 issue: "#74"
 spec: docs/plans/5-verba-akicilik-ve-monitor-katmani-spec.md §5
 ledger: FLUENCY_LEDGER rows 7, 8
-status: ready
+status: done
 ---
 
 # PLAN-044 — The exercises

@@ -3,7 +3,7 @@ id: PLAN-041
 title: The five kinds of self-repair, and the one that is the point
 branch: plan/m7-fluency
 base: PLAN-040
-status: ready
+status: done
 executor: unassigned
 created: 2026-09-04
 issue: https://github.com/nuvocode/verba/issues/71

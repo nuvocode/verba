@@ -3,7 +3,7 @@ id: PLAN-040
 title: The six timing numbers, and the two that cannot be measured honestly
 branch: plan/m7-fluency
 base: PLAN-039
-status: ready
+status: done
 executor: unassigned
 created: 2026-09-04
 issue: https://github.com/nuvocode/verba/issues/70

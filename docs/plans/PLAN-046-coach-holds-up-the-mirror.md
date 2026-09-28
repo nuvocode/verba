@@ -6,7 +6,7 @@ base: PLAN-045
 issue: "#75"
 spec: docs/plans/5-verba-akicilik-ve-monitor-katmani-spec.md §6, §7.2, §7.3
 ledger: FLUENCY_LEDGER row 10 — closes the ledger
-status: ready
+status: done
 ---
 
 # PLAN-046 — Coach holds up the mirror

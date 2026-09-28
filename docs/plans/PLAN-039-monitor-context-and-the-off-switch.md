@@ -3,7 +3,7 @@ id: PLAN-039
 title: The context every measurement rides with, and the switch that stops it
 branch: plan/m7-fluency
 base: master
-status: ready
+status: done
 executor: unassigned
 created: 2026-09-04
 issue: https://github.com/nuvocode/verba/issues/70

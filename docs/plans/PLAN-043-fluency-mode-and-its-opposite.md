@@ -6,7 +6,7 @@ base: PLAN-042
 issue: "#73"
 spec: docs/plans/5-verba-akicilik-ve-monitor-katmani-spec.md §4, §7.1
 ledger: FLUENCY_LEDGER rows 4, 5, 6
-status: ready
+status: done
 ---
 
 # PLAN-043 — Fluency mode and its opposite
