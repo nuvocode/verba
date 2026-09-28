@@ -16,12 +16,19 @@ import {
   parseMemory,
   parseSummary,
   parseTurn,
+  parseProduction,
+  productionPrompt,
   styleGuidance,
   SPOKEN_PROMPTS,
   STRUCTURED_PROMPTS,
+  COACH_PROHIBITIONS,
+  ABOUT_THE_LEARNER,
+  rewindOwnPrompt,
+  summaryPrompt,
   type CorrectionCategory,
   type Memory,
 } from "./prompts.ts";
+import { weeklyReportPrompt } from "./coach.ts";
 
 // --- parseSummary: the four null cases (PLAN-020 §2.2) ----------------------
 // A failed summary writes nothing. `null` is the value that means "no usable
@@ -86,6 +93,68 @@ assert.deepEqual(
   CATS.slice().sort(),
   "the category set is closed and stable",
 );
+
+// --- parseProduction: shape only, no judgement (PLAN-041 / PLAN-042) ----------
+// `parseProduction` checks shape, never truth — a non-array, a missing field, or
+// a `type` outside the five is dropped. The belief gates are `verifySelfRepairs`
+// and the §2.3 verifiers' job, and keeping the two apart is what PLAN-038's
+// defect 2 taught. Every field is optional in the model's JSON and absent parses
+// to empty — a model that only answers half the question has answered half the
+// question, not zero for the rest.
+{
+  // A well-formed report parses through.
+  const ok = parseProduction(
+    '{"repairs": [ { "before": "I go to", "after": "I went to", "type": "E" } ], "abandoned": [ { "fragment": "I was going to" } ], "l1": [ { "span": "the doctor" } ], "avoidance": { "goal": "past simple", "attempted": false, "evidence": "I went" } }',
+  );
+  assert.equal(ok.repairs.length, 1, "a well-formed repair parses");
+  assert.equal(ok.repairs[0].type, "E", "an E type parses");
+  assert.equal(ok.abandoned.length, 1, "an abandoned fragment parses");
+  assert.equal(ok.abandoned[0].fragment, "I was going to", "the abandoned fragment is read through");
+  assert.equal(ok.l1.length, 1, "an l1 span parses");
+  assert.equal(ok.l1[0].span, "the doctor", "the l1 span is read through");
+  assert.ok(ok.avoidance, "a well-formed avoidance claim parses");
+  assert.equal(ok.avoidance!.goal, "past simple", "the avoidance goal is read through");
+  assert.equal(ok.avoidance!.attempted, false, "the avoidance attempted flag is read through");
+
+  // The four ways a repairs field is malformed are all dropped.
+  assert.equal(parseProduction('{"repairs": {}}').repairs.length, 0, "a non-array repairs is dropped");
+  assert.equal(parseProduction('{"repairs": [ { "after": "x", "type": "E" } ]}').repairs.length, 0, "a report with no before is dropped");
+  assert.equal(parseProduction('{"repairs": [ { "before": "x", "type": "E" } ]}').repairs.length, 0, "a report with no after is dropped");
+  assert.equal(parseProduction('{"repairs": [ { "before": "x", "after": "y", "type": "Z" } ]}').repairs.length, 0, "a type outside the five is dropped");
+  assert.equal(parseProduction('{"repairs": [ { "before": "x", "after": "y", "type": "E" }, { "before": "a", "after": "b", "type": "nonsense" } ]}').repairs.length, 1, "a bad row is dropped, a good row survives");
+
+  // §2.3's fields are lenient the same way: absent parses to empty.
+  assert.equal(parseProduction('{"repairs": []}').repairs.length, 0, "an empty repairs is the expected answer");
+  assert.equal(parseProduction("not json").repairs.length, 0, "a non-JSON reply yields no repairs");
+  assert.equal(parseProduction('{"repairs": [], "abandoned": {}}').abandoned.length, 0, "a non-array abandoned is dropped");
+  assert.equal(parseProduction('{"repairs": [], "abandoned": [ { "fragment": "" } ]}').abandoned.length, 0, "an empty fragment is dropped");
+  assert.equal(parseProduction('{"repairs": [], "l1": [ { "span": "   " } ]}').l1.length, 0, "a blank l1 span is dropped");
+  // A model that only answers §2.2 leaves §2.3 empty, not zero for the rest.
+  const half = parseProduction('{"repairs": [ { "before": "x", "after": "y", "type": "E" } ]}');
+  assert.equal(half.abandoned.length, 0, "an absent abandoned parses to empty");
+  assert.equal(half.l1.length, 0, "an absent l1 parses to empty");
+  assert.equal(half.avoidance, null, "an absent avoidance parses to null");
+}
+
+// PLAN-041 hand sample: what the self-repair prompt had to learn from real
+// transcripts. Each line below answers one way two models got a real session
+// wrong — a repetition filed as a repair, two distant places fused into one, the
+// model's own correction in "after", and the same repair typed three ways.
+{
+  const p = productionPrompt({ ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "English", nativeLanguage: "Turkish" } }, ["I go— I went home."]);
+  assert(/same words again unchanged[^\n]*hesitation, not a repair/.test(p), "a word said twice is not a repair");
+  assert(/"after" starts where "before" stops/.test(p), "before and after are adjacent in the text");
+  assert(/word the learner did not say[^\n]*leave that repair out/.test(p), "the model's own correction is not a repair");
+  for (const t of ["E", "A", "D", "C", "falseAlarm"])
+    assert(new RegExp(`- "${t}": [^\n]*Example: `).test(p), `type ${t} is defined with an example`);
+  assert(/already correct in English[^\n]*no better/.test(p), "falseAlarm is told apart from A: correct before, and no better after");
+  assert(/Decide the type by asking, in this order/.test(p), "the types are decided in one fixed order");
+
+  // An extraction runs cold: at 0.7 the same transcript gave one repair, then six.
+  const talk = readFileSync(join(ROOT, "src/lib/useTalk.ts"), "utf8");
+  const call = talk.slice(talk.indexOf("content: productionPrompt("), talk.indexOf("content: productionPrompt(") + 500);
+  assert(/\{ json: true, temperature: 0 \}/.test(call), "the self-repair call runs at temperature 0");
+}
 
 // ============================================================================
 // PLAN-033: one remembered detail per opening, and a coach who does not drift.
@@ -326,6 +395,103 @@ function allPromptNames(root: string): string[] {
   if (sawRehearsal) names.push("rehearsal.ts:rehearsalSystem");
   if (sawBrought) names.push("brought.ts:discussionSystem");
   return names;
+}
+
+// ============================================================================
+// PLAN-046: §6.3's five prohibitions — requested of the model, enforced on
+// ourselves. fluency ledger 10.
+// ============================================================================
+
+// --- 1. COACH_PROHIBITIONS carries five lines, each findable by its marker ----
+// A constant that lost a line while staying non-empty is the regression this
+// shape is built to catch.
+{
+  const lines = COACH_PROHIBITIONS.split("\n");
+  assert.equal(lines.length, 5, "fluency ledger 10: COACH_PROHIBITIONS is exactly five lines, one per §6.3 prohibition");
+  const markers = [
+    "anxiety", // 1: never describe the learner in terms of anxiety/confidence/self-esteem/perfectionism
+    "relax", // 2: no empty encouragement
+    "combined score", // 3: no single combined score
+    "breathing", // 4: no therapeutic technique
+    "genuinely hard", // 5: answer as a person would and stop
+  ];
+  for (const m of markers) {
+    assert(COACH_PROHIBITIONS.includes(m), `fluency ledger 10: prohibition marker "${m}" is findable in COACH_PROHIBITIONS`);
+  }
+}
+
+// --- 2. each ABOUT_THE_LEARNER prompt carries the whole constant ----------------
+// Built with real settings, not a stub, so a builder that drops it under some
+// branch is caught.
+{
+  const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "English" } };
+  const scenario = { id: "free", title: "Free talk", emoji: "💬", setup: "Talk about anything.", persona: { name: "Marta", role: "a friendly conversation partner", emoji: "🧑‍🏫" } };
+  const built = {
+    "prompts.ts:buildSystem": buildSystem(s, scenario, scenario.persona),
+    "prompts.ts:summaryPrompt": summaryPrompt(s),
+    "coach.ts:weeklyReportPrompt": weeklyReportPrompt(s, {
+      sessions: 3,
+      messages: 20,
+      wordsPracticed: 300,
+      vocabLearned: 4,
+      vocabReviewed: 6,
+      avgLevelScore: 87,
+      focusAreas: [],
+    }),
+  };
+  for (const [key, prompt] of Object.entries(built)) {
+    assert(ABOUT_THE_LEARNER[key] === true, `fluency ledger 10: ${key} is classified true in ABOUT_THE_LEARNER`);
+    assert(prompt.includes(COACH_PROHIBITIONS), `fluency ledger 10: ${key} carries the whole COACH_PROHIBITIONS constant`);
+  }
+}
+
+// --- 3. ABOUT_THE_LEARNER is complete over SPOKEN_PROMPTS ----------------------
+// Every entry classified, no entry that is not in SPOKEN_PROMPTS. The probe runs
+// the *same* predicate on a fabricated list rather than re-implementing it — a
+// probe that computes the answer a second way proves only that it can count.
+{
+  const classified = Object.keys(ABOUT_THE_LEARNER);
+  const unclassified = (list: readonly string[]): string[] => list.filter((k) => !classified.includes(k));
+
+  assert.deepEqual(unclassified(SPOKEN_PROMPTS), [], "fluency ledger 10: every SPOKEN_PROMPTS entry is classified in ABOUT_THE_LEARNER");
+  for (const key of classified) {
+    assert((SPOKEN_PROMPTS as readonly string[]).includes(key), `fluency ledger 10: ${key} is classified but is not a real SPOKEN_PROMPTS entry`);
+  }
+  // Probe: a prompt added to SPOKEN_PROMPTS and left unclassified is caught by
+  // the very assertion above — so a prompt added later cannot reach the learner
+  // without someone deciding about §6.3.
+  assert.deepEqual(
+    unclassified([...SPOKEN_PROMPTS, "prompts.ts:fabricatedPrompt"]),
+    ["prompts.ts:fabricatedPrompt"],
+    "fluency ledger 10 probe: an unclassified prompt is caught by the completeness assertion",
+  );
+}
+
+// --- 4. a false prompt does NOT carry the constant -----------------------------
+// The rule is targeted, and a check that passed either way would be no check.
+{
+  const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "English" } };
+  // buildSystem is true; a false prompt is one of the others. Rebuild a false
+  // one through its own builder to prove the rule is targeted.
+  const rewind = rewindOwnPrompt(s);
+  assert(!rewind.includes(COACH_PROHIBITIONS), "fluency ledger 10: a false prompt (rewindOwnPrompt) does not carry the constant — the rule is targeted");
+}
+
+// --- 5. the composite never reaches the model ---------------------------------
+// weeklyReportPrompt bands the 0–100 composite through scoreBand rather than
+// printing it — a WeekStats with avgLevelScore 87 must not contain "87".
+{
+  const s: Settings = { ...defaultSettings, profile: { ...defaultSettings.profile, targetLanguage: "Spanish", nativeLanguage: "English" } };
+  const prompt = weeklyReportPrompt(s, {
+    sessions: 3,
+    messages: 20,
+    wordsPracticed: 300,
+    vocabLearned: 4,
+    vocabReviewed: 6,
+    avgLevelScore: 87,
+    focusAreas: [],
+  });
+  assert(!prompt.includes("87"), "fluency ledger 10: weeklyReportPrompt must not hand the model the raw composite — 87 is banded, never printed");
 }
 
 console.log("prompts.check: ok");

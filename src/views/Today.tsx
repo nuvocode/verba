@@ -92,7 +92,7 @@ export default function Today({
   day: Day;
   onBegin: (kind: ActivityKind) => void;
   /** Where yesterday's trace goes — the record of what happened lives in Coach. */
-  onOpen: (space: "coach") => void;
+  onOpen: (space: "coach" | "talk") => void;
   /** PLAN-034: the rehearsal is reached from Today's overflow, not from the plan. */
   onRehearse: () => void;
 }) {
@@ -235,6 +235,16 @@ export default function Today({
           rehearse a conversation
         </button>
         {" — the coach plays the other side for a conversation you actually have coming."}
+      </div>
+
+      {/* PLAN-043 §6: the fluency entry, in the same overflow voice as the
+          rehearsal. Five minutes, no corrections — the mode reached from Today,
+          the contract waiting at the door in Talk. */}
+      <div style={{ marginLeft: 22, marginBottom: 46, fontSize: 13, color: "var(--ink3)" }}>
+        <button className="linky" onClick={() => onOpen("talk")}>
+          speak without stopping
+        </button>
+        {" — five minutes, no corrections."}
       </div>
 
       <div className="eyebrow" style={{ marginBottom: 10 }}>

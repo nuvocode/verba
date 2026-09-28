@@ -16,7 +16,10 @@ export async function recentSignals() {
 export async function recentMemories() {
   return [];
 }
-export async function createSession() {
+// closing.check.ts counts the sessions opened.
+export const created = [];
+export async function createSession(scenario) {
+  created.push(scenario);
   return 1;
 }
 export async function addMessage() {}

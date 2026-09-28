@@ -4,6 +4,7 @@
 // which is exactly the macOS-webview situation this code exists to survive.
 // Run: node --experimental-strip-types src/lib/speech.check.ts
 import assert from "node:assert";
+import { readFileSync } from "node:fs";
 import {
   bundledStt,
   bundledTts,
@@ -564,6 +565,25 @@ assert.equal(getSpeech({}).seekable, false, "the OS voice → the composite is n
   await new Promise((r) => setTimeout(r, 10));
   tier.cancel();
   assert.notEqual(await settles(second), HUNG, "the tier still speaks after a cancel");
+}
+
+// --- the cloud tier's transcript keeps its disfluencies (PLAN-041 hand sample) --
+// §2.2 measures self-repair, so the abandoned fragment *is* the evidence:
+// `verifySelfRepairs` requires `before` and `after` to both appear in the
+// transcript, in order. Deepgram removes "uh"/"um" unless `filler_words=true`,
+// which would drop every repair at gate 1 and leave the layer measuring nothing
+// while looking like it works. `smart_format=true` stays for the opposite
+// reason — it is the punctuation `clauseCount` builds `midClausePauseRatio` out
+// of, so a rawer transcript would silently take that number down.
+//
+// A source assertion because the URL is built inside a closure the check cannot
+// call without a mic and a key.
+{
+  const src = readFileSync(new URL("./speech.ts", import.meta.url), "utf8");
+  const url = src.match(/https:\/\/api\.deepgram\.com\/v1\/listen\?[^`]*/)?.[0] ?? "";
+  assert(url, "the Deepgram request URL is findable in the source");
+  assert(url.includes("filler_words=true"), "the Deepgram transcript must keep its fillers — §2.2's evidence is the disfluency");
+  assert(url.includes("smart_format=true"), "…and its punctuation — clauseCount is built out of it, and midClausePauseRatio out of clauseCount");
 }
 
 console.log("speech.check: ok");

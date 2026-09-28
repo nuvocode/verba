@@ -8,9 +8,10 @@ import { CEFR_LEVELS } from "../lib/level";
 import { levelOf, levelGapNote, progressionSuggested, MIN_WEAKNESS_EVIDENCE, type Signal } from "../lib/model";
 import { addressed, weaknessCard } from "../lib/weakness";
 import { coachPanel, measured, wins, daySeries, type Metric, type MetricPair } from "../lib/coachmetrics";
-import { recentMemories, recentMetricScores, weekStats, signalsSince } from "../lib/db";
+import { recentMemories, recentMetricScores, weekStats, signalsSince, recentSignals } from "../lib/db";
 import { absolute, humanError } from "../lib/fmt";
 import { inventoryFrom, direction, directionSentence, targetSentence, nextTarget, categoryTitle, REPAIR_CATEGORIES } from "../lib/repair";
+import { monitorProfile, profileReading, readingSentence, rowComment, pauseSentence, earnedPraise, type ProfileRow, type Reading } from "../lib/profile";
 import { Generating, Nothing, Failed, Unusable } from "./States";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -29,6 +30,16 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
   const [panel, setPanel] = useState<MetricPair[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [trend, setTrend] = useState<number[]>([]);
+  // PLAN-045: the monitor-load profile — a *reading* over the learner's recent
+  // record, recomputed on every Coach open from the same signals already loaded
+  // here. No cache, no memo: it is a group-by over a few hundred rows.
+  const [profile, setProfile] = useState<ProfileRow[]>([]);
+  const [reading, setReading] = useState<Reading | null>(null);
+  // PLAN-046: the pause sentence and the praise line, both derived from the same
+  // recent record the profile reads. Either may be null and usually will be;
+  // nothing is rendered for a null.
+  const [pauseLine, setPauseLine] = useState<string | null>(null);
+  const [praiseLine, setPraiseLine] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   // A reply that came back with no usable report — the `Unusable` state. Distinct
@@ -59,6 +70,19 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
         const signals = await signalsSince(settings.profile.targetLanguage, Date.now() - 2 * WEEK_MS);
         setSignals(signals);
         setPanel(coachPanel(signals, Date.now()));
+
+        // PLAN-045: the monitor-load profile reads the learner's recent record
+        // (recent-first, a generous cap — three sessions per condition can span
+        // weeks, so this is not Coach's seven-day window). Derived, never stored.
+        const recent = await recentSignals(settings.profile.targetLanguage, 400);
+        const rows = monitorProfile(recent);
+        setProfile(rows);
+        setReading(profileReading(rows));
+        // PLAN-046: the pause sentence and the praise line read the same recent
+        // record, so the kill switch covers them for free — with the measurement
+        // off, no session qualifies and both are null.
+        setPauseLine(pauseSentence(recent));
+        setPraiseLine(earnedPraise(recent));
 
         // The written report is the only AI call here; the numbers above are measured.
         const raw = await getProvider(settings).chat(
@@ -385,6 +409,72 @@ export default function Coach({ settings, day }: { settings: Settings; day: Day 
             {targetSentence(next)}
           </div>
         </>
+      )}
+
+      {/*
+        PLAN-045: the monitor-load profile — §3.1's four differences, each one
+        line: the question, the two conditions with their numbers, and the
+        difference. Every number carries its unit; the definition is reachable
+        from the screen (invariant 12). The reading, when there is one, is one
+        sentence — PLAN-046 owns how it is worded.
+
+        §3.2's bar is hard: below it the Coach says *nothing*. No row is drawn
+        for an absent comparison, and no section is drawn for an empty profile —
+        not a heading, not an empty state, not a count of sessions left to go.
+      */}
+      {profile.length > 0 && (
+        <div style={{ borderTop: "1px solid var(--line)", padding: "28px 0", marginBottom: 8 }}>
+          <div className="eyebrow" style={{ marginBottom: 18 }}>
+            Monitor load — how you compare to yourself
+          </div>
+          {reading && (
+            <div style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 20, maxWidth: 560 }}>
+              {readingSentence(reading)}
+            </div>
+          )}
+          {/* PLAN-046: the pause sentence and the praise line sit under the
+              reading sentence. Both may be null and usually will be; nothing is
+              rendered for a null — no heading, no placeholder. The praise line
+              is §6.2's earned praise, and it is the only thing in this milestone
+              that congratulates anybody. */}
+          {pauseLine && (
+            <div style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 8, maxWidth: 560 }}>
+              {pauseLine}
+            </div>
+          )}
+          {praiseLine && (
+            <div style={{ fontSize: 14, color: "var(--ink2)", marginBottom: 20, maxWidth: 560 }}>
+              {praiseLine}
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+            {profile.map((row) => {
+              // A row that survived the gate always has both sides measured —
+              // a side with fewer than two sessions is absent from the array,
+              // never present with a dash. So both values are numbers here.
+              const diff = Math.abs(row.a.value! - row.b.value!);
+              return (
+                <div className="weak" key={row.id}>
+                  <h3>{row.question}</h3>
+                  <p className="ev">
+                    {row.a.label}: {row.a.value!.toFixed(1)} {row.unit}
+                    {" · "}
+                    {row.b.label}: {row.b.value!.toFixed(1)} {row.unit}
+                  </p>
+                  <p className="ev" style={{ color: "var(--ink3)" }}>
+                    Difference: {diff.toFixed(1)} {row.unit}
+                  </p>
+                  {/* PLAN-046: §7.3's fourth element — one plain sentence about
+                      *that* comparison. The arrow is direction, not valence. */}
+                  <p className="ev" style={{ color: "var(--ink2)" }}>
+                    {rowComment(row)}
+                  </p>
+                  <p>{row.definition}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );

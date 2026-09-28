@@ -83,6 +83,10 @@ export function buildSystem(
     corrections.length
       ? `Things this learner has been corrected on before (the record you may cite): ${corrections.join("; ")}.`
       : `This learner has no correction record yet — so there is nothing to cite, and no praise is allowed.`,
+    // PLAN-046: §6.3's five prohibitions ride on the prompts that produce prose
+    // about the learner. This is the conversation — where distress is actually
+    // voiced, so prohibition 5 has nowhere else to live.
+    COACH_PROHIBITIONS,
     `You MUST answer with ONLY a valid JSON object, no prose outside it, in this exact shape:`,
     `{`,
     `  "reply": "your natural conversational reply in ${s.profile.targetLanguage} (1-3 sentences)",`,
@@ -111,6 +115,70 @@ export function buildSystem(
     `- Never mention that you are returning JSON.`,
   ].join("\n");
 }
+
+/**
+ * §4.2 rule 4 (PLAN-043): the fluency system prompt's one added line. In
+ * fluency mode the coach never finishes, completes or repairs a sentence the
+ * learner left unfinished — if they stop mid-sentence, the coach waits and lets
+ * the silence stand (§4.2's patience rule, at the prompt level where it can
+ * hold). A constant so it can be asserted present in the prompt the mode sends,
+ * exactly as the offer lines are — deleting it fails the build. It is a prompt,
+ * and the plan says so plainly rather than pretending a model instruction is an
+ * interlock.
+ */
+export const FLUENCY_RULE4 =
+  "Never finish, complete or repair a sentence the learner left unfinished. If they stop mid-sentence, wait — say nothing and let the silence stand.";
+
+/**
+ * The 4/3/2 listener's rule (§5.2, PLAN-044 §2). The listener attends with the
+ * same interest each round and never says the learner "already told them". A
+ * constant, so a check can assert it is present in rounds 2 and 3's prompt and
+ * *absent* from round 1's — a rule about repetition in a prompt with nothing to
+ * repeat is noise.
+ */
+export const REPETITION_RULE =
+  "The learner is telling you this topic again, on purpose, to tell it better. Listen as if for the first time. Never say that they already told you, never say it is shorter or faster, and never compare this telling to the last one.";
+
+/**
+ * The rung-4 listener's rule (§5.3, PLAN-044 fixup). Rung 4 is the one where the
+ * other side speaks fast and politely interrupts — the pressure is the point, so
+ * the coach is told to keep it up. A constant, so a check can assert it is folded
+ * into the prompt exactly when `interlocutorPressure === "interrupting"` and
+ * absent otherwise — the same offer-line treatment `FLUENCY_RULE4` gets.
+ */
+export const INTERRUPTING_RULE =
+  "The learner chose the hardest rung: you speak at a brisk pace and may politely interrupt to keep the conversation moving. Do not apologise for it and do not slow down.";
+
+/**
+ * §6.3's five prohibitions, as one constant (PLAN-046). Five lines, one per
+ * prohibition, in §6.3's order — a constant that lost a line while staying
+ * non-empty is the regression this shape is built to catch.
+ *
+ * The claim is split, and each half is stated for what it is. Four of the five
+ * are addressed to a **model**, and a model is not bound by an instruction — it
+ * is asked. So this constant is *requested* of the model, in every prompt that
+ * produces prose about the learner (`ABOUT_THE_LEARNER`), and the check proves
+ * no such prompt escapes the list. What Verba itself writes is *enforced* by a
+ * source scan over our own strings (profile.check.ts §8, check 6). Requested of
+ * the model, enforced on ourselves — the plan says out loud which is which.
+ */
+export const COACH_PROHIBITIONS = [
+  "Never describe the learner in terms of anxiety, confidence, self-esteem, or perfectionism. You measure what they did, not who they are.",
+  "Never offer encouragement with nothing in it — no \"relax\", no \"believe in yourself\", no \"don't be afraid of mistakes\".",
+  "Never give a single combined score of any kind — no fluency score, no monitor score, no rating out of ten, no percentage standing for the whole.",
+  "Never suggest breathing exercises, meditation, or any therapeutic technique. That is not what this is.",
+  "If the learner says something is genuinely hard for them, answer as a person would and stop there. Do not turn it into a measurement, a number, or a plan.",
+].join("\n");
+
+/**
+ * The §5.4 naming sentence, with §6.3's shape rules on it (PLAN-044 §5): it names
+ * the structure, says getting it wrong is fine, and never characterises the
+ * learner. No adjectives, no "you tend to", no comparison. A caller that has a
+ * structure to name (reached the three-session bar in `goalToName`) uses this —
+ * a caller with nothing to name says nothing at all, never a hedge.
+ */
+export const NAME_STRUCTURE_PROMPT = (structure: string) =>
+  `I picked a topic this time where you'll need to use the structure "${structure}". Getting it wrong is fine — not building it is the problem.`;
 
 /**
  * Ceiling on one conversational turn.
@@ -480,6 +548,121 @@ export function parseVocab(raw: string): {
     .slice(0, MAX_VOCAB_PER_SESSION);
 }
 
+// ---- production signals (§2.2 + §2.3, PLAN-041 / PLAN-042) -------------------
+
+/**
+ * Ask the model to read the learner's own spoken turns and report both the
+ * self-repairs (§2.2) and the completion signals (§2.3) — abandoned utterances,
+ * L1 slips, and whether the planned structure was attempted — from one pass.
+ * Spoken only: a typed turn's restarts are deleted before they are sent, so a
+ * transcript of typing carries no evidence and asking about it invents some.
+ *
+ * `goal` is the structure the plan aimed at, when the activity carried one. It is
+ * folded in so the model can judge avoidance against something; a session with no
+ * goal does not mention it, and `parseProduction` then carries `avoidance: null`.
+ */
+export function productionPrompt(s: Settings, turns: string[], pack?: LanguagePack, goal?: string): string {
+  return [
+    `Here are the learner's own spoken turns from this session, each on its own line:`,
+    ...turns.map((t) => `- "${t}"`),
+    ``,
+    `Find the places where the learner interrupted themselves and rebuilt a phrase.`,
+    `Return ONLY repairs that are present in the text above, copied character for character — never a paraphrase, never a correction of your own.`,
+    `For each repair, give the abandoned fragment ("before") and what the learner said instead ("after"), both copied verbatim from the text.`,
+    // PLAN-041 hand sample: both models fused two distant places into one
+    // repair, and wrote their own fix into "after". Adjacency is what makes a
+    // repair a repair, and gate 1 can only check that the words exist.
+    `"after" starts where "before" stops: nothing but a filler ("uh", "um"), a dash or a comma lies between them in the text. Keep each fragment short — the few words that were abandoned, and the few that replaced them.`,
+    `If "after" contains a word the learner did not say, it is your correction, not theirs — leave that repair out.`,
+    // The same sample: "she she" and "it's it's" were filed as repairs. A word
+    // said twice is a hesitation — nothing was changed, so nothing was repaired.
+    `Saying the same words again unchanged ("she she", "it's it's") is hesitation, not a repair. A filler on its own is not a repair either.`,
+    `Classify each as exactly one of:`,
+    `- "E": the abandoned fragment had an error and the replacement fixes it. Example: "he have— he has two kids".`,
+    `- "A": the abandoned fragment was correct, and the replacement is more precise or more fitting. Example: "a big— a huge difference".`,
+    `- "D": the learner dropped the idea and started a different sentence. Example: "I wanted to— let's talk about work".`,
+    `- "C": the learner stopped in the middle of a word. Example: "I bou— I purchased it".`,
+    `- "falseAlarm": the abandoned fragment was already correct in ${s.profile.targetLanguage}, and the replacement is no better — it says the same thing, or it is worse. Example: "she doesn't— she does not like it", "I went— I have went there".`,
+    `Decide the type by asking, in this order: was a word cut in half (C)? did the idea change (D)? was "before" wrong (E)? if "before" was correct, did "after" add precision (A) or not (falseAlarm)?`,
+    `An empty list is the expected answer for most turns. Say [] rather than finding something.`,
+    ``,
+    `In the same text, find any sentence the learner started and did not finish. For each, copy the fragment that got cut off, verbatim, into "abandoned".`,
+    `Find any word or phrase that slipped into the learner's own native language (${s.profile.nativeLanguage}) and copy it, verbatim, into "l1".`,
+    goal
+      ? `The plan aimed at the structure "${goal}". Say whether the learner attempted it in "avoidance": "attempted" is true when the learner used the structure (or clearly came close), false when the session gave them a real opening and they steered around it. Back "attempted" with a verbatim fragment from the text as "evidence".`
+      : `There is no planned structure this session — set "avoidance" to null.`,
+    packGuidance(pack),
+    `Answer with ONLY a JSON object: { "repairs": [ { "before": "…", "after": "…", "type": "E | A | D | C | falseAlarm" } ], "abandoned": [ { "fragment": "…" } ], "l1": [ { "span": "…" } ], "avoidance": { "goal": "…", "attempted": true, "evidence": "…" } or null }.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** The five kinds of self-repair (§2.2). */
+export const SELF_REPAIR_TYPES = ["E", "A", "D", "C", "falseAlarm"] as const;
+
+export interface SelfRepairReport {
+  /** The abandoned fragment, copied verbatim from the transcript. */
+  before: string;
+  /** What the learner said instead, verbatim. */
+  after: string;
+  type: "E" | "A" | "D" | "C" | "falseAlarm";
+}
+
+/**
+ * What the model reports for the whole of §2.2 and §2.3 in one call. Repairs,
+ * abandoned utterances and L1 slips are lists (absent parses to empty); avoidance
+ * is `null` when the activity carried no goal at all.
+ */
+export interface ProductionReport {
+  repairs: SelfRepairReport[];
+  /** Sentences started and never finished (§2.3). */
+  abandoned: { fragment: string }[];
+  /** Slips into the native language (§2.3). */
+  l1: { span: string }[];
+  /** Whether the planned structure was attempted (§2.3). Null without a goal. */
+  avoidance: { goal: string; attempted: boolean; evidence: string } | null;
+}
+
+/**
+ * Shape-checked only, like `parseTurn`: a non-array, a missing field, or a `type`
+ * outside the five is dropped. It makes no judgement about truth — that is
+ * `verifySelfRepairs` and the §2.3 verifiers' job, and keeping the two apart is
+ * what PLAN-038's defect 2 taught. Every field is optional in the model's JSON and
+ * absent parses to empty — a model that only answers half the question has
+ * answered half the question, not zero for the rest.
+ */
+export function parseProduction(raw: string): ProductionReport {
+  const obj = extractJson(raw);
+  const repairs: SelfRepairReport[] = [];
+  if (Array.isArray(obj?.repairs)) {
+    for (const r of obj.repairs) {
+      if (!r || typeof r !== "object") continue;
+      const before = typeof r.before === "string" ? r.before.trim() : "";
+      const after = typeof r.after === "string" ? r.after.trim() : "";
+      if (!before || !after) continue;
+      if (!SELF_REPAIR_TYPES.includes(r.type)) continue;
+      repairs.push({ before, after, type: r.type });
+    }
+  }
+  const abandoned: { fragment: string }[] = Array.isArray(obj?.abandoned)
+    ? obj.abandoned.filter((a: any) => a && typeof a.fragment === "string" && a.fragment.trim()).map((a: any) => ({ fragment: a.fragment.trim() }))
+    : [];
+  const l1: { span: string }[] = Array.isArray(obj?.l1)
+    ? obj.l1.filter((o: any) => o && typeof o.span === "string" && o.span.trim()).map((o: any) => ({ span: o.span.trim() }))
+    : [];
+  // `evidence` is deliberately not required: it backs `attempted: true`, and the
+  // answer that writes a signal is `attempted: false`, which has nothing to
+  // evidence — a model that leaves the field out there has answered the question,
+  // not malformed it. Requiring it would drop the only branch that files.
+  const av = obj?.avoidance;
+  const avoidance =
+    av && typeof av === "object" && typeof av.goal === "string" && av.goal.trim() && typeof av.attempted === "boolean"
+      ? { goal: av.goal.trim(), attempted: av.attempted, evidence: typeof av.evidence === "string" ? av.evidence.trim() : "" }
+      : null;
+  return { repairs, abandoned, l1, avoidance };
+}
+
 /** Prompt for an end-of-session summary. */
 export function summaryPrompt(s: Settings, pack?: LanguagePack): string {
   return [
@@ -494,6 +677,9 @@ export function summaryPrompt(s: Settings, pack?: LanguagePack): string {
     // name. Old and new records must read alike.
     `Write the "summary" in the second person singular ("you"), in the past tense, as one paragraph.`,
     `Praise only what the transcript actually shows — never a general compliment, and never the learner's name.`,
+    // PLAN-046: §6.3's prohibitions ride on the prompts that produce prose about
+    // the learner. The reflection's prose is read at the end of every session.
+    COACH_PROHIBITIONS,
   ]
     .filter(Boolean)
     .join("\n");
@@ -673,6 +859,7 @@ export const SPOKEN_PROMPTS = [
  */
 export const STRUCTURED_PROMPTS = [
   "prompts.ts:vocabPrompt",
+  "prompts.ts:productionPrompt",
   "prompts.ts:titlePrompt",
   "prompts.ts:memoryPrompt",
   "placement.ts:placementPrompt",
@@ -688,6 +875,36 @@ export const STRUCTURED_PROMPTS = [
   // and the other party's own voice. Spoken, but deliberately not styled.
   "rehearsal.ts:rehearsalSystem",
 ] as const;
+
+/**
+ * The prompts that produce prose *about the learner* — §6.3's prohibitions ride
+ * on exactly these (PLAN-046). `true` for the three that describe the learner to
+ * themselves; `false` for the rest, each with its reason in one clause. Every
+ * entry of `SPOKEN_PROMPTS` is classified here, so a new spoken prompt cannot be
+ * added without a decision about §6.3 — and because `SPOKEN_PROMPTS`' own
+ * completeness is already asserted against the source, a prompt added later
+ * cannot reach the learner without someone deciding. That is the whole
+ * guarantee, and it is a guarantee about our code, which is the only kind
+ * available here.
+ */
+export const ABOUT_THE_LEARNER: Record<string, boolean> = {
+  // The conversation — where distress is actually voiced, so prohibition 5 has
+  // nowhere else to live.
+  "prompts.ts:buildSystem": true,
+  // The reflection's prose, read at the end of every session.
+  "prompts.ts:summaryPrompt": true,
+  // §6.1's paragraph, the most exposed surface in the app.
+  "coach.ts:weeklyReportPrompt": true,
+  // The rest talk about a sentence, an exercise, or language — never the learner.
+  "prompts.ts:rewindOwnPrompt": false, // about a sentence, not the learner
+  "prompts.ts:rewindUnpackPrompt": false, // about a sentence, not the learner
+  "coach.ts:drillPrompt": false, // about an exercise, not the learner
+  "learn.ts:recapPrompt": false, // about the day's work, not the learner
+  "reading.ts:notesPrompt": false, // about a passage, not the learner
+  "reading.ts:explainWordPrompt": false, // about a word, not the learner
+  "rehearsal.ts:debriefPrompt": false, // about the rehearsal, not the learner
+  "brought.ts:discussionSystem": false, // about the learner's text, not the learner
+};
 
 /** The date as the record carries it, and as Settings shows it: "14 Jul 2026". */
 export const memoryDate = (ts: number): string =>

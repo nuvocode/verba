@@ -13,6 +13,7 @@ import { live } from "../lib/keys";
 import { SETTINGS_INDEX } from "../lib/settingsIndex";
 import { linkish } from "./settings/parts";
 import Learning from "./settings/Learning";
+import Coaching from "./settings/Coaching";
 import Speech from "./settings/Speech";
 import Privacy from "./settings/Privacy";
 import AboutMe from "./settings/AboutMe";
@@ -25,6 +26,7 @@ import Hints from "./Hints";
  */
 const NAV = [
   ["learning", "Learning"],
+  ["coaching", "Coaching"],
   ["speech", "Speech and listening"],
   ["privacy", "Privacy and data"],
   ["about", "About me"],
@@ -39,7 +41,6 @@ const isTab = (s: string): s is Tab => NAV.some(([id]) => id === s);
 /** Where the old eight panels went, so a link or a stored tab from 0.4 still lands. */
 const MOVED: Record<string, Tab> = {
   language: "learning",
-  coaching: "learning",
   offline: "privacy",
   data: "privacy",
   memory: "about",
@@ -287,6 +288,7 @@ export default function SettingsView({
       )}
 
       {tab === "learning" && <Learning {...section} onLevelTest={onLevelTest} />}
+      {tab === "coaching" && <Coaching {...section} />}
       {tab === "speech" && <Speech {...section} />}
       {tab === "privacy" && <Privacy {...section} appVersion={appVersion} />}
       {tab === "about" && <AboutMe {...section} />}

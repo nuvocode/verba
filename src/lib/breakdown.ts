@@ -67,19 +67,82 @@ export const isMeaningSignal = (s: string): s is BreakdownSignal =>
  */
 export const SPEECH_FLOOR = 0.02;
 
-/** Pauses over 600 ms in an envelope, using ~20 frames/s — the same count voiceSignals makes. */
-export function countPauses(levels: number[]): number {
-  let pauses = 0;
+/**
+ * The gaps in an envelope longer than `minSec`, in seconds, at ~20 frames/s.
+ * The single pause detector — `countPauses` and every timing signal read through
+ * it, so "a pause" means one thing in this repo.
+ *
+ * A gap is counted the moment a speech frame follows it, so a recording that
+ * opens with silence counts that leading silence as a pause too — the same
+ * behaviour `countPauses` has always had, kept byte for byte. `leadingSilence`
+ * is the separate reader for the silence *before* the first speech frame, which
+ * belongs to `initiationLatency`, not to a mid-utterance pause.
+ */
+export function pauseLengths(levels: number[], minSec: number): number[] {
+  const out: number[] = [];
   let quiet = 0;
   for (const l of levels) {
     if (l > SPEECH_FLOOR) {
-      if (quiet > 0.6) pauses++;
+      if (quiet > minSec) out.push(quiet);
       quiet = 0;
     } else {
       quiet += 1 / 20;
     }
   }
-  return pauses;
+  return out;
+}
+
+/** Pauses over 600 ms — what the hesitation checker has always counted. Unchanged. */
+export const countPauses = (levels: number[]): number => pauseLengths(levels, 0.6).length;
+
+/**
+ * Silence before the first speech frame, in ms. The learner's own hesitation
+ * before starting — part of initiation, never a pause. Returns null for an
+ * envelope with no speech frame at all: a recording that caught nothing measures
+ * nothing.
+ */
+export function leadingSilence(levels: number[]): number | null {
+  let quiet = 0;
+  for (const l of levels) {
+    if (l > SPEECH_FLOOR) return quiet * 1000;
+    quiet += 1 / 20;
+  }
+  return null;
+}
+
+/**
+ * The envelope from the first speech frame onward. The leading silence — the
+ * learner's hesitation before starting — belongs to `initiationLatency`, not to
+ * the utterance, so every timing measurement reads through this slice and the
+ * leading silence is counted exactly once. `[]` for an envelope with no speech
+ * frame at all.
+ */
+export function fromFirstSpeech(levels: number[]): number[] {
+  const i = levels.findIndex((l) => l > SPEECH_FLOOR);
+  return i === -1 ? [] : levels.slice(i);
+}
+
+/**
+ * How many runs of speech an envelope holds, separated by pauses over `minSec`.
+ * `meanLengthOfRun`'s divisor. 0 for an envelope with no speech.
+ */
+export function speechRuns(levels: number[], minSec: number): number {
+  let runs = 0;
+  let inSpeech = false;
+  let quiet = 0;
+  for (const l of levels) {
+    if (l > SPEECH_FLOOR) {
+      if (!inSpeech) {
+        runs++;
+        inSpeech = true;
+      }
+      quiet = 0;
+    } else {
+      quiet += 1 / 20;
+      if (quiet > minSec) inSpeech = false;
+    }
+  }
+  return runs;
 }
 
 /** How much of an envelope carried speech, 0–1. 1 for an empty envelope. */

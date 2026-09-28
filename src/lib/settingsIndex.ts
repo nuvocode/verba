@@ -28,12 +28,19 @@ export const SETTINGS_INDEX: SettingRow[] = [
   { id: "target-language", title: "I'm learning", desc: "The language you are studying, and the pack that teaches it.", panel: "learning" },
   { id: "level", title: "My level", desc: "How hard the passages, corrections and role-plays are pitched.", panel: "learning" },
   { id: "daily-minutes", title: "Minutes a day", desc: "How long a session should be — the plan is built to about this.", panel: "learning" },
-  { id: "coaching", title: "Coaching", desc: "When corrections appear: as they happen, only when meaning breaks, or at the end.", panel: "learning" },
-  { id: "patience", title: "Patience", desc: "How long the coach waits before offering — quick, normal, or a long patient beat.", panel: "learning" },
-  { id: "coach-style", title: "Coach's voice", desc: "How the coach speaks to you — warm, neutral, or direct.", panel: "learning" },
-  { id: "rewinds", title: "Rewinds", desc: "Whether the coach may stop and repeat a line slower when you miss it — off stops the interruption, never the measurement.", panel: "learning" },
   { id: "keyboard-hints", title: "Keyboard hints", desc: "The small shortcut lines under each screen.", panel: "learning" },
   { id: "subtitles", title: "Subtitles", desc: "Show the coach's lines as they are spoken — hiding them is the deliberate step up.", panel: "learning" },
+
+  // ---- Coaching (§7.4) ----
+  { id: "coaching", title: "Coaching", desc: "When corrections appear: as they happen, only when meaning breaks, or at the end.", panel: "coaching" },
+  { id: "patience", title: "Patience", desc: "How long the coach waits before offering — quick, normal, or a long patient beat.", panel: "coaching" },
+  { id: "coach-style", title: "Coach's voice", desc: "How the coach speaks to you — warm, neutral, or direct.", panel: "coaching" },
+  { id: "rewinds", title: "Rewinds", desc: "Whether the coach may stop and repeat a line slower when you miss it — off stops the interruption, never the measurement.", panel: "coaching" },
+  { id: "fluency-silence", title: "Fluency silence", desc: "How many seconds of pause close the mic and end a fluency-mode turn — the coach waits the same way.", panel: "coaching" },
+  { id: "default-mode", title: "Default mode", desc: "Whether a conversation starts in fluency mode, accuracy mode, or asks you each time.", panel: "coaching" },
+  { id: "top-rung", title: "Pressure ladder", desc: "The highest rung of the pressure ladder the Talk screen offers you.", panel: "coaching" },
+  { id: "monitor-load", title: "Measure what slows you down", desc: "Time your pauses and self-corrections while you speak. Everything is worked out on this computer and stays here. Off stops the measuring, not just the showing.", panel: "coaching" },
+  { id: "monitor-data", title: "Delete what has been measured", desc: "Remove every timing and self-correction record for this language. Your conversations, words and corrections are untouched.", panel: "coaching" },
 
   // ---- Speech and listening (§5.4) ----
   { id: "speak", title: "Read replies aloud", desc: "The coach speaks each turn as it arrives.", panel: "speech" },

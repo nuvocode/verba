@@ -858,8 +858,19 @@ export function deepgram(apiKey: string, deviceId = ""): Stt {
       // the bare mime type.
       const mime = clip.type.split(";")[0] || "audio/webm";
       const audio = await clip.arrayBuffer();
+      // `filler_words=true` because §2.2's evidence *is* the disfluency. Deepgram
+      // strips "uh"/"um" when the parameter is absent — for readability, which is
+      // exactly the wrong trade here: `verifySelfRepairs` requires the abandoned
+      // fragment and its replacement to both appear in the transcript, so a
+      // tidied transcript drops every repair at gate 1 and the layer measures
+      // nothing while looking like it works.
+      //
+      // `smart_format=true` stays. It is punctuation, and `clauseCount` is built
+      // entirely out of punctuation — turning it off to get a rawer transcript
+      // would take `midClausePauseRatio` down with it (ledger row 3, and the
+      // pause sentence and praise rule that read it).
       const transcribe = (lang: string) =>
-        fetch(`https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&language=${lang}`, {
+        fetch(`https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&filler_words=true&language=${lang}`, {
           method: "POST",
           headers: { Authorization: `Token ${apiKey}`, "Content-Type": mime },
           body: audio,

@@ -42,6 +42,17 @@ const CATEGORY: Record<SignalKind, Weakness["category"]> = {
   // never a miss (signalMiss returns false for it), so it can never become a
   // weakness. Entry keeps SignalKind exhaustive.
   listenWalkBack: "fluency",
+  // PLAN-039: the six monitor kinds are measurements of the fluency layer, not
+  // observations of failure. They are never a miss not because of their kind —
+  // `signalMiss` does not look at the kind — but because their payloads carry no
+  // `correct`/`grade` field, so `signalMiss` returns false for them. None can
+  // become a weakness. Entries keep SignalKind exhaustive.
+  sessionContext: "fluency",
+  timing: "fluency",
+  selfRepair: "fluency",
+  abandonedUtterance: "fluency",
+  l1Fallback: "fluency",
+  avoidance: "fluency",
 };
 
 /** Same input, same id: the id has to survive being recomputed, since nothing stores it. */

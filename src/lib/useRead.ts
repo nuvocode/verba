@@ -542,7 +542,7 @@ export function useRead(settings: Settings) {
       const locale = pack?.speech.locale ?? "en";
       const r = compare(expected, heard.split(/\s+/), ms, targetWpm, locale);
       setReport(r);
-      setVoice({ text: heard, ms, levels, locale });
+      setVoice({ text: heard, ms, levels, locale, initiationMs: null });
     },
     [pack],
   );

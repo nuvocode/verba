@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isLocalProvider, type Settings } from "./settings";
 import { levelOf, signalLabel } from "./model";
 import { getProvider, type ChatMessage } from "./providers";
@@ -16,15 +16,22 @@ import {
   memoryPrompt,
   parseMemory,
   openingDetail,
-  shouldShowInline,
   verifyCorrections,
   rewindOwnPrompt,
   parseOwnLine,
   rewindUnpackPrompt,
   parseUnpack,
+  productionPrompt,
+  parseProduction,
+  FLUENCY_RULE4,
+  REPETITION_RULE,
+  INTERRUPTING_RULE,
+  NAME_STRUCTURE_PROMPT,
   type UnpackResult,
   type Correction,
   type SessionSummary,
+  type SelfRepairReport,
+  type ProductionReport,
 } from "./prompts";
 import {
   rehearsalScenario,
@@ -93,6 +100,8 @@ import {
   clearWait as clearWaitState,
   type WaitState,
 } from "./patience";
+import { FREE_CONTEXT, type MonitorContext, verifySelfRepairs, verifyAbandoned, verifyL1Fallback, verifyAvoidance, showInline, FLUENCY_MINUTES, goalToName } from "./fluency";
+import { languageScript } from "./langs";
 import {
   addMessage,
   addVocab,
@@ -152,6 +161,30 @@ export interface Reflection extends SessionSummary {
    * In-role corrections never appear here — there were none to collect.
    */
   rehearsal?: { brief: RehearsalBrief; debrief: Debrief | null };
+  /**
+   * The conditions this session ran under (§2.4), written once per session.
+   * `null` when the learner has the measurement off — `talkSignals` then writes
+   * no `sessionContext` signal. In this plan every session is free, unplanned,
+   * first-pass and unpressured (`FREE_CONTEXT`); PLAN-043 and PLAN-044 are what
+   * start making it vary.
+   */
+  context: MonitorContext | null;
+  /**
+   * Self-repairs the learner made inside their own spoken turns (§2.2). Not to be
+   * confused with `repairs`, which is PLAN-027's comprehension repair — that layer
+   * is about not understanding, this one is about not trusting what you know.
+   * Empty when the measurement is off, when nothing was spoken, or when the
+   * transcript carried no restart to find.
+   */
+  selfRepairs: SelfRepairReport[];
+  /**
+   * §2.3's completion signals, verified against the mic's transcripts — the
+   * sentences abandoned unfinished, the slips into the native language, and
+   * whether the planned structure was attempted. `completion.avoidance` is null
+   * when the activity carried no goal (no signal is then written). Empty when
+   * the measurement is off or when nothing was spoken — never a zero.
+   */
+  completion: ProductionReport;
 }
 
 /** One thing the learner actually sent, and whether they found it themselves. */
@@ -192,6 +225,13 @@ export interface ProducedTurn {
    * line, the learner's reply, and the turn index.
    */
   coachLine?: string;
+  /**
+   * The learner spoke this turn rather than typing it (§3.1's first comparison:
+   * written accuracy against spoken accuracy). A fact about the turn, like
+   * `words` — not a monitor measurement, so the kill switch does not remove it
+   * and the same rule `axisUsed` follows applies: recorded, never scored.
+   */
+  spoken: boolean;
 }
 
 /**
@@ -215,6 +255,14 @@ export interface VoiceTurn {
   ms: number;
   levels: number[];
   locale: string;
+  /**
+   * ms from the coach finishing its line to the learner opening the mic (§2.1's
+   * `initiationLatency`, before the leading silence inside the recording is
+   * added). Null when the coach was still speaking at mic-open, or when there
+   * was no coach line to measure from — an unmeasured initiation is absent, not
+   * an instant one. The same rule `speakUnknown` follows.
+   */
+  initiationMs: number | null;
 }
 
 /**
@@ -250,7 +298,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [msgs, setMsgs] = useState<TalkMsg[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [input, setInput] = useState("");
+  const [input, setInputRaw] = useState("");
   const [busy, setBusy] = useState(false);
   // Cloud STT has two phases the learner can feel: the mic is open, then the clip
   // is in flight. One "Listening…" bar covering both is a lie for the second half.
@@ -277,6 +325,13 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
   const history = useRef<ChatMessage[]>([]); // full provider context, incl. system
   const sessionId = useRef<number | null>(null);
+  // True from the moment `end()` starts closing a session until it has read the
+  // last of that session's refs. `end()` awaits the model several times and
+  // reads `sessionId`, `voice`, `history` and the rest *after* those awaits; a
+  // `start`, `resume` or `reset` landing in between resets them under it — the
+  // summary went to the next session's row and the spoken turns were gone before
+  // the self-repair pass could read them. While closing, those three do nothing.
+  const closing = useRef(false);
   // What the learner produced, and whether it was theirs. `msgs` cannot answer the
   // second question — a picked suggestion and a typed sentence are the same bubble.
   const produced = useRef<ProducedTurn[]>([]);
@@ -287,6 +342,20 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   // What each spoken turn observed, beside what it said. Accumulated in `mic()`
   // and handed to the reflection, where `voiceSignals` turns it into signals.
   const voice = useRef<VoiceTurn[]>([]);
+  // Whether the current draft in the input box came from the mic (PLAN-039).
+  // The mic fills the box as an editable draft, so the send path cannot tell a
+  // spoken turn from a typed one by the text alone — this flag is set by `mic()`
+  // when it lands a transcript and read-and-cleared by `send()` when the turn is
+  // produced. A learner who edits the draft still spoke it; the flag survives
+  // the edit, because the fact being recorded is the modality of the turn.
+  const spokenDraft = useRef(false);
+  // The one door the input box is written through (PLAN-039). Wrapping the raw
+  // setter lets an empty write clear the mic-draft flag: the box emptying means
+  // the draft is gone, so a later send must not claim the turn was spoken.
+  const setInput = useCallback((value: string) => {
+    if (value === "") spokenDraft.current = false;
+    setInputRaw(value);
+  }, []);
   // Times the learner asked to see the coach's text (PLAN-021). Recorded, never
   // scored — the reflection carries them so `talkSignals` can write a reveal
   // signal per ask, and nothing counts them against the learner.
@@ -382,6 +451,39 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   // session start; the timing signals grade each turn against them.
   const baseline = useRef<ReturnType<typeof baselineFrom>>({ median: 0, mad: 0, sample: 0, ready: false });
   const medianLen = useRef<number | null>(null);
+  // §2.3 (PLAN-042): the structure this session's plan aimed at, when the
+  // activity carried one. Folded into the system prompt by `start` (the "Quietly
+  // give the learner practice with:" line); kept here so the reflection can read
+  // it back into the avoidance gate. Null for a session with no goal — and no
+  // avoidance signal is then written. Cleared with the rest of the session state.
+  const completionGoal = useRef<string | null>(null);
+  // The mode this session runs as (PLAN-043 §2). Set in `start` from the
+  // `context` parameter and reset to `FREE_CONTEXT` on resume (a resumed
+  // conversation is not a mode — the same rule `completionGoal` follows). Pinned
+  // by source scan: `sessionContext.current =` appears only inside `start` and
+  // the resume path, so a mode can never be changed mid-session — a contract
+  // that can be broken mid-session is not a contract.
+  const sessionContext = useRef<MonitorContext>(FREE_CONTEXT);
+  // PLAN-044 §4: whether leaving rung 4 ended this session's conditions being
+  // what its context says. Set by `leaveRung4`, never reset by `end`. When set,
+  // `end()` passes `context: null` — the same door the kill switch uses — so no
+  // monitor signal is written for a session whose conditions changed under it,
+  // and `sessionContext.current` is *not* rewritten: row 6's two-writer scan
+  // stays true byte for byte, with no exception carved into it.
+  const conditionsBroken = useRef(false);
+  // PLAN-044 fixup: whether this session is a 4/3/2 round running a real clock.
+  // When set, the round's minutes drive the same `fluencyUntil` countdown the
+  // fluency mode uses, and `paced` (the shrinking clock) is only honest while
+  // this is non-null — a `paced` context with no round timer has no tempo.
+  const roundMinutes = useRef<number | null>(null);
+  // PLAN-044 fixup: whether rung 4 is *currently* active on screen. `leaveRung4`
+  // drops it (removing the one-key exit button) without rewriting
+  // `sessionContext.current` — row 6's two-writer scan stays true.
+  const [rung4Active, setRung4Active] = useState(false);
+  // The fluency timer (PLAN-043 §3 rule 7): the epoch ms the mode ends at, or
+  // null when the mode is off or the timer has fired. A 1 s tick publishes
+  // `fluencyLeftMs` for the banner and stops when the ref is null.
+  const fluencyUntil = useRef<number | null>(null);
   // How far the session's title has got: 0 unnamed, 1 named off the opening,
   // 2 re-named once the subject settled. Not a rolling rewrite — 2 is the end.
   const titleStage = useRef<0 | 1 | 2>(0);
@@ -398,6 +500,67 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   const [waiting, setWaiting] = useState(false);
   const waitState = useRef<WaitState>(freshWait());
   const waitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The fluency banner's countdown (PLAN-043 rule 7): ms left in the mode, or 0
+  // when the mode is off. Driven by the 1 s tick below. Not a score and not a
+  // timer with teeth on its own — the teeth are `fluencyUntil` going null and
+  // the composer closing.
+  const [fluencyLeftMs, setFluencyLeftMs] = useState(0);
+  // Whether the fluency mode's time is up (PLAN-043 rule 7): the composer is
+  // replaced by "Finish · see the three things" and "5 more minutes", and no
+  // new turn is accepted until one is pressed. `extend()` pushes `fluencyUntil`
+  // out, clears this, and reopens the composer.
+  const [fluencyUp, setFluencyUp] = useState(false);
+  // A per-arm counter bumped whenever a fluency timer is (re)armed — on `start`
+  // and on `extend()`. The countdown effect depends on it, so arming after the
+  // previous timer fired actually restarts the countdown; without it a ref
+  // change (`fluencyUntil.current`) would not re-run the effect.
+  const [fluencyArm, setFluencyArm] = useState(0);
+
+  // The fluency countdown (PLAN-043 rule 7). The one new machine. It runs only
+  // while a fluency timer is armed — a self-clearing `setTimeout` chain that
+  // stops scheduling the moment the timer is null (an untimed session, or a
+  // session whose time already ran out). It is *not* an interval left running
+  // for the whole session, because that would hold a live handle on every
+  // conversation (a check file that drives a real session would never exit).
+  // At zero the mode closes itself: the ref goes null (no new turn accepted,
+  // the composer replaced by the two buttons) and `fluencyUp` rises. The mode
+  // closing does **not** turn corrections back on — a fluency session stays a
+  // fluency session to its end.
+  useEffect(() => {
+    // PLAN-044 fixup: a 4/3/2 round is timed too — its own minutes, the same
+    // machine. Gating this on the *mode* alone armed `fluencyUntil` for a round
+    // and then never ticked it, so `paced` was filed with no tempo behind it.
+    const timed = sessionContext.current.mode === "fluency" || roundMinutes.current !== null;
+    if (!scenario || !timed || fluencyUntil.current === null) {
+      setFluencyLeftMs(0);
+      setFluencyUp(false);
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = () => {
+      const until = fluencyUntil.current;
+      if (until === null) {
+        setFluencyLeftMs(0);
+        setFluencyUp(false);
+        return; // nothing more to schedule — the countdown is over
+      }
+      const left = until - Date.now();
+      if (left <= 0) {
+        // Time up — the mode closes itself, now. No further turn is accepted
+        // until the learner asks for five more minutes or finishes.
+        fluencyUntil.current = null;
+        setFluencyLeftMs(0);
+        setFluencyUp(true);
+        return; // do not re-arm — only `extend` reopens the countdown
+      }
+      setFluencyLeftMs(left);
+      timer = setTimeout(tick, 1000);
+    };
+    timer = setTimeout(tick, 1000);
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [scenario, fluencyArm]);
   // `armDeadline` is defined after `say`, but `say` starts the clock when its
   // queue empties — so it reaches the helper through this ref, which
   // `armDeadline` keeps pointing at itself. No dependency cycle: `say` depends
@@ -663,7 +826,8 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
 
   /** Open a scenario and let the coach speak first. */
   const start = useCallback(
-    async (sc: Scenario, mode: "normal" | "rehearsal" | "brought" = "normal", brief?: RehearsalBrief, goal?: string, broughtText?: BroughtText) => {
+    async (sc: Scenario, mode: "normal" | "rehearsal" | "brought" = "normal", brief?: RehearsalBrief, goal?: string, broughtText?: BroughtText, context: MonitorContext = FREE_CONTEXT, repeat = false, roundMin?: number | null) => {
+      if (closing.current) return;
       // PLAN-034: the mode is decided from the *parameters*, not from the
       // `rehearsal` state — `setRehearsal` only lands on the next render, so
       // reading it here would make the first call of a rehearsal behave like an
@@ -681,6 +845,26 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       setReflection(null);
       setError("");
       setNotice("");
+      // PLAN-043 §2: this session's mode rides the context, written *here* — the
+      // one writer outside `resume`. Every rule below reads it off this ref at
+      // fire time, never off the parameter (a render boundary would make the
+      // first turn of a mode behave like an ordinary session).
+      sessionContext.current = context;
+      // PLAN-043 rule 7: a fluency session runs a timer from its first word.
+      // PLAN-044 fixup: a 4/3/2 round runs the same countdown for its own
+      // minutes (`roundMinutes`), so `paced` — the shrinking clock — is real.
+      // Non-fluency, non-round sessions carry no timer: `fluencyUntil` stays
+      // null and the countdown (gated on `scenario` + `fluencyArm`) does not
+      // schedule. The arm bump re-runs the effect so a start actually arms it.
+      roundMinutes.current = roundMin ?? null;
+      const roundMs = roundMin ? roundMin * 60_000 : null;
+      fluencyUntil.current = context.mode === "fluency" || roundMs !== null ? Date.now() + (roundMs ?? FLUENCY_MINUTES * 60_000) : null;
+      setFluencyLeftMs(context.mode === "fluency" || roundMs !== null ? (roundMs ?? FLUENCY_MINUTES * 60_000) : 0);
+      setFluencyUp(false);
+      setFluencyArm((n) => n + 1);
+      // PLAN-044 fixup: rung 4 is active exactly while the session's context
+      // says it is — the one-key exit is on screen until `leaveRung4` drops it.
+      setRung4Active(context.interlocutorPressure === "interrupting");
       // Rehearsal mode (PLAN-034): the role starts now, and any previous
       // session's debrief is gone with the rest of it. This is for the next
       // render — the decisions above and below run off `inRole`. The ref is
@@ -698,8 +882,16 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       produced.current = [];
       setProducedVersion((v) => v + 1);
       voice.current = [];
+      spokenDraft.current = false;
       reveals.current = [];
       repairs.current = [];
+      // §2.3's goal is a per-session fact (PLAN-042): set from this session's
+      // parameter so the reflection's completion report can judge avoidance
+      // against it, and cleared with the rest of the session state.
+      completionGoal.current = goal ?? null;
+      // PLAN-044 §4: a fresh session's conditions are intact until the learner
+      // leaves rung 4 — the flag belongs to the session, cleared with it.
+      conditionsBroken.current = false;
       spokeMs.current = 0;
       spokeUnknown.current = false;
       // A fresh session is a fresh floor: nothing queued from the old one may
@@ -713,7 +905,12 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // PLAN-037: the standing `settings.rewinds` preference feeds the same `off`
       // gate PLAN-031's `ease()` sets — one door, not two. Measurement continues;
       // only the interruption stops.
-      budget.current = { used: 0, handicap: 0, off: !settings.rewinds };
+      // PLAN-043 rule 1: in fluency mode the rewind's *off* is unconditional —
+      // §4.2 rule 1 says the coach never interrupts mid-turn, and the rewind is
+      // the interruption. `rewindAct` returns `none` when `off` is set, so the
+      // mode never rewinds whatever the preference says — but the learner's own
+      // preference still holds when the mode is off.
+      budget.current = { used: 0, handicap: 0, off: sessionContext.current.mode === "fluency" || !settings.rewinds };
       // A new session is a fresh difficulty watch (PLAN-031): the axis, the
       // drowning counts, the ease ask and the drop flag all belong to the session.
       axis.current = null;
@@ -780,6 +977,11 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // prompt would spend the opening for nothing.
       const opening = !inRole && !inBrought ? openingDetail(memories, Date.now()) : null;
       if (opening) void stampMemoryAsked(opening.id).catch(() => {});
+      // PLAN-044 fixup §5.4: the structure to name, if any. `goalToName` reads
+      // the avoidance signals already loaded (`known`) — three sessions of the
+      // same label — and the coach names it out loud before the task. Null is
+      // the normal answer: the coach says nothing at all, never a hedge.
+      const nameStructure = !inRole && !inBrought ? goalToName(known) : null;
       const system = inRole
         ? rehearsalSystem(settings, brief!, sc, pack)
         : inBrought
@@ -790,7 +992,26 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
           : buildSystem(settings, sc, sc.persona, pack, memories, {
               axis: axis.current,
               step: settings.difficultyStep,
-            }, correctionRecords.current, opening) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "");
+            }, correctionRecords.current, opening) + (goal ? `\nQuietly give the learner practice with: ${goal}.` : "") +
+          // §4.2 rule 4 (PLAN-043): only a fluency session carries the rule — it
+          // would be wrong for an ordinary one, where the coach may help. The
+          // line is a constant, so a check asserts it is present in the prompt
+          // the mode actually sends (the offer-line treatment).
+          (sessionContext.current.mode === "fluency" ? `\n${FLUENCY_RULE4}` : "") +
+          // §5.2 (PLAN-044): rounds 2 and 3 of 4/3/2 carry the repetition rule —
+          // the listener never says the learner "already told them", because the
+          // point of the exercise is to tell the same topic better. Round 1 has
+          // nothing to repeat, so `repeat` is false there and the rule is absent
+          // — a rule about repetition in a prompt with nothing to repeat is noise.
+          (repeat ? `\n${REPETITION_RULE}` : "") +
+          // §5.3 (PLAN-044 fixup): rung 4's pressure is the point — the coach is
+          // told to keep it up, folded in exactly when the context says
+          // `interrupting` and absent otherwise (the offer-line treatment).
+          (sessionContext.current.interlocutorPressure === "interrupting" ? `\n${INTERRUPTING_RULE}` : "") +
+          // §5.4 (PLAN-044 fixup): the structure to name, out loud, before the
+          // task. Only when `goalToName` cleared its three-session bar — a caller
+          // with nothing to name says nothing at all, never a hedge.
+          (nameStructure ? `\n${NAME_STRUCTURE_PROMPT(nameStructure)}` : "");
       history.current = [{ role: "system", content: system }];
       try {
         try {
@@ -940,6 +1161,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
    */
   const resume = useCallback(
     async (sessionIdToResume: number) => {
+      if (closing.current) return;
       setError("");
       setNotice("");
       setReflecting(false);
@@ -971,8 +1193,30 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         produced.current = [];
         setProducedVersion((v) => v + 1);
         voice.current = [];
+        spokenDraft.current = false;
         reveals.current = [];
         repairs.current = [];
+        // A resume is not a fresh opening (PLAN-042): it carries no plan goal,
+        // so no avoidance is judged against it.
+        completionGoal.current = null;
+        // PLAN-044 §4: a resumed conversation's conditions are whatever the
+        // resume says they are (`FREE_CONTEXT`) — not a broken-rung-4 session.
+        conditionsBroken.current = false;
+        // A resumed conversation is not a mode (PLAN-043 §2): the mode belongs
+        // to the session it was started in, and `resume` opens the conversation
+        // for what it is — ordinary, free, unplanned — `FREE_CONTEXT`, the same
+        // reset `completionGoal` and `voice` perform. A resumed fluency session
+        // is not resumed *as* fluency: its contract and timer ended with the
+        // session that carried them.
+        sessionContext.current = FREE_CONTEXT;
+        fluencyUntil.current = null;
+        roundMinutes.current = null;
+        setRung4Active(false);
+        setFluencyLeftMs(0);
+        setFluencyUp(false);
+        // Re-run the countdown effect (see start/extend): it sees until null
+        // and tears down any pending timer without re-arming.
+        setFluencyArm((n) => n + 1);
         spokeMs.current = 0;
         spokeUnknown.current = false;
         // A resume begins a fresh floor: nothing queued from the old one plays
@@ -1194,10 +1438,73 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     setRewindExchange(null);
   }, [rewindExchange]);
 
+  /**
+   * "5 more minutes" (PLAN-043 rule 7): the learner's own extension of a fluency
+   * session whose time ran out. A 4/3/2 round is never extended — its length is
+   * the exercise, and the guard here is the same one the view reads to leave the
+   * button off a round's screen. Pushes `fluencyUntil` out by five more minutes,
+   * drops the time-up flags, and reopens the composer. The extension is never
+   * automatic — the mode closes itself when the time is up, and only this press
+   * (or finishing, see `end`) reopens it.
+   */
+  const extend = useCallback(() => {
+    if (sessionContext.current.mode !== "fluency") return;
+    fluencyUntil.current = Date.now() + FLUENCY_MINUTES * 60_000;
+    setFluencyLeftMs(FLUENCY_MINUTES * 60_000);
+    setFluencyUp(false);
+    // Re-arm the countdown: `fluencyUntil.current` changed, but the effect
+    // depends on `fluencyArm`, so without the bump it would not re-run.
+    setFluencyArm((n) => n + 1);
+  }, []);
+
+  /**
+   * Leave rung 4 of the pressure ladder with one key (§5.3, PLAN-044 §4). The
+   * coach stops interrupting *immediately* — a line is pushed to the model's
+   * history telling it to stop, and `rung4Active` drops so the one-key exit
+   * leaves the screen. `end()` then passes `context: null` — the same door the
+   * kill switch uses — so no monitor signal is written for a session whose
+   * conditions changed under it. `sessionContext.current` is deliberately **not**
+   * rewritten: row 6's "one mode, one writer, written once" stays true, and a
+   * session filed as "interrupting" that spent half its length not being
+   * interrupted would corrupt both sides of every comparison PLAN-045 makes.
+   */
+  const leaveRung4 = useCallback(() => {
+    conditionsBroken.current = true;
+    setRung4Active(false);
+    // The coach must stop interrupting *now*, not on the next session. A line in
+    // the model's own history is the one lever that reaches the live turn — and
+    // it is a `system` line, not a `user` one: the learner did not say this, and
+    // `history.current` is also what the summary, vocab and memory prompts read.
+    // Every provider hoists system messages into the system prompt, so the rule
+    // lands as a standing instruction rather than as something the learner said.
+    history.current.push({
+      role: "system",
+      content: "The learner left rung 4. Stop interrupting and slow down — speak at a normal, patient pace from here on.",
+    });
+  }, []);
+
   const send = useCallback(
     async (text: string, fromSuggestion = false) => {
       const msg = text.trim();
       if (!msg || busy || !scenario) return;
+      // PLAN-043 rule 7: when the fluency time is up, no new turn is accepted
+      // until the learner presses "5 more minutes" or "Finish". The guard is
+      // data (the ref already went null), not a preference — the session is
+      // over and the composer is closed; a Send must not sneak a turn past it.
+      // PLAN-044 fixup: a 4/3/2 round's clock closes it the same way. Without
+      // this the round's minutes would end the countdown and nothing else — the
+      // learner could keep talking past a length the card then reports as 4, 3
+      // or 2 minutes.
+      if ((sessionContext.current.mode === "fluency" || roundMinutes.current !== null) && fluencyUp) return;
+      // PLAN-039: whether this turn was spoken. Read *before* `setInput("")`
+      // below — the wrapped setter clears the flag on an empty write, so reading
+      // after it would always see false. A picked suggestion is by definition
+      // not spoken — the learner clicked it, they did not say it — so
+      // `fromSuggestion` forces `false` even if the mic had filled the box
+      // first. The flag is cleared here in every case, so a stale flag can never
+      // leak into the next turn.
+      const spoken = !fromSuggestion && spokenDraft.current;
+      spokenDraft.current = false;
       setInput("");
       setError("");
       setNotice(""); // last turn's degrade notice is not this turn's news
@@ -1235,6 +1542,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         keyWord: "",
         breakdown: [],
         verdict: "clear",
+        // PLAN-039: the modality of this turn — spoken or typed. A fact about
+        // the turn, recorded, never scored.
+        spoken,
         // PLAN-037: the coach's line this turn answers, captured at send time so
         // the end-of-session review can replay the moment that broke.
         coachLine: prevCoachLine.current,
@@ -1302,7 +1612,14 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
             next[idx] = {
               ...next[idx],
               corrections: rehearsal ? [] : corrections,
-              inline: rehearsal ? false : shouldShowInline(settings.correctionTiming, worst?.severity),
+              // PLAN-043 rule 2: the one decision. `showInline` is the single
+              // door — it answers false for every fluency-mode severity and
+              // timing (§4.2 rule 2 is not the learner's to out-configure and
+              // not the model's to decide), false in role (PLAN-034), and
+              // `shouldShowInline` byte for byte everywhere else. The corrections
+              // are still collected for the closing items; they simply do not
+              // reach a screen.
+              inline: rehearsal ? false : showInline(sessionContext.current.mode, settings.correctionTiming, worst?.severity, !!rehearsal),
             };
           next.push({ role: "ai", text: turn.reply, corrections: [], inline: false });
           return next;
@@ -1529,7 +1846,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         setBusy(false);
       }
     },
-    [busy, scenario, msgs, settings, say, nameSession, pack, driveRewind, clearWait, armWait, armDeadline, resetWaitOnHold],
+    [busy, scenario, msgs, settings, say, nameSession, pack, driveRewind, clearWait, armWait, armDeadline, resetWaitOnHold, fluencyUp],
   );
 
   /**
@@ -1561,11 +1878,28 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     // show the suggestions again (PLAN-032).
     clearWait();
     waitState.current = { ...waitState.current, offerCount: 0 };
+    // §2.1's initiation clock, read at the moment recording starts. When the
+    // coach still has the floor (`speaking.current`), `spokeMs` holds only part
+    // of this turn's audio and the subtraction would under-count — the same
+    // `floorInProgress` reasoning `send()` applies at the other end. No coach
+    // line to measure from is the same absence: an unmeasured initiation is
+    // null, not an instant one.
+    const initiationMs =
+      speaking.current || coachReplyAt.current === null
+        ? null
+        : Math.max(0, performance.now() - coachReplyAt.current - spokeMs.current);
     try {
       const heard = await speech.listen({
         locale: pack?.speech.locale,
         onLevel: setMicLevel,
         onPartial: (text) => setInput(text),
+        // §4.2 rule 5 (PLAN-043): in fluency mode the mic waits a whole
+        // `settings.fluencySilenceSec` seconds of silence before closing.
+        // The floor holds at the read end, not just the row: a bad value (or a
+        // hand-edited one) is clamped to at least 2 s — the spec's "en az 2
+        // saniye" — and a non-finite value reads as 2. Outside the mode, 1800 ms
+        // as today; this plan does not retune the ordinary session.
+        silenceMs: sessionContext.current.mode === "fluency" ? Math.max(2, Math.round(settings.fluencySilenceSec)) * 1000 || 2000 : 1800,
         // The moment the recorder actually stops, the mic is closed and the clip
         // is in flight — that is the "transcribing" phase. Fired by record() on
         // rec.onstop, so it covers silence auto-stop and a hand stop alike.
@@ -1576,7 +1910,11 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // the conversation measures, so a spoken turn is a produced turn too.
       if (heard.text.trim()) {
         setInput(heard.text);
-        voice.current.push({ text: heard.text, ms: heard.ms, levels: heard.levels, locale: pack?.speech.locale ?? "en" });
+        // PLAN-039: this draft came from the mic. The flag survives an edit —
+        // the fact being recorded is the modality of the turn, not its final
+        // spelling. `send()` reads and clears it.
+        spokenDraft.current = true;
+        voice.current.push({ text: heard.text, ms: heard.ms, levels: heard.levels, locale: pack?.speech.locale ?? "en", initiationMs });
       }
     } catch (e: unknown) {
       const { say: said, log } = humanError(e);
@@ -1591,6 +1929,7 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
   /** Close the session: capture vocabulary, summarise, and record the level signals. */
   const end = useCallback(async () => {
     if (!scenario || busy) return;
+    closing.current = true;
     // The session is closing — a pending wait must not fire into the reflection
     // (PLAN-032). End it.
     clearWait();
@@ -1603,6 +1942,15 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     // `null` when the summary call came back unusable — the DB row keeps NULL and
     // the reflection renders Unusable (PLAN-020). No fallback text, ever.
     let summary: SessionSummary | null = null;
+    // §2.2's self-repairs, verified against the mic's transcripts. Empty when the
+    // measurement is off, when nothing was spoken, or when the transcript carried
+    // no restart to find — never a zero.
+    let selfRepairs: SelfRepairReport[] = [];
+    // §2.3's completion signals, verified against the same transcripts: abandoned
+    // utterances and L1 slips as lists, and the avoidance claim (null without a
+    // goal, or when no signal survives the gates). Rides the reflection so
+    // `talkSignals` can write the drafts behind the `r.context` gate.
+    let completion: ProductionReport = { repairs: [], abandoned: [], l1: [], avoidance: null };
 
     try {
       const provider = getProvider(settings);
@@ -1633,6 +1981,46 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // A failed summary writes nothing — `sessions.summary` stays NULL (invariant
       // 22). The reflection renders Unusable and offers a regenerate.
       if (summary && sessionId.current) await setSummary(sessionId.current, summary.summary).catch(() => {});
+
+      // §2.2 and §2.3 in one call, and §9's switch with teeth: with the
+      // measurement off there is no signal *and no request* — a layer that still
+      // calls the model while claiming not to measure has not stopped measuring,
+      // it has stopped filing. `spokenTexts` is the mic's own transcripts, not
+      // `produced`: a learner who dictated and then edited the box has a
+      // `ProducedTurn` that no longer contains the restart, and the mic's
+      // transcript is the only record of what was actually said. The prompt itself
+      // carries the transcript; history is deliberately not prepended — a model
+      // asked over the coach's whole session would start hunting for repairs in
+      // the coach's own lines.
+      if (settings.monitorLoad && voice.current.length) {
+        const spokenTexts = voice.current.map((v) => v.text);
+        try {
+          const report = parseProduction(
+            await provider.chat(
+              [{ role: "user", content: productionPrompt(settings, spokenTexts, pack, completionGoal.current ?? undefined) }],
+              // An extraction, not a conversation: at the default 0.7 the same
+              // transcript came back with one repair on one run and six on the
+              // next, the same repair typed D, C and D (PLAN-041 hand sample).
+              { json: true, temperature: 0 },
+            ),
+          );
+          const locale = pack?.speech.locale ?? "en";
+          selfRepairs = verifySelfRepairs(report.repairs, spokenTexts, corrections, locale);
+          const targetScript = languageScript(settings.profile.targetLanguage);
+          const nativeScript = languageScript(settings.profile.nativeLanguage);
+          completion = {
+            repairs: selfRepairs,
+            abandoned: verifyAbandoned(report.abandoned, spokenTexts, locale),
+            l1: verifyL1Fallback(report.l1, spokenTexts, locale, targetScript, nativeScript),
+            // Avoidance's gates (no goal, or an attempt rather than a dodge) are
+            // decided here, beside the goal that is the only reason to ask.
+            avoidance: completionGoal.current ? verifyAvoidance(report.avoidance) : null,
+          };
+        } catch {
+          // Offline or the provider is down. An unmeasured session measured
+          // nothing — absence, not zero (D3). Nothing is shown, nothing is retried.
+        }
+      }
 
       // What the learner told us about themselves. Best-effort like the rest of the
       // wrap-up: a coach that fails to take a note is a coach that took no note, not
@@ -1675,6 +2063,10 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     // Whatever is still pending when the session closes was never met — it is
     // missed, and the reflection's scorecard reads it that way.
     setGoalState((gs) => gs.map((g) => (g === "pending" ? "missed" : g)));
+    // PLAN-044 fixup: `paced` is the shrinking clock. A round that never armed
+    // one measured no tempo, and a measurement of a condition that did not
+    // happen is withheld (§4), not relabelled.
+    const pacedWithoutClock = sessionContext.current.interlocutorPressure === "paced" && roundMinutes.current === null;
     setReflection({
       ...(summary ?? { summary: "", strengths: [], focus: [] }),
       turns: userTexts.length,
@@ -1691,6 +2083,33 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       // so its phrases can be offered to Memory through the existing vocab save
       // path (the learner chooses; nothing is auto-saved).
       rehearsal: rehearsal ? { brief: rehearsal.brief, debrief } : undefined,
+      // PLAN-039: the conditions this session ran under. Every session in this
+      // plan genuinely is free, unplanned, first-pass and unpressured, so it is
+      // `FREE_CONTEXT` — never `null`, because a session with no condition can
+      // never be compared. The one exception is the kill switch: with
+      // `monitorLoad` off, no `sessionContext` signal is written at all.
+      // PLAN-043 §2: the mode this session ran as — `sessionContext.current`,
+      // the single source of truth written once in `start`. Accuracy mode and
+      // fluency mode are both produced here; a resumed session is `FREE_CONTEXT`
+      // because a resume is not a mode.
+      // PLAN-044 §4: a session whose conditions changed under it measured
+      // neither condition — `conditionsBroken` (leaving rung 4) routes through
+      // the same `null` door the kill switch uses, so no monitor signal is
+      // written, while `sessionContext.current` is left untouched (row 6).
+      // PLAN-044 fixup: `paced` is only honest while a real clock ran. A `paced`
+      // context whose round never armed a countdown measured no tempo, and §4's
+      // answer to that is the one it gives rung 4 — *withhold the measurement*,
+      // never relabel it. Rewriting the context on the way out was the option §4
+      // rejected: it files a session under conditions it did not keep.
+      context: settings.monitorLoad && !conditionsBroken.current && !pacedWithoutClock ? sessionContext.current : null,
+      // §2.2's self-repairs, verified against the mic's transcripts. Empty when
+      // the measurement is off, when nothing was spoken, or when the transcript
+      // carried no restart to find — never a zero.
+      selfRepairs,
+      // §2.3's completion signals, verified the same way. `avoidance` is null
+      // without a goal or when it did not survive the four gates; `abandoned` and
+      // `l1` are empty when nothing spoken carried them.
+      completion,
     });
     // Calibration (PLAN-031 §5.2): once, at the end of the session, over the
     // verdicts. The rise needs two consecutive zero-breakdown sessions; the drop
@@ -1729,6 +2148,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
         /* calibration is best-effort — a store miss should not fail the wrap-up */
       }
     }
+    // Every await above is inside a try, so this line is always reached; the
+    // calibration read of `produced` just above is the session's last.
+    closing.current = false;
   }, [scenario, busy, msgs, settings, pack, onSettings, clearWait, rehearsal, debrief, brought]);
 
   /**
@@ -1955,6 +2377,41 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
     /** "No, I understood" — clear the mark, raise the handicap, carry on. */
     denyRewind,
     /**
+     * The mode this session runs as (PLAN-043 §2), read off the session context.
+     * The single source of truth the view gates the banner, the rail's quiet
+     * state, the suggestion click-gate and the composer on. `"free"` is an
+     * ordinary conversation (or a resume).
+     */
+    mode: sessionContext.current.mode,
+    /**
+     * Whether rung 4 is *currently* active on screen (§5.3, PLAN-044 §4). Set
+     * when a rung-4 session starts, dropped by `leaveRung4` — so the one-key
+     * exit leaves the screen the moment it is pressed, without rewriting
+     * `sessionContext.current` (row 6's two-writer scan stays true).
+     */
+    ladderRung4: rung4Active,
+    /** Milliseconds left in a timed session (fluency, or a 4/3/2 round), for the banner; 0 when off or up. */
+    fluencyLeft: fluencyLeftMs,
+    /**
+     * Whether the running clock is a 4/3/2 round's rather than a fluency
+     * session's (PLAN-044 fixup §5). Derived, not stored: only those two arm a
+     * countdown, so a clock on a session that is not in fluency mode is a
+     * round's. The view reads it for the banner's wording and to leave "5 more
+     * minutes" off a round — a round's length is the exercise.
+     */
+    roundTimed: sessionContext.current.mode !== "fluency" && (fluencyLeftMs > 0 || fluencyUp),
+    /** True when a fluency session's time is up and the composer is closed. */
+    fluencyUp,
+    /** "5 more minutes" — the learner's extension of a lapsed fluency session. */
+    extend,
+    /**
+     * Leave rung 4 of the pressure ladder with one key (PLAN-044 §4). The coach
+     * stops interrupting immediately; the session's context is treated as broken
+     * from here on, so `end()` writes no monitor signal at all rather than
+     * filing a session under conditions it did not keep.
+     */
+    leaveRung4,
+    /**
      * The turns whose verdict was not `clear` (PLAN-037) — the moments that
      * broke, for the end-of-session review. Each carries the coach's line, the
      * learner's reply, and its turn index. Empty when nothing broke.
@@ -1981,7 +2438,9 @@ export function useTalk(settings: Settings, onSettings?: (patch: Partial<Setting
       }
       setReflecting(false);
     },
-    reset: () => setScenario(null),
+    reset: () => {
+      if (!closing.current) setScenario(null);
+    },
     /** The scenario a plan block points at, falling back to free conversation. */
     scenarioById: (id?: string) =>
       listScenarios().find((s) => s.id === id) ?? BUNDLED_SCENARIOS.find((s) => s.id === "free")!,

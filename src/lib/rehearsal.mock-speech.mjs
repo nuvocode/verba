@@ -2,6 +2,8 @@
 // every spoken line so the check can count what the coach actually said — the
 // offer test asserts that in role nothing is spoken over the wait.
 export const spoken = [];
+// closing.check.ts queues what the mic "hears"; empty queue, empty clip.
+export const heard = [];
 
 export function getSpeech() {
   return {
@@ -13,7 +15,7 @@ export function getSpeech() {
       return 1000;
     },
     cancel: async () => {},
-    listen: async () => ({ text: "", ms: 0, levels: [] }),
+    listen: async () => heard.shift() ?? { text: "", ms: 0, levels: [] },
   };
 }
 

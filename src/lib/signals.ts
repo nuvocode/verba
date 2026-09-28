@@ -11,6 +11,24 @@ import { words, sentenceCount } from "./text.ts";
 import type { ProducedTurn, Reflection, VoiceTurn } from "./useTalk.ts";
 import { repairSignal, type RepairObservation } from "./repair.ts";
 import { countPauses, speechRatio } from "./breakdown.ts";
+import { sessionContextSignal, timingOf, timingSignal, selfRepairSignal, abandonedUtteranceSignal, l1FallbackSignal, avoidanceSignal } from "./fluency.ts";
+import type { ProductionReport } from "./prompts.ts";
+
+/**
+ * §2.3's completion signals. One `abandonedUtterance` and one `l1Fallback` per
+ * verified item from the report, and exactly one `avoidance` signal per activity
+ * when a claim survived the gates in `useTalk` — `completion.avoidance` is already
+ * null (no goal, or a claim dropped) by the time it reaches here, so these drafts
+ * only ever describe what was actually believed. Monitor kinds, so the caller
+ * gates each on `r.context`.
+ */
+export function completionSignals(activityId: ActivityId, c: ProductionReport): SignalDraft[] {
+  return [
+    ...c.abandoned.map((a) => abandonedUtteranceSignal(activityId, a)),
+    ...c.l1.map((o) => l1FallbackSignal(activityId, o)),
+    ...(c.avoidance ? [avoidanceSignal(activityId, c.avoidance)] : []),
+  ];
+}
 
 /**
  * A finished conversation. A correction with no note names nothing, so it is not
@@ -21,7 +39,7 @@ import { countPauses, speechRatio } from "./breakdown.ts";
  * be a number Coach could not recount, and a session that mixed one long unaided
  * answer with four picked suggestions would arrive as a single middling figure.
  */
-export function talkSignals(activityId: ActivityId, r: Reflection, locale: string): SignalDraft[] {
+export function talkSignals(activityId: ActivityId, r: Reflection, locale: string, packId: string): SignalDraft[] {
   return [
     ...r.corrections
       .filter((c) => c.note.trim() !== "")
@@ -38,6 +56,23 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
     ...r.produced.map((t) => turnSignal(activityId, t, locale)),
     // What the mic observed, per spoken turn — pace and delivery.
     ...(r.voice ?? []).flatMap((v) => voiceSignals(activityId, v)),
+    // §2.1's six timing numbers, one per spoken recording. A monitor kind, so it
+    // rides the same gate `sessionContext` does: no context means the learner
+    // has the measurement off, and nothing here is written.
+    ...(r.context ? timingSignals(activityId, r.voice ?? [], packId) : []),
+    // §2.2's self-repairs, one signal per verified repair. A monitor kind, so it
+    // rides the same gate `sessionContext` and `timing` do. §8's "gereksiz yere
+    // şüphelendiğin yapılar" list needs no new storage: it is these signals
+    // filtered to `type === "falseAlarm"`, grouped by `label`. PLAN-046 renders
+    // it; building a reader here would be a reader with no screen.
+    ...(r.context ? (r.selfRepairs ?? []).map((sr) => selfRepairSignal(activityId, sr)) : []),
+    // §2.3's completion signals. Monitor kinds, so they ride the same gate
+    // `sessionContext`, `timing` and `selfRepair` do. `abandonedUtterance` and
+    // `l1Fallback` ride the `completion` report already verified in `useTalk`;
+    // `avoidance` is null (no signal, not a zero) when the activity had no goal
+    // or the model's claim failed its gates — the gate lives in `useTalk`, which
+    // is where the goal and the language are known.
+    ...(r.context ? completionSignals(activityId, r.completion) : []),
     // Times the learner asked to see the coach's text (PLAN-021). Recorded, never
     // scored — each ask is one assisted comprehension signal.
     ...(r.reveals ?? []).map((rv) => revealSignal(activityId, rv.what)),
@@ -57,6 +92,12 @@ export function talkSignals(activityId: ActivityId, r: Reflection, locale: strin
     // of the two "easy sessions" that raise the difficulty. It is a SignalKind,
     // not an ActivityKind: nothing is scheduled on the learner's day.
     ...(r.rehearsal ? [{ activityId, kind: "rehearsal" as const, payload: { label: "rehearsal" } }] : []),
+    // The conditions this session ran under (§2.4). One per session, written
+    // beside the turn signals at the same stamp so `recapsFrom` groups it into
+    // the session it describes. Never written when the learner has the
+    // measurement off — that gate is in `useTalk`, not here: this file is pure
+    // and does not read Settings.
+    ...(r.context ? [sessionContextSignal(activityId, r.context)] : []),
   ];
 }
 
@@ -95,6 +136,14 @@ function turnSignal(activityId: ActivityId, t: ProducedTurn, locale: string): Si
     // direction in words, and that is the only reader there will be.
     breakdown: t.breakdown,
     verdict: t.verdict,
+    // The learner spoke this turn rather than typing it (§3.1's first comparison:
+    // written accuracy against spoken accuracy). A fact about the turn, like
+    // `words` — not a monitor measurement, so the kill switch does not remove it
+    // and the same rule `axisUsed` follows applies: recorded, never scored.
+    // A picked suggestion is by definition not spoken — the learner clicked it —
+    // so `fromSuggestion` forces `false` here, the single builder, even if a
+    // caller handed a `spoken: true` turn through.
+    spoken: t.fromSuggestion ? false : t.spoken,
   };
   return t.fromSuggestion
     ? { activityId, kind: "suggestionUsed" as const, payload }
@@ -155,6 +204,19 @@ export function voiceSignals(
   }
 
   return out;
+}
+
+/**
+ * §2.1's six timing numbers, one per spoken recording. A monitor kind, so it is
+ * written only when the session has a context — `talkSignals` does the gating,
+ * this just measures. A recording that measures nothing (`timingOf` returns null)
+ * writes no signal at all.
+ */
+export function timingSignals(activityId: ActivityId, voice: VoiceTurn[], packId: string): SignalDraft[] {
+  return voice
+    .map((v) => timingOf(v, packId))
+    .filter((t): t is NonNullable<typeof t> => t !== null)
+    .map((t) => timingSignal(activityId, t));
 }
 
 /**

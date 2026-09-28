@@ -1,7 +1,7 @@
 import type { Settings } from "./settings.ts";
 import { levelOf } from "./model.ts";
 import { packGuidance, type LanguagePack } from "./packs/schema.ts";
-import { memoryBrief, styleGuidance, type Memory } from "./prompts.ts";
+import { memoryBrief, styleGuidance, COACH_PROHIBITIONS, type Memory } from "./prompts.ts";
 
 // Advanced coaching — the two AI features the phase asks for on top of the
 // learning engine: a weekly progress report and targeted weak-area drills.
@@ -46,6 +46,10 @@ export function weeklyReportPrompt(s: Settings, w: WeekStats, pack?: LanguagePac
     // not guessed at by the report — asking for it produced a second, softer answer to
     // a question the plan already answers with evidence.
     `Do not write a headline, a score, a percentage, or a list of wins — those are measured elsewhere and shown beside your text. Write only the paragraph.`,
+    // PLAN-046: §6.3's prohibitions ride on the prompts that produce prose about
+    // the learner. The weekly report is §6.1's paragraph, the most exposed
+    // surface in the app.
+    COACH_PROHIBITIONS,
     `Answer with ONLY a JSON object: { "report": "2-4 sentences of substance" }.`,
   ]
     .filter(Boolean)

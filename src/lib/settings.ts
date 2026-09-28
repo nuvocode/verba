@@ -30,6 +30,11 @@ export type Patience = "quick" | "normal" | "patient";
  */
 export type CoachStyle = "warm" | "neutral" | "direct";
 /**
+ * The mode a conversation starts armed with (§7.4): `fluency`, `accuracy`, or
+ * `ask` — nothing armed, the learner picks on the Talk screen each time.
+ */
+export type DefaultMode = "fluency" | "accuracy" | "ask";
+/**
  * The two ways to work a passage. `passage` is close reading — focus a sentence, tap a
  * word, read the coach's note. `prompter` is the same text moving up the screen at a
  * pace you set, to be read out loud. Same passage, two exercises.
@@ -175,6 +180,41 @@ export interface Settings {
    * the interruption stops, and an in-session `ease` still persists nothing.
    */
   rewinds: boolean;
+  /**
+   * Whether the fluency layer measures at all (§7.4, §9). On by default: the
+   * signals are computed on this machine and stay on it, and a layer whose
+   * whole claim is "we measure what slows you down" that ships measuring
+   * nothing is not a conservative default, it is a broken one.
+   *
+   * Off stops the **measuring**, not the display — no `sessionContext` signal is
+   * written, and every later plan gates its own writer on this same field.
+   * Past data is removed by the action beside it, never by this switch alone:
+   * a learner who turns measurement off for a week has not asked to lose the
+   * month before it.
+   */
+  monitorLoad: boolean;
+  /**
+   * How long the microphone waits in silence before closing its recording, in
+   * **seconds**, for a fluency-mode session (PLAN-043 rule 5, §4.2). Default 2:
+   * §4.2 says "en az 2 saniye" — the fixed 1.8 s of the ordinary mic is out of
+   * compliance with the mode before a line is written. Only the mode's
+   * recordings read it; the ordinary session keeps its fixed 1800 ms.
+   */
+  fluencySilenceSec: number;
+  /**
+   * The mode the Talk screen arms before the learner picks a scenario (§7.4).
+   * `ask` arms nothing — the default, and what the screen did before this row
+   * existed. An armed default is still only armed: fluency is still entered
+   * through §4.2's opening screen every session, and one tap disarms it.
+   */
+  defaultMode: DefaultMode;
+  /**
+   * The highest pressure-ladder rung the Talk screen offers, `1..4` (§7.4,
+   * §5.3). Default 4, every rung. A ceiling the learner sets on their own
+   * ladder, never one the system sets for them: rungs above it are not shown,
+   * and nothing below it changes.
+   */
+  topRung: 1 | 2 | 3 | 4;
 }
 
 /** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
@@ -286,6 +326,20 @@ export const defaultSettings: Settings = {
   // until the learner says they bother them. A standing preference, distinct
   // from "don't push me today" — it feeds the same SessionBudget.off gate.
   rewinds: true,
+  // Measurement on by default (PLAN-039): the signals are computed on this
+  // machine and stay on it, and a layer whose whole claim is "we measure what
+  // slows you down" that ships measuring nothing is a broken one. Off stops
+  // the measuring, never the display.
+  monitorLoad: true,
+  // §4.2 rule 5: the mic waits at least two whole seconds of silence before it
+  // closes a fluency-mode recording. The mode's own number, separate from the
+  // ordinary mic's fixed 1800 ms — this plan does not retune the ordinary
+  // session.
+  fluencySilenceSec: 2,
+  // §7.4: nothing armed and every rung offered — the Talk screen exactly as it
+  // was before these two rows existed.
+  defaultMode: "ask",
+  topRung: 4,
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>
