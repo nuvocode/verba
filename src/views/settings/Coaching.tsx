@@ -1,13 +1,14 @@
 // Settings → Coaching (spec §7.4). The rows that shape how the coach teaches —
-// when corrections appear, how long it waits, its voice, whether it may rewind —
-// and the two rows that control the fluency layer's measurement: the switch that
-// stops it, and the action that deletes what it has measured.
+// when corrections appear, how long it waits, its voice, whether it may rewind,
+// the mode a conversation starts in and the ladder's ceiling — and the two rows
+// that control the fluency layer's measurement: the switch that stops it, and
+// the action that deletes what it has measured.
 //
 // The four rows that moved here from Learning are a move, not a redesign: their
 // markup is byte-for-byte what Learning rendered, so a diff that also rewrote
 // them would be a diff that cannot be reviewed.
 import { useEffect, useState } from "react";
-import { type CoachStyle, type CorrectionTiming, type Patience } from "../../lib/settings";
+import { type CoachStyle, type CorrectionTiming, type DefaultMode, type Patience } from "../../lib/settings";
 import { countMonitorSignals, deleteMonitorSignals } from "../../lib/db";
 import { linkish, ToggleRow, type SectionProps } from "./parts";
 
@@ -72,6 +73,25 @@ const TIMINGS: [CorrectionTiming, string, string, string][] = [
     "Never interrupt. Everything is handed back at the end of the session.",
     "your last sentence — nothing now · every note together when the session ends",
   ],
+];
+
+/**
+ * The three answers to "which mode should a conversation start in" (§7.4). An
+ * armed mode is only armed: the Talk screen shows it selected, one tap clears
+ * it, and fluency still opens its contract every session.
+ */
+const MODES: [DefaultMode, string, string][] = [
+  ["ask", "Ask each time", "Nothing is chosen for you — pick a mode on the Talk screen when you want one."],
+  ["fluency", "Fluency", "Conversations start in fluency mode: keep talking, corrections wait for the end."],
+  ["accuracy", "Accuracy", "Conversations start in accuracy mode: every mistake is shown as it happens."],
+];
+
+/** The ladder's four rungs as §5.3 names them, for the ceiling row. */
+const RUNGS: [1 | 2 | 3 | 4, string][] = [
+  [1, "Prepared topic, planning time, patient partner"],
+  [2, "Prepared topic, no planning"],
+  [3, "New topic, no planning"],
+  [4, "New topic, the other side speaks fast and interrupts"],
 ];
 
 export default function Coaching({ settings, onChange }: SectionProps) {
@@ -192,6 +212,36 @@ export default function Coaching({ settings, onChange }: SectionProps) {
             style={{ width: 72, textAlign: "center", padding: "7px", borderRadius: 7, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)" }}
           />
         </div>
+      </div>
+
+      {/* §7.4: the mode a conversation starts armed with. `ask` — the default —
+          arms nothing, which is what the Talk screen did before this row. */}
+      <div className="sec" style={{ marginTop: 44 }}>Default mode</div>
+      <div data-setting="default-mode">
+        {MODES.map(([id, name, desc]) => (
+          <button key={id} className="srow" onClick={() => onChange({ defaultMode: id })}>
+            <div className={`radio ${settings.defaultMode === id ? "on" : ""}`} />
+            <div style={{ flex: 1 }}>
+              <div className="name">{name}</div>
+              <div className="desc">{desc}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* §7.4, §5.3: the highest rung the pressure ladder offers. The learner's
+          own ceiling — the system never pushes past it, and never sets it. */}
+      <div className="sec" style={{ marginTop: 44 }}>Pressure ladder</div>
+      <div data-setting="top-rung">
+        {RUNGS.map(([rung, desc]) => (
+          <button key={rung} className="srow" onClick={() => onChange({ topRung: rung })}>
+            <div className={`radio ${settings.topRung === rung ? "on" : ""}`} />
+            <div style={{ flex: 1 }}>
+              <div className="name">Up to rung {rung}</div>
+              <div className="desc">{desc}</div>
+            </div>
+          </button>
+        ))}
       </div>
 
       {/* PLAN-039, §7.4: the fluency layer's off switch. Off stops the measuring,

@@ -234,6 +234,19 @@ lost, with a count, before it does anything.
 are not built here. They have nothing to configure until PLAN-043 and PLAN-044
 exist, and a settings row that changes no behaviour is worse than a missing one.
 
+**Built at M7's close (2026-09-28, #76).** Neither later plan picked them up, so
+they were added once both existed: `defaultMode` (`ask` | `fluency` | `accuracy`,
+default `ask`) arms the Talk screen's mode on mount and every time the picker
+comes back — fluency still enters through its contract — and `topRung` (1–4,
+default 4) hides the ladder's rungs above it. The defaults are the Talk screen
+as it was. `fluency.check.ts` §27 pins both, and the delete below.
+
+§7.4's **patience "1–5 s"** is not built as seconds. `Settings.patience` predates
+this layer (PLAN-032): three steps, each a multiple of the learner's own median
+latency, so "noticeably longer than your own average" holds for a fast and a slow
+speaker alike. A fixed 1–5 s would be too short for one and too long for the
+other; the row stays as it is.
+
 ### 7. `db.deleteMonitorSignals`
 
 ```ts

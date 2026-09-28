@@ -722,6 +722,24 @@ export function rungContext(rung: 1 | 2 | 3 | 4): MonitorContext {
 }
 
 /**
+ * The rungs the Talk screen offers under the learner's ceiling (§7.4). A value
+ * that is not 1–4 — a hand-edited or older settings blob — offers every rung:
+ * a broken ceiling must not hide the ladder.
+ */
+export function ladderRungs(topRung: unknown): (1 | 2 | 3 | 4)[] {
+  const top = topRung === 1 || topRung === 2 || topRung === 3 || topRung === 4 ? topRung : 4;
+  return ([1, 2, 3, 4] as const).filter((r) => r <= top);
+}
+
+/**
+ * The mode the Talk screen arms from the learner's default (§7.4). `ask`, or
+ * anything unrecognised, arms nothing.
+ */
+export function armedMode(defaultMode: unknown): "fluency" | "accuracy" | null {
+  return defaultMode === "fluency" || defaultMode === "accuracy" ? defaultMode : null;
+}
+
+/**
  * One round of 4/3/2 (§5.2, PLAN-044 §2). Three consecutive sessions sharing a
  * topic, with `taskRepetition` 1, 2, 3 — three `activityId`s the card groups out
  * of `recentSignals`. Rounds 2 and 3 are `prepared` because the learner has now

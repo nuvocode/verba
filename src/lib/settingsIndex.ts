@@ -37,6 +37,8 @@ export const SETTINGS_INDEX: SettingRow[] = [
   { id: "coach-style", title: "Coach's voice", desc: "How the coach speaks to you — warm, neutral, or direct.", panel: "coaching" },
   { id: "rewinds", title: "Rewinds", desc: "Whether the coach may stop and repeat a line slower when you miss it — off stops the interruption, never the measurement.", panel: "coaching" },
   { id: "fluency-silence", title: "Fluency silence", desc: "How many seconds of pause close the mic and end a fluency-mode turn — the coach waits the same way.", panel: "coaching" },
+  { id: "default-mode", title: "Default mode", desc: "Whether a conversation starts in fluency mode, accuracy mode, or asks you each time.", panel: "coaching" },
+  { id: "top-rung", title: "Pressure ladder", desc: "The highest rung of the pressure ladder the Talk screen offers you.", panel: "coaching" },
   { id: "monitor-load", title: "Measure what slows you down", desc: "Time your pauses and self-corrections while you speak. Everything is worked out on this computer and stays here. Off stops the measuring, not just the showing.", panel: "coaching" },
   { id: "monitor-data", title: "Delete what has been measured", desc: "Remove every timing and self-correction record for this language. Your conversations, words and corrections are untouched.", panel: "coaching" },
 

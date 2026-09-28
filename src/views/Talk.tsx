@@ -11,7 +11,7 @@ import { sessionGroups, sessionMessages, addVocab, type SessionDay, type Session
 import { PROVIDERS } from "../lib/models";
 import { when } from "../lib/fmt";
 import type { CorrectionCategory } from "../lib/prompts";
-import { accuracyContext, closingItems as computeClosingItems, FLUENCY_MINUTES, fourThreeTwoContext, nextPlanningSec, roundTimingOf, rungContext, FREE_CONTEXT, FOUR_THREE_TWO_MINUTES, longestRunMs, sessionChange, type MonitorContext } from "../lib/fluency";
+import { accuracyContext, armedMode, ladderRungs, closingItems as computeClosingItems, FLUENCY_MINUTES, fourThreeTwoContext, nextPlanningSec, roundTimingOf, rungContext, FREE_CONTEXT, FOUR_THREE_TWO_MINUTES, longestRunMs, sessionChange, type MonitorContext } from "../lib/fluency";
 import type { RoundTiming } from "../lib/fluency";
 import { monitorContext } from "../lib/model";
 import { recentSignals } from "../lib/db";
@@ -107,7 +107,15 @@ export default function Talk({
   // opens the contract for the chosen scenario first (the contract is the only
   // path into fluency, so the mode is *established* by the button and *entered*
   // by accepting the scenario-bound contract). Cleared once the mode begins.
-  const [pendingMode, setPendingMode] = useState<"fluency" | "accuracy" | null>(null);
+  // It starts armed with the learner's default mode (§7.4) — `ask` arms nothing
+  // — and re-arms with it whenever the picker comes back (the `talk.started`
+  // effect below), so the default holds for every conversation, not only the
+  // first one after the app opens.
+  const [pendingMode, setPendingMode] = useState<"fluency" | "accuracy" | null>(() => armedMode(settings.defaultMode));
+  // A default changed while the picker is showing takes effect at once.
+  useEffect(() => {
+    if (!talk.started) setPendingMode(armedMode(settings.defaultMode));
+  }, [settings.defaultMode]);
   // The scenario awaiting the fluency contract (PLAN-043 §7): a scenario card
   // picked while the fluency mode is armed opens the contract bound to it,
   // sitting over the picker until the learner accepts or goes back. `null` is
@@ -222,7 +230,9 @@ export default function Talk({
   // mid-conversation.
   useEffect(() => {
     setContractFor(null);
-    setPendingMode(null);
+    // §7.4: a conversation opening clears the armed mode; the picker coming
+    // back re-arms the learner's default.
+    setPendingMode(talk.started ? null : armedMode(settings.defaultMode));
     setStuckOpen(false);
     // PLAN-044: a conversation opening (first or a 4/3/2's next round) clears
     // the entry-armings — the planning screen, the ladder pick and rung 4's
@@ -623,7 +633,8 @@ export default function Talk({
           >
             4/3/2 · tell it three times
           </button>
-          {([1, 2, 3, 4] as const).map((rung) => (
+          {/* §7.4: only the rungs up to the learner's own ceiling. */}
+          {ladderRungs(settings.topRung).map((rung) => (
             <button
               key={rung}
               className={`btn sm ghost ${ladderRung === rung ? "armed" : ""}`}

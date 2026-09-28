@@ -9,7 +9,7 @@ import assert from "node:assert";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, roundTimingOf, timingSignal, FILLERS, verifySelfRepairs, selfRepairSignal, saidAt, saidInOrder, verifyAbandoned, verifyL1Fallback, verifyAvoidance, abandonedUtteranceSignal, l1FallbackSignal, avoidanceSignal, showInline, closingItems, fluencyContext, accuracyContext, FLUENCY_MINUTES, CONTRACT_TEXT, nextPlanningSec, rungContext, fourThreeTwoContext, goalToName, FALSE_ALARM_ON_SCREEN, FOUR_THREE_TWO_MINUTES, longestRunMs, sessionChange, measuredSessions } from "./fluency.ts";
+import { MONITOR_KINDS, FREE_CONTEXT, sessionContextSignal, timingOf, roundTimingOf, timingSignal, FILLERS, verifySelfRepairs, selfRepairSignal, saidAt, saidInOrder, verifyAbandoned, verifyL1Fallback, verifyAvoidance, abandonedUtteranceSignal, l1FallbackSignal, avoidanceSignal, showInline, closingItems, fluencyContext, accuracyContext, FLUENCY_MINUTES, CONTRACT_TEXT, nextPlanningSec, rungContext, fourThreeTwoContext, goalToName, FALSE_ALARM_ON_SCREEN, FOUR_THREE_TWO_MINUTES, longestRunMs, sessionChange, measuredSessions, ladderRungs, armedMode } from "./fluency.ts";
 import { scriptOf, languageScript } from "./langs.ts";
 import { shouldShowInline, parseProduction, FLUENCY_RULE4, REPETITION_RULE, INTERRUPTING_RULE, NAME_STRUCTURE_PROMPT } from "./prompts.ts";
 import { monitorContext, signalMiss, timingRate, type Signal, type SignalKind } from "./model.ts";
@@ -1524,6 +1524,51 @@ const vt = (over: Partial<VoiceTurn>): VoiceTurn => ({
     !/sessionChange\(closing\.id/.test(talkView),
     "sessionChange takes no activity id — an id is a slot in the day's plan, so 'not this activity' meant the reading exercise",
   );
+}
+
+// --- 27. §7.4's Coaching rows and §9's delete (#76) --------------------------
+// The two rows PLAN-039 left for later — the default mode and the ladder's
+// ceiling — and the one action that deletes what the layer has measured.
+{
+  const { defaultSettings } = await import("./settings.ts");
+  // 1. The defaults are the Talk screen as it was before the rows existed:
+  //    nothing armed, every rung offered.
+  assert.equal(defaultSettings.defaultMode, "ask", "the default mode arms nothing by default");
+  assert.equal(defaultSettings.topRung, 4, "the ladder offers every rung by default");
+  // 2. The default mode arms what it names; `ask` and anything unrecognised
+  //    arm nothing.
+  assert.equal(armedMode("fluency"), "fluency", "fluency arms fluency");
+  assert.equal(armedMode("accuracy"), "accuracy", "accuracy arms accuracy");
+  assert.equal(armedMode("ask"), null, "ask arms nothing");
+  assert.equal(armedMode("free"), null, "an unrecognised mode arms nothing");
+  // 3. The ceiling hides only the rungs above it; a broken ceiling hides none.
+  assert.deepEqual(ladderRungs(4), [1, 2, 3, 4], "ceiling 4 offers every rung");
+  assert.deepEqual(ladderRungs(2), [1, 2], "ceiling 2 offers rungs 1 and 2");
+  assert.deepEqual(ladderRungs(1), [1], "ceiling 1 offers rung 1 only");
+  assert.deepEqual(ladderRungs(undefined), [1, 2, 3, 4], "a missing ceiling offers every rung");
+  assert.deepEqual(ladderRungs(7), [1, 2, 3, 4], "an out-of-range ceiling offers every rung");
+  // 4. The Talk screen reads both: the ladder is built from the ceiling, not a
+  //    literal, and the mode is armed from the default on mount and every time
+  //    the picker comes back.
+  const talkSrc = readFileSync(join(ROOT, "src/views/Talk.tsx"), "utf8");
+  assert(/ladderRungs\(settings\.topRung\)\.map\(/.test(talkSrc), "the ladder's buttons come from the learner's ceiling");
+  assert(!/\[1, 2, 3, 4\] as const\)\.map\(/.test(talkSrc), "the ladder is not a literal that ignores the ceiling");
+  assert(/useState<[^>]*>\(\(\) => armedMode\(settings\.defaultMode\)\)/.test(talkSrc), "the mode starts armed from the default");
+  // The re-arm lives in the one `talk.started` effect that clears the
+  // entry-armings: a second effect on the same dependency ran first and was
+  // overwritten by that effect's `setPendingMode(null)`, so the default never
+  // came back after a session. Exactly one `setPendingMode` there, and it arms.
+  const armings = talkSrc.indexOf("setPlanningFor(null);\n    setLadderRung(null);");
+  const startedEffect = talkSrc.slice(talkSrc.lastIndexOf("useEffect(() => {", armings), talkSrc.indexOf("}, [talk.started]);", armings));
+  assert(/setPendingMode\(talk\.started \? null : armedMode\(settings\.defaultMode\)\)/.test(startedEffect), "the mode re-arms from the default when the picker returns");
+  assert(!/setPendingMode\(null\)/.test(startedEffect), "the talk.started effect does not clear the default back to nothing");
+  // 5. §9's delete is scoped to one language and to MONITOR_KINDS: the
+  //    learner's conversations, words and corrections are not touched by it.
+  const dbSrc = readFileSync(join(ROOT, "src/lib/db.ts"), "utf8");
+  const del = dbSrc.slice(dbSrc.indexOf("export async function deleteMonitorSignals"), dbSrc.indexOf("interface SignalRow"));
+  assert(/DELETE FROM signals WHERE lang = \$1 AND kind IN \(/.test(del), "the delete is scoped to one language and a kind list");
+  assert(/\[lang, \.\.\.MONITOR_KINDS\]/.test(del), "the kind list is MONITOR_KINDS, nothing wider");
+  assert(!/DELETE FROM (sessions|messages|vocab|memories)/.test(del), "the delete touches the signals table only");
 }
 
 console.log("fluency.check OK");

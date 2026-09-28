@@ -30,6 +30,11 @@ export type Patience = "quick" | "normal" | "patient";
  */
 export type CoachStyle = "warm" | "neutral" | "direct";
 /**
+ * The mode a conversation starts armed with (§7.4): `fluency`, `accuracy`, or
+ * `ask` — nothing armed, the learner picks on the Talk screen each time.
+ */
+export type DefaultMode = "fluency" | "accuracy" | "ask";
+/**
  * The two ways to work a passage. `passage` is close reading — focus a sentence, tap a
  * word, read the coach's note. `prompter` is the same text moving up the screen at a
  * pace you set, to be read out loud. Same passage, two exercises.
@@ -196,6 +201,20 @@ export interface Settings {
    * recordings read it; the ordinary session keeps its fixed 1800 ms.
    */
   fluencySilenceSec: number;
+  /**
+   * The mode the Talk screen arms before the learner picks a scenario (§7.4).
+   * `ask` arms nothing — the default, and what the screen did before this row
+   * existed. An armed default is still only armed: fluency is still entered
+   * through §4.2's opening screen every session, and one tap disarms it.
+   */
+  defaultMode: DefaultMode;
+  /**
+   * The highest pressure-ladder rung the Talk screen offers, `1..4` (§7.4,
+   * §5.3). Default 4, every rung. A ceiling the learner sets on their own
+   * ladder, never one the system sets for them: rungs above it are not shown,
+   * and nothing below it changes.
+   */
+  topRung: 1 | 2 | 3 | 4;
 }
 
 /** What "Skip setup" leaves behind (§6): the middle session length, B1, and the
@@ -317,6 +336,10 @@ export const defaultSettings: Settings = {
   // ordinary mic's fixed 1800 ms — this plan does not retune the ordinary
   // session.
   fluencySilenceSec: 2,
+  // §7.4: nothing armed and every rung offered — the Talk screen exactly as it
+  // was before these two rows existed.
+  defaultMode: "ask",
+  topRung: 4,
 };
 
 const isCefrLevel = (v: unknown): v is CEFRLevel =>
