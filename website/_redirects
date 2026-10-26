@@ -1,5 +1,3 @@
-# Short paths that people guess at, sent where the artefacts actually live.
-/download   https://github.com/nuvocode/verba/releases/latest   302
-/releases   https://github.com/nuvocode/verba/releases          302
-/github     https://github.com/nuvocode/verba                   302
-/source     https://github.com/nuvocode/verba                   302
+# Verba is archived; everything goes to its successor, Sprigo.
+/releases   https://github.com/nuvocode/verba/releases   302
+/*          https://mehmetozer.dev/sprigo                301
